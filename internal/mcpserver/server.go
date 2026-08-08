@@ -38,6 +38,7 @@ func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, dataDir string) *
 	s.registerExec(s.Exec)
 	s.registerJobs(s.Jobs)
 	s.registerFiles(s.Files)
+	s.registerImage(s.Files)
 	return s
 }
 func (s *Server) Close() {
