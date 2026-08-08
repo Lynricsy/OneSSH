@@ -11,6 +11,7 @@ OneSSH 是面向 AI Agent 的集中式 SSH 网关。它以单个 Go 二进制运
 - 持久 cwd/env 的命令会话、超时、并发执行和大输出 artifact
 - 无远端常驻组件的后台任务启动、状态、日志与终止
 - SFTP 读取、原子写入、乐观锁编辑、目录浏览和跨主机传输
+- 面向编码 Agent 的 `grep`/`find`，调用远端 ripgrep/fd 并遵循项目忽略规则
 - PNG、JPEG、GIF 首帧和 WebP 图片查看及缩放
 - Linux CPU、内存、负载、磁盘指标采集和 7 天保留
 - React 管理控制台、SSE 实时活动、Ghostty Web WASM/Canvas 终端
@@ -117,9 +118,12 @@ Authorization: Bearer osh_...
 | 主机与执行 | `hosts_list`、`exec`、`session_env`、`exec_many`、`output_read` |
 | 后台任务 | `job_start`、`job_list`、`job_status`、`job_logs`、`job_kill` |
 | 文件 | `file_read`、`file_write`、`file_edit`、`file_list`、`file_transfer` |
+| 搜索 | `grep`（ripgrep）、`find`（fd/fdfind） |
 | 资源 | `image_view`、`host_status` |
 
 `file_edit` 支持 `expected_sha256` 乐观锁；冲突时应重新读取。大输出会返回 `artifact_id`，再通过 `output_read` 分段读取或正则过滤。
+
+Pi 风格的简单编码工具已完整覆盖：`file_read`、`file_write`、`file_edit`、`exec`、`grep`、`find`、`file_list` 分别对应 read、write、edit、bash、grep、find、ls。`grep` 和 `find` 直接在目标主机运行 `rg` 与 `fd`（Debian 的 `fdfind` 也受支持），以保留原生性能和 `.gitignore` 语义；OneSSH 不会自动修改远端主机，使用前需自行安装这两个可选命令。搜索请求最多运行 30 秒，结构化结果最大 256 KiB，并受各工具的条目上限约束。
 
 ## 本地构建
 

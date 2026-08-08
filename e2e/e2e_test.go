@@ -74,6 +74,21 @@ type snapshot struct {
 	CPUPct     *float64 `json:"cpu_pct"`
 	MemTotalKB *int64   `json:"mem_total_kb"`
 }
+type grepResult struct {
+	Lines []struct {
+		Path   string `json:"path"`
+		Line   int    `json:"line"`
+		Column int    `json:"column"`
+		Text   string `json:"text"`
+		Match  bool   `json:"match"`
+	} `json:"lines"`
+	MatchCount int  `json:"match_count"`
+	Truncated  bool `json:"truncated"`
+}
+type findResult struct {
+	Paths     []string `json:"paths"`
+	Truncated bool     `json:"truncated"`
+}
 
 func request[T any](t *testing.T, c *http.Client, method, url string, body any) T {
 	t.Helper()
@@ -247,6 +262,59 @@ func TestEndToEnd(t *testing.T) {
 		moved := decoded[transfer](t, call(t, a, "file_transfer", map[string]any{"src_host": "ssh1", "src_path": "/tmp/blob", "dst_host": "ssh2", "dst_path": "/tmp/blob"}))
 		if !moved.Verified || moved.SourceSHA256 != moved.DestinationSHA256 {
 			t.Fatalf("传输 %+v", moved)
+		}
+	})
+	t.Run("search", func(t *testing.T) {
+		decoded[execResult](t, call(t, a, "exec", map[string]any{"host": "ssh1", "command": "mkdir -p /tmp/onessh-search/.git"}))
+		for path, content := range map[string]string{
+			"/tmp/onessh-search/.gitignore":       "ignored.go\n",
+			"/tmp/onessh-search/main.go":          "package main\n// NeedleAlpha\n",
+			"/tmp/onessh-search/pkg/main_test.go": "package pkg\n// needLEalpha\n",
+			"/tmp/onessh-search/ignored.go":       "package ignored\n// NeedleAlpha\n",
+		} {
+			decoded[fileWrite](t, call(t, a, "file_write", map[string]any{"host": "ssh1", "path": path, "content": content}))
+		}
+		found := decoded[grepResult](t, call(t, a, "grep", map[string]any{
+			"host": "ssh1", "pattern": "needlealpha", "path": "/tmp/onessh-search",
+			"ignoreCase": true, "context": 1, "limit": 10,
+		}))
+		if found.MatchCount != 2 || found.Truncated {
+			t.Fatalf("grep 结果错误: %+v", found)
+		}
+		matches := map[string]bool{}
+		for _, line := range found.Lines {
+			if line.Match {
+				matches[line.Path] = true
+			}
+		}
+		if len(matches) != 2 || !matches["main.go"] || !matches["pkg/main_test.go"] {
+			t.Fatalf("grep 路径或 ignore 规则错误: %v", matches)
+		}
+		files := decoded[findResult](t, call(t, a, "find", map[string]any{
+			"host": "ssh1", "pattern": "**/*_test.go", "path": "/tmp/onessh-search",
+		}))
+		if len(files.Paths) != 1 || files.Paths[0] != "pkg/main_test.go" || files.Truncated {
+			t.Fatalf("find 结果错误: %+v", files)
+		}
+		limited := decoded[grepResult](t, call(t, a, "grep", map[string]any{
+			"host": "ssh1", "pattern": "package|Needle", "path": "/tmp/onessh-search/main.go", "limit": 1,
+		}))
+		if limited.MatchCount != 1 || !limited.Truncated {
+			t.Fatalf("grep 限制未生效: %+v", limited)
+		}
+		invalid := call(t, a, "grep", map[string]any{"host": "ssh1", "pattern": "[", "path": "/tmp/onessh-search"})
+		if !invalid.IsError || !strings.Contains(toolText(invalid), "rg") {
+			t.Fatalf("无效正则未返回错误: %s", toolText(invalid))
+		}
+		longLine := "NeedleAlpha " + strings.Repeat("x", 3000) + "\n"
+		decoded[fileWrite](t, call(t, a, "file_write", map[string]any{
+			"host": "ssh1", "path": "/tmp/onessh-large.txt", "content": strings.Repeat(longLine, 100),
+		}))
+		bounded := decoded[grepResult](t, call(t, a, "grep", map[string]any{
+			"host": "ssh1", "pattern": "NeedleAlpha", "path": "/tmp/onessh-large.txt", "limit": 1000,
+		}))
+		if !bounded.Truncated || bounded.MatchCount == 0 || bounded.MatchCount >= 100 {
+			t.Fatalf("grep 输出上限未生效: matches=%d truncated=%v", bounded.MatchCount, bounded.Truncated)
 		}
 	})
 	t.Run("image", func(t *testing.T) {

@@ -16,6 +16,7 @@ import (
 	"onessh/internal/files"
 	"onessh/internal/jobs"
 	"onessh/internal/monitor"
+	"onessh/internal/searchx"
 	"onessh/internal/sshpool"
 	"onessh/internal/store"
 )
@@ -41,6 +42,7 @@ func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, dataDir string, p
 	s.registerExec(s.Exec)
 	s.registerJobs(s.Jobs)
 	s.registerFiles(s.Files)
+	s.registerSearch(searchx.New(pool))
 	s.registerImage(s.Files)
 	s.registerMonitor(s.Monitor)
 	s.registerFanout()
