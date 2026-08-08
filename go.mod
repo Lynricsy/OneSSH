@@ -3,6 +3,7 @@ module onessh
 go 1.26.5
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/pkg/sftp v1.13.11
