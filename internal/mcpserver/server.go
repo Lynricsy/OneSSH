@@ -12,6 +12,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"onessh/internal/events"
+	"onessh/internal/execx"
 	"onessh/internal/sshpool"
 	"onessh/internal/store"
 )
@@ -21,12 +22,14 @@ type Server struct {
 	Store  *store.Store
 	Pool   *sshpool.Pool
 	Events *events.Bus
+	Exec   *execx.Runner
 }
 
-func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus) *Server {
-	s := &Server{Store: st, Pool: pool, Events: bus}
+func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, dataDir string) *Server {
+	s := &Server{Store: st, Pool: pool, Events: bus, Exec: execx.New(dataDir)}
 	s.MCP = mcp.NewServer(&mcp.Implementation{Name: "OneSSH", Version: "dev"}, nil)
 	register[Empty, HostsOutput](s, &mcp.Tool{Name: "hosts_list", Description: "列出当前令牌可访问的 SSH 主机及连接状态"}, s.hostsList)
+	s.registerExec(s.Exec)
 	return s
 }
 
