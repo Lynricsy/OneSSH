@@ -35,7 +35,7 @@ func main() {
 	pool := sshpool.New(st, box)
 	defer pool.Close()
 	bus := events.New()
-	mcpService := mcpserver.New(st, pool, bus, cfg.DataDir)
+	mcpService := mcpserver.New(st, pool, bus, cfg.DataDir, cfg.PollInterval)
 	defer mcpService.Close()
 	adminAuth := webapi.NewAdminAuth(cfg.AdminPassword, cfg.MasterKey)
 

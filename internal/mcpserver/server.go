@@ -15,33 +15,39 @@ import (
 	"onessh/internal/execx"
 	"onessh/internal/files"
 	"onessh/internal/jobs"
+	"onessh/internal/monitor"
 	"onessh/internal/sshpool"
 	"onessh/internal/store"
 )
 
 type Server struct {
-	MCP    *mcp.Server
-	Store  *store.Store
-	Pool   *sshpool.Pool
-	Events *events.Bus
-	Exec   *execx.Runner
-	Files  *files.Manager
-	Jobs   *jobs.Manager
+	MCP     *mcp.Server
+	Store   *store.Store
+	Pool    *sshpool.Pool
+	Events  *events.Bus
+	Exec    *execx.Runner
+	Files   *files.Manager
+	Jobs    *jobs.Manager
+	Monitor *monitor.Manager
 }
 
-func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, dataDir string) *Server {
+func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, dataDir string, pollInterval time.Duration) *Server {
 	s := &Server{Store: st, Pool: pool, Events: bus, Exec: execx.New(dataDir)}
 	s.Jobs = jobs.New(st, pool, s.Exec, bus)
 	s.Files = files.New(pool, s.Exec)
+	s.Monitor = monitor.New(st, pool, s.Exec, pollInterval)
 	s.MCP = mcp.NewServer(&mcp.Implementation{Name: "OneSSH", Version: "dev"}, nil)
 	register[Empty, HostsOutput](s, &mcp.Tool{Name: "hosts_list", Description: "列出当前令牌可访问的 SSH 主机及连接状态"}, s.hostsList)
 	s.registerExec(s.Exec)
 	s.registerJobs(s.Jobs)
 	s.registerFiles(s.Files)
 	s.registerImage(s.Files)
+	s.registerMonitor(s.Monitor)
+	s.Monitor.Start(context.Background())
 	return s
 }
 func (s *Server) Close() {
+	s.Monitor.Stop()
 	s.Files.Clients.Close()
 }
 
