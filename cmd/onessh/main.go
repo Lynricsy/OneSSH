@@ -9,8 +9,11 @@ import (
 
 	"onessh/internal/config"
 	"onessh/internal/cryptox"
+	"onessh/internal/events"
+	"onessh/internal/mcpserver"
 	"onessh/internal/sshpool"
 	"onessh/internal/store"
+	"onessh/internal/webapi"
 )
 
 const version = "dev"
@@ -31,8 +34,13 @@ func main() {
 	}
 	pool := sshpool.New(st, box)
 	defer pool.Close()
+	bus := events.New()
+	mcpService := mcpserver.New(st, pool, bus)
+	adminAuth := webapi.NewAdminAuth(cfg.AdminPassword, cfg.MasterKey)
 
 	mux := http.NewServeMux()
+	mux.Handle("POST /api/v1/login", http.HandlerFunc(adminAuth.Login))
+	mux.Handle("/mcp", mcpserver.Handler(st, mcpService))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := st.Health(r.Context()); err != nil {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
