@@ -1,0 +1,15 @@
+services:
+  onessh:
+    build: .
+    ports:
+      - "8866:8866"
+    environment:
+      ONESSH_MASTER_KEY: ${ONESSH_MASTER_KEY:?required}
+      ONESSH_ADMIN_PASSWORD: ${ONESSH_ADMIN_PASSWORD:?required}
+      ONESSH_LISTEN: :8866
+      ONESSH_DATA_DIR: /data
+    volumes:
+      - onessh-data:/data
+    restart: unless-stopped
+volumes:
+  onessh-data:
