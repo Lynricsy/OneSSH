@@ -36,6 +36,7 @@ func main() {
 	defer pool.Close()
 	bus := events.New()
 	mcpService := mcpserver.New(st, pool, bus, cfg.DataDir)
+	defer mcpService.Close()
 	adminAuth := webapi.NewAdminAuth(cfg.AdminPassword, cfg.MasterKey)
 
 	mux := http.NewServeMux()
