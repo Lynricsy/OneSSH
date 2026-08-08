@@ -22,7 +22,7 @@ func (s *Store) ListKeys(ctx context.Context) ([]Key, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Key
+	out := make([]Key, 0)
 	for rows.Next() {
 		var x Key
 		if err := rows.Scan(&x.ID, &x.Name, &x.PublicKey, &x.CreatedAt); err != nil {
@@ -80,7 +80,7 @@ func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Host
+	out := make([]Host, 0)
 	for rows.Next() {
 		x, err := scanHost(rows)
 		if err != nil {
@@ -110,7 +110,7 @@ func (s *Store) MonitoredHosts(ctx context.Context) ([]Host, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Host
+	out := make([]Host, 0)
 	for rows.Next() {
 		h, e := scanHost(rows)
 		if e != nil {

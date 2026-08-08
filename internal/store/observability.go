@@ -39,7 +39,7 @@ func (s *Store) ListAudit(ctx context.Context, tokenID *int64, host, tool string
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Audit
+	out := make([]Audit, 0)
 	for rows.Next() {
 		var a Audit
 		var ok int
@@ -66,7 +66,7 @@ func (s *Store) MetricsSince(ctx context.Context, hostID, since int64) ([]Metric
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Metric
+	out := make([]Metric, 0)
 	for rows.Next() {
 		var m Metric
 		if err := rows.Scan(&m.HostID, &m.Ts, &m.CPUPct, &m.MemUsedKB, &m.MemTotalKB, &m.Load1, &m.DisksJSON); err != nil {

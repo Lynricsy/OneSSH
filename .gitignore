@@ -1,1 +1,3 @@
 .agent-logs/
+web/node_modules/
+/onessh

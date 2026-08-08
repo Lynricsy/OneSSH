@@ -72,7 +72,7 @@ func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Token
+	out := make([]Token, 0)
 	for rows.Next() {
 		var t Token
 		var a int
@@ -103,7 +103,7 @@ func (s *Store) TokenHostIDs(ctx context.Context, id int64) ([]int64, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []int64
+	out := make([]int64, 0)
 	for rows.Next() {
 		var x int64
 		if err := rows.Scan(&x); err != nil {

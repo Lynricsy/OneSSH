@@ -14,6 +14,7 @@ import (
 	"onessh/internal/sshpool"
 	"onessh/internal/store"
 	"onessh/internal/webapi"
+	"onessh/web"
 )
 
 const version = "dev"
@@ -52,6 +53,7 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "version": version})
 	})
+	mux.Handle("/", web.Handler())
 	server := &http.Server{Addr: cfg.Listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	log.Printf("OneSSH %s 监听 %s", version, cfg.Listen)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {

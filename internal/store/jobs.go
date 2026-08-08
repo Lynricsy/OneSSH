@@ -37,7 +37,7 @@ func (s *Store) ListJobs(ctx context.Context, tokenID *int64, hostID *int64) ([]
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Job
+	out := make([]Job, 0)
 	for rows.Next() {
 		j, e := scanJob(rows)
 		if e != nil {
