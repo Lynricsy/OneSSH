@@ -13,7 +13,7 @@ OneSSH 是面向 AI Agent 的集中式 SSH 网关。它以单个 Go 二进制运
 - SFTP 读取、原子写入、乐观锁编辑、目录浏览和跨主机传输
 - PNG、JPEG、GIF 首帧和 WebP 图片查看及缩放
 - Linux CPU、内存、负载、磁盘指标采集和 7 天保留
-- React 管理控制台、SSE 实时活动、xterm WebSocket PTY 终端
+- React 管理控制台、SSE 实时活动、Ghostty Web WASM/Canvas 终端
 - 结构化审计；文件正文和编辑内容仅记录长度摘要
 
 ## 架构
@@ -27,7 +27,7 @@ flowchart LR
     Gateway -->|SSH + SFTP| Hosts[SSH Hosts]
 ```
 
-后端使用 Go 标准库 HTTP 路由、`modelcontextprotocol/go-sdk`、`x/crypto/ssh`、`pkg/sftp` 和 CGO-free SQLite。前端使用 React 18、antd、xterm 和 Recharts，并通过 `go:embed` 打入二进制。
+后端使用 Go 标准库 HTTP 路由、`modelcontextprotocol/go-sdk`、`x/crypto/ssh`、`pkg/sftp` 和 CGO-free SQLite。前端使用 React 18、antd、Ghostty Web 和 Recharts，并通过 `go:embed` 打入二进制。
 
 ## 环境变量
 

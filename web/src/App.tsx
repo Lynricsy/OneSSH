@@ -1,10 +1,11 @@
 import {useEffect,useMemo,useRef,useState} from 'react'
 import {Alert,App as AntApp,Button,Card,Col,Descriptions,Drawer,Empty,Flex,Form,Input,InputNumber,Layout,List,Menu,Modal,Popconfirm,Progress,Row,Select,Space,Spin,Statistic,Switch,Table,Tag,Typography,Upload} from 'antd'
 import {Activity,Folder,Gauge,HardDrive,KeyRound,LayoutDashboard,Monitor,RadioTower,Server,SquareTerminal,Ticket,Upload as UploadIcon} from 'lucide-react'
-import {Terminal as XTerminal} from '@xterm/xterm'
-import {FitAddon} from '@xterm/addon-fit'
+import {FitAddon,Terminal as GhosttyTerminal,init as initGhostty} from 'ghostty-web'
 import {Area,AreaChart,CartesianGrid,Legend,Line,LineChart,ResponsiveContainer,Tooltip,XAxis,YAxis} from 'recharts'
 import {api,del,post,put} from './api'
+
+let ghosttyReady:Promise<void>|undefined
 
 const {Header,Sider,Content}=Layout
 const {Title,Text,Paragraph}=Typography
@@ -32,7 +33,46 @@ function KeysPage(){const{message}=AntApp.useApp();const[items,setItems]=useStat
 
 function TokensPage({hosts}:PageProps){const{message}=AntApp.useApp();const[items,setItems]=useState<Token[]>([]);const[open,setOpen]=useState(false);const[plain,setPlain]=useState('');const load=()=>api<Token[]>('/tokens').then(setItems);useEffect(() => { void load() }, []);const create=async(v:any)=>{try{const token=await post<Token>('/tokens',v);setOpen(false);setPlain(token.token||'');load()}catch(e){message.error((e as Error).message)}};return <><PageTitle title="Agent 令牌" subtitle="按主机最小授权；明文仅展示一次" extra={<Button type="primary" onClick={()=>setOpen(true)}>创建令牌</Button>}/><Table rowKey="id" dataSource={items} columns={[{title:'名称',dataIndex:'name'},{title:'权限',render:(_,t)=>t.all_hosts?<Tag color="cyan">全部主机</Tag>:<Space wrap>{t.host_ids?.map(id=><Tag key={id}>{hosts.find(h=>h.id===id)?.name||id}</Tag>)}</Space>},{title:'创建时间',dataIndex:'created_at',render:v=>new Date(v*1000).toLocaleString()},{title:'操作',render:(_,t)=><Popconfirm title="删除令牌？" onConfirm={async()=>{await del(`/tokens/${t.id}`);load()}}><Button danger size="small">删除</Button></Popconfirm>}]}/><Modal open={open} title="创建令牌" footer={null} onCancel={()=>setOpen(false)}><Form layout="vertical" initialValues={{all_hosts:true}} onFinish={create}><Form.Item name="name" label="名称" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="all_hosts" label="允许全部主机" valuePropName="checked"><Switch/></Form.Item><Form.Item noStyle shouldUpdate>{({getFieldValue})=>!getFieldValue('all_hosts')&&<Form.Item name="host_ids" label="允许主机" rules={[{required:true}]}><Select mode="multiple" options={hosts.map(h=>({value:h.id,label:h.name}))}/></Form.Item>}</Form.Item><Button type="primary" htmlType="submit" block>创建</Button></Form></Modal><Modal open={!!plain} title="立即保存令牌" onOk={()=>{navigator.clipboard.writeText(plain);message.success('已复制')}} okText="复制" cancelText="关闭" onCancel={()=>setPlain('')}><Alert type="warning" message="关闭后无法再次查看"/><Paragraph copyable className="token-plain">{plain}</Paragraph></Modal></>}
 
-function TerminalPage({hosts}:PageProps){const[host,setHost]=useState<string>();const mount=useRef<HTMLDivElement>(null);const terminal=useRef<XTerminal>();const socket=useRef<WebSocket>();useEffect(()=>()=>{socket.current?.close();terminal.current?.dispose()},[]);const connect=()=>{if(!host||!mount.current)return;socket.current?.close();terminal.current?.dispose();mount.current.innerHTML='';const term=new XTerminal({cursorBlink:true,fontFamily:'JetBrains Mono, monospace',fontSize:14,theme:{background:'#050b13',foreground:'#d6e4ff'}});const fit=new FitAddon();term.loadAddon(fit);term.open(mount.current);fit.fit();const proto=location.protocol==='https:'?'wss':'ws';const ws=new WebSocket(`${proto}://${location.host}/api/v1/ws/terminal?host=${encodeURIComponent(host)}&cols=${term.cols}&rows=${term.rows}`);ws.binaryType='arraybuffer';ws.onmessage=e=>term.write(new Uint8Array(e.data));ws.onopen=()=>term.focus();ws.onclose=()=>term.write('\r\n\x1b[33m连接已关闭\x1b[0m');term.onData(data=>ws.readyState===1&&ws.send(JSON.stringify({type:'input',data})));term.onResize(({cols,rows})=>ws.readyState===1&&ws.send(JSON.stringify({type:'resize',cols,rows})));terminal.current=term;socket.current=ws};return <><PageTitle title="交互终端" subtitle="xterm-256color WebSocket PTY"/><Card><Space style={{marginBottom:16}}><Select placeholder="选择主机" style={{width:240}} value={host} onChange={setHost} options={hosts.map(h=>({value:h.name,label:h.name}))}/><Button type="primary" onClick={connect}>连接</Button></Space><div className="terminal" ref={mount}/></Card></>}
+function TerminalPage({hosts}:PageProps){
+  const{message}=AntApp.useApp()
+  const[host,setHost]=useState<string>()
+  const mount=useRef<HTMLDivElement>(null)
+  const terminal=useRef<GhosttyTerminal>()
+  const socket=useRef<WebSocket>()
+  useEffect(()=>()=>{if(socket.current){socket.current.onclose=null;socket.current.close()}terminal.current?.dispose()},[])
+  const connect=async()=>{
+    if(!host||!mount.current)return
+    try{
+      ghosttyReady??=initGhostty()
+      await ghosttyReady
+    }catch(error){
+      message.error(`Ghostty WASM 初始化失败：${(error as Error).message}`)
+      return
+    }
+    if(!mount.current)return
+    if(socket.current){socket.current.onclose=null;socket.current.close()}
+    terminal.current?.dispose()
+    mount.current.innerHTML=''
+    const term=new GhosttyTerminal({cursorBlink:true,fontFamily:'JetBrains Mono, monospace',fontSize:14,theme:{background:'#050b13',foreground:'#d6e4ff'}})
+    const fit=new FitAddon()
+    term.loadAddon(fit)
+    term.open(mount.current)
+    fit.fit()
+    fit.observeResize()
+    const proto=location.protocol==='https:'?'wss':'ws'
+    const ws=new WebSocket(`${proto}://${location.host}/api/v1/ws/terminal?host=${encodeURIComponent(host)}&cols=${term.cols}&rows=${term.rows}`)
+    ws.binaryType='arraybuffer'
+    ws.onmessage=event=>term.write(new Uint8Array(event.data))
+    ws.onopen=()=>term.focus()
+    ws.onerror=()=>message.error('终端 WebSocket 连接失败')
+    ws.onclose=()=>term.write('\r\n\x1b[33m连接已关闭\x1b[0m')
+    term.onData(data=>ws.readyState===WebSocket.OPEN&&ws.send(JSON.stringify({type:'input',data})))
+    term.onResize(({cols,rows})=>ws.readyState===WebSocket.OPEN&&ws.send(JSON.stringify({type:'resize',cols,rows})))
+    terminal.current=term
+    socket.current=ws
+  }
+  return <><PageTitle title="交互终端" subtitle="Ghostty WASM · xterm-256color WebSocket PTY"/><Card><Space style={{marginBottom:16}}><Select placeholder="选择主机" style={{width:240}} value={host} onChange={setHost} options={hosts.map(h=>({value:h.name,label:h.name}))}/><Button type="primary" onClick={connect}>连接</Button></Space><div className="terminal" ref={mount}/></Card></>
+}
 
 function FilesPage({hosts}:PageProps){const{message}=AntApp.useApp();const[host,setHost]=useState<number>();const[path,setPath]=useState('~');const[items,setItems]=useState<FileEntry[]>([]);const[preview,setPreview]=useState<string>();const load=async(p=path)=>{if(!host)return;try{setItems(await api(`/sftp/${host}/list?path=${encodeURIComponent(p)}`));setPath(p)}catch(e){message.error((e as Error).message)}};useEffect(()=>{setItems([])},[host]);const openEntry=(e:FileEntry)=>{const p=path.replace(/\/$/,'')+'/'+e.name;if(e.directory)load(p);else if(/\.(png|jpe?g|gif|webp)$/i.test(e.name))setPreview(`/api/v1/sftp/${host}/download?path=${encodeURIComponent(p)}`);else window.open(`/api/v1/sftp/${host}/download?path=${encodeURIComponent(p)}`)};return <><PageTitle title="文件" subtitle="SFTP 浏览、上传、下载与图片预览"/><Card><Flex gap={12} wrap><Select placeholder="选择主机" value={host} onChange={setHost} style={{width:200}} options={hosts.map(h=>({value:h.id,label:h.name}))}/><Input value={path} onChange={e=>setPath(e.target.value)} onPressEnter={()=>load()} style={{maxWidth:520}}/><Button onClick={()=>load()}>打开</Button><Upload showUploadList={false} customRequest={async({file,onSuccess,onError})=>{if(!host)return;const body=new FormData();body.append('file',file as Blob);body.append('path',path+'/');try{const r=await fetch(`/api/v1/sftp/${host}/upload`,{method:'POST',body});if(!r.ok)throw new Error(await r.text());onSuccess?.({});load()}catch(e){onError?.(e as Error)}}}><Button icon={<UploadIcon size={15}/>}>上传</Button></Upload></Flex><List className="file-list" dataSource={items} renderItem={e=><List.Item onDoubleClick={()=>openEntry(e)} actions={[<Button size="small" onClick={()=>openEntry(e)}>打开</Button>]}><List.Item.Meta avatar={e.directory?<Folder size={22}/>:<HardDrive size={22}/>} title={e.name} description={`${e.mode} · ${e.directory?'目录':formatBytes(e.size)} · ${new Date(e.mtime*1000).toLocaleString()}`}/></List.Item>}/></Card><Drawer open={!!preview} onClose={()=>setPreview(undefined)} width="min(720px, 92vw)" title="图片预览">{preview&&<img src={preview} className="preview-image"/>}</Drawer></>}
 function formatBytes(n:number){if(n<1024)return `${n} B`;if(n<1048576)return `${(n/1024).toFixed(1)} KiB`;return `${(n/1048576).toFixed(1)} MiB`}
