@@ -68,34 +68,46 @@ func Script(command, cwd string, env map[string]string) string {
 
 type limitedWriter struct {
 	buf       bytes.Buffer
+	tail      []byte
 	limit     int
 	truncated bool
+	written   int
+	newlines  int
 	stream    string
 	callback  func(string, []byte)
 }
 
 func (w *limitedWriter) Write(p []byte) (int, error) {
 	original := len(p)
-	remain := w.limit - w.buf.Len()
-	if remain <= 0 {
-		w.truncated = true
-		return original, nil
-	}
-	accepted := p
-	if len(accepted) > remain {
-		accepted = accepted[:remain]
-		w.truncated = true
-	}
+	w.written += original
+	w.newlines += bytes.Count(p, []byte{'\n'})
+	headLimit := (w.limit + 1) / 2
+	remain := max(0, headLimit-w.buf.Len())
+	headLen := min(remain, len(p))
+	accepted := p[:headLen]
 	_, _ = w.buf.Write(accepted)
 	if w.callback != nil {
 		for len(accepted) > 0 {
 			n := min(len(accepted), 4096)
-			chunk := append([]byte(nil), accepted[:n]...)
-			w.callback(w.stream, chunk)
+			w.callback(w.stream, append([]byte(nil), accepted[:n]...))
 			accepted = accepted[n:]
 		}
 	}
+	if headLen < len(p) {
+		tailLimit := w.limit - headLimit
+		w.tail = append(w.tail, p[headLen:]...)
+		if len(w.tail) > tailLimit {
+			w.tail = append([]byte(nil), w.tail[len(w.tail)-tailLimit:]...)
+		}
+	}
+	w.truncated = w.written > w.limit
 	return original, nil
+}
+
+func (w *limitedWriter) captured() []byte {
+	out := append([]byte(nil), w.buf.Bytes()...)
+	out = append(out, w.tail...)
+	return out
 }
 
 func (r *Runner) Run(ctx context.Context, client *ssh.Client, command, cwd string, env map[string]string, opt Options) (Result, error) {
@@ -134,16 +146,24 @@ func (r *Runner) Run(ctx context.Context, client *ssh.Client, command, cwd strin
 		_ = session.Close()
 		waitErr = errors.New("command timeout")
 	}
-	stdoutBytes := stdout.buf.Bytes()
+	stdoutBytes := stdout.captured()
 	exitCode, newCwd, clean, parsed := parseTrailer(stdoutBytes)
 	stdoutBytes = clean
 	if !parsed {
 		exitCode = exitCodeFromError(waitErr)
 		newCwd = cwd
 	}
-	combined := append(append([]byte(nil), stdoutBytes...), stderr.buf.Bytes()...)
-	selected, totalLines, lineCut := selectLines(combined, opt.MaxLines, opt.Tail)
-	res := Result{Stdout: string(stdoutBytes), Stderr: stderr.buf.String(), Output: string(selected), ExitCode: exitCode, Cwd: newCwd, Timeout: timedOut, Truncated: stdout.truncated || stderr.truncated || lineCut, TotalLines: totalLines, TotalBytes: len(combined)}
+	stderrBytes := stderr.captured()
+	combined := append(append([]byte(nil), stdoutBytes...), stderrBytes...)
+	selected, capturedLines, lineCut := selectLines(combined, opt.MaxLines, opt.Tail)
+	totalLines := capturedLines
+	if stdout.truncated || stderr.truncated {
+		totalLines = stdout.newlines + stderr.newlines
+		if parsed {
+			totalLines--
+		}
+	}
+	res := Result{Stdout: string(stdoutBytes), Stderr: string(stderrBytes), Output: string(selected), ExitCode: exitCode, Cwd: newCwd, Timeout: timedOut, Truncated: stdout.truncated || stderr.truncated || lineCut, TotalLines: totalLines, TotalBytes: stdout.written + stderr.written}
 	if res.Truncated {
 		if err := os.MkdirAll(filepath.Join(r.dataDir, "artifacts"), 0o700); err != nil {
 			return res, err

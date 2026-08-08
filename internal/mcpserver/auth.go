@@ -2,6 +2,8 @@ package mcpserver
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -12,6 +14,7 @@ type principalKey struct{}
 type Principal struct {
 	Token store.Token
 	Hosts map[string]store.Host
+	Store *store.Store
 }
 
 func FromContext(ctx context.Context) (Principal, bool) {
@@ -34,7 +37,7 @@ func Bearer(st *store.Store, next http.Handler) http.Handler {
 		for _, h := range hosts {
 			allowed[h.Name] = h
 		}
-		ctx := context.WithValue(r.Context(), principalKey{}, Principal{Token: token, Hosts: allowed})
+		ctx := context.WithValue(r.Context(), principalKey{}, Principal{Token: token, Hosts: allowed, Store: st})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -45,6 +48,11 @@ func AuthorizedHost(ctx context.Context, name string) (store.Host, error) {
 	}
 	if h, ok := p.Hosts[name]; ok {
 		return h, nil
+	}
+	if p.Store != nil {
+		if _, err := p.Store.GetHostByName(ctx, name); errors.Is(err, sql.ErrNoRows) {
+			return store.Host{}, toolError("unknown host: " + name)
+		}
 	}
 	return store.Host{}, toolError("host not authorized: " + name)
 }

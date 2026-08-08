@@ -21,9 +21,35 @@ type Manager struct {
 	Exec   *execx.Runner
 	Events *events.Bus
 }
+type JobView struct {
+	ID         string `json:"id"`
+	HostID     int64  `json:"host_id"`
+	Command    string `json:"command"`
+	Cwd        string `json:"cwd"`
+	PID        *int64 `json:"pid"`
+	UsedSetsid bool   `json:"used_setsid"`
+	Status     string `json:"status"`
+	ExitCode   *int64 `json:"exit_code"`
+	StartedAt  int64  `json:"started_at"`
+	FinishedAt *int64 `json:"finished_at"`
+}
 type Status struct {
-	Job      store.Job `json:"job"`
-	LogBytes int64     `json:"log_bytes"`
+	Job      JobView `json:"job"`
+	LogBytes int64   `json:"log_bytes"`
+}
+
+func view(j store.Job) JobView {
+	out := JobView{ID: j.ID, HostID: j.HostID, Command: j.Command, Cwd: j.Cwd, UsedSetsid: j.UsedSetsid, Status: j.Status, StartedAt: j.StartedAt}
+	if j.PID.Valid {
+		out.PID = &j.PID.Int64
+	}
+	if j.ExitCode.Valid {
+		out.ExitCode = &j.ExitCode.Int64
+	}
+	if j.FinishedAt.Valid {
+		out.FinishedAt = &j.FinishedAt.Int64
+	}
+	return out
 }
 
 func New(st *store.Store, p *sshpool.Pool, e *execx.Runner, b *events.Bus) *Manager {
@@ -66,7 +92,7 @@ func (m *Manager) Start(ctx context.Context, h store.Host, tokenID int64, comman
 }
 func (m *Manager) Refresh(ctx context.Context, j store.Job) (Status, error) {
 	if j.Status != "running" {
-		return Status{Job: j}, nil
+		return Status{Job: view(j)}, nil
 	}
 	h, err := m.Store.GetHost(ctx, j.HostID)
 	if err != nil {
@@ -100,9 +126,12 @@ func (m *Manager) Refresh(ctx context.Context, j store.Job) (Status, error) {
 		if code != nil {
 			j.ExitCode = sql.NullInt64{Int64: int64(*code), Valid: true}
 		}
+		if status != "running" {
+			j.FinishedAt = sql.NullInt64{Int64: time.Now().Unix(), Valid: true}
+		}
 		m.Events.Publish("job_status", map[string]any{"job_id": j.ID, "status": status})
 	}
-	return Status{Job: j, LogBytes: size}, nil
+	return Status{Job: view(j), LogBytes: size}, nil
 }
 func (m *Manager) Logs(ctx context.Context, j store.Job, tailLines int, pattern string, offset int64) (string, error) {
 	h, err := m.Store.GetHost(ctx, j.HostID)

@@ -19,8 +19,15 @@ func TestSHQAndTrailer(t *testing.T) {
 func TestLimitedWriterAndLines(t *testing.T) {
 	w := &limitedWriter{limit: 3}
 	n, _ := w.Write([]byte("abcdef"))
-	if n != 6 || w.buf.String() != "abc" || !w.truncated {
-		t.Fatalf("limited writer 错误")
+	if n != 6 || string(w.captured()) != "abf" || !w.truncated || len(w.captured()) > 3 {
+		t.Fatalf("limited writer 错误: %q", w.captured())
+	}
+	stdout := &limitedWriter{limit: captureLimit}
+	stderr := &limitedWriter{limit: captureLimit}
+	_, _ = stdout.Write(bytes.Repeat([]byte("o"), captureLimit*2))
+	_, _ = stderr.Write(bytes.Repeat([]byte("e"), captureLimit*2))
+	if len(stdout.captured()) > captureLimit || len(stderr.captured()) > captureLimit || len(stdout.captured())+len(stderr.captured()) > 512<<10 {
+		t.Fatal("artifact 捕获预算超限")
 	}
 	selected, total, cut := selectLines([]byte("1\n2\n3\n"), 2, false)
 	if string(selected) != "1\n2" || total != 3 || !cut {

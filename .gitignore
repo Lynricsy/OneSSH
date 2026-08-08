@@ -1,3 +1,4 @@
 .agent-logs/
 web/node_modules/
 /onessh
+web/*.tsbuildinfo

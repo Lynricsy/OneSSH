@@ -52,10 +52,10 @@ func TestRealJobDefaultCwd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Job.Status != "exited" || !status.Job.ExitCode.Valid || status.Job.ExitCode.Int64 != 0 {
+	if status.Job.Status != "exited" || status.Job.ExitCode == nil || *status.Job.ExitCode != 0 {
 		t.Fatalf("结束状态 %+v", status.Job)
 	}
-	logs, err := m.Logs(ctx, status.Job, 100, "", 0)
+	logs, err := m.Logs(ctx, j, 100, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
