@@ -43,6 +43,7 @@ func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, dataDir string, p
 	s.registerFiles(s.Files)
 	s.registerImage(s.Files)
 	s.registerMonitor(s.Monitor)
+	s.registerFanout()
 	s.Monitor.Start(context.Background())
 	return s
 }
