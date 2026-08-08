@@ -76,13 +76,9 @@ func (s *Store) MetricsSince(ctx context.Context, hostID, since int64) ([]Metric
 	}
 	return out, rows.Err()
 }
-func (s *Store) Cleanup(ctx context.Context, cutoff int64) error {
-	for _, q := range []string{`DELETE FROM audit WHERE ts<?`, `DELETE FROM metrics WHERE ts<?`} {
-		if _, err := s.DB.ExecContext(ctx, q, cutoff); err != nil {
-			return err
-		}
-	}
-	return nil
+func (s *Store) CleanupMetrics(ctx context.Context, cutoff int64) error {
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM metrics WHERE ts<?`, cutoff)
+	return err
 }
 func nullString(v sql.NullString) any {
 	if v.Valid {

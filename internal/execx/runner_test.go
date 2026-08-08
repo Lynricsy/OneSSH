@@ -2,8 +2,13 @@ package execx
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestSHQAndTrailer(t *testing.T) {
@@ -35,5 +40,49 @@ func TestLimitedWriterAndLines(t *testing.T) {
 	}
 	if !strings.Contains(Script("pwd", "~", map[string]string{"A": "b"}), "export A='b'") {
 		t.Fatal("脚本缺少 env")
+	}
+}
+
+func TestCleanupArtifactsHonorsRetention(t *testing.T) {
+	dataDir := t.TempDir()
+	artifactDir := filepath.Join(dataDir, "artifacts")
+	if err := os.MkdirAll(artifactDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	oldPath := filepath.Join(artifactDir, uuid.NewString()+".log")
+	newPath := filepath.Join(artifactDir, uuid.NewString()+".log")
+	unmanagedPath := filepath.Join(artifactDir, "manual.log")
+	for _, path := range []string{oldPath, newPath, unmanagedPath} {
+		if err := os.WriteFile(path, []byte("output"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	if err := os.Chtimes(oldPath, now.Add(-8*24*time.Hour), now.Add(-8*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newPath, now.Add(-6*24*time.Hour), now.Add(-6*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(unmanagedPath, now.Add(-8*24*time.Hour), now.Add(-8*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := New(dataDir).CleanupArtifacts(now.Add(-7 * 24 * time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 {
+		t.Fatalf("删除数量 %d", removed)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("过期 artifact 仍存在: %v", err)
+	}
+	for _, path := range []string{newPath, unmanagedPath} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("应保留 %s: %v", path, err)
+		}
+	}
+	if removed, err = New(filepath.Join(dataDir, "missing")).CleanupArtifacts(now); err != nil || removed != 0 {
+		t.Fatalf("缺失目录清理结果 removed=%d err=%v", removed, err)
 	}
 }

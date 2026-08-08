@@ -167,7 +167,7 @@ ONESSH_URL=http://localhost:8866/mcp \
 ## 数据与安全
 
 - `/data/onessh.db`：主机、加密凭据、令牌哈希、任务、审计和指标。
-- `/data/artifacts/`：截断命令输出，保留 7 天。
+- `/data/artifacts/`：截断命令输出；服务启动时及每小时删除超过 7 天的文件。指标数据采用相同保留策略。
 - Agent 令牌明文不入库；数据库只保存 SHA-256 哈希。
 - WebUI 使用 24 小时 HMAC Cookie；生产环境应通过 HTTPS 反向代理访问。
 - 首次连接会接受并保存主机指纹。指纹变化会拒绝连接，确认主机已重装后才能在 WebUI 重置。

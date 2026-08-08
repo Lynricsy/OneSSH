@@ -42,6 +42,41 @@ type Runner struct{ dataDir string }
 
 func New(dataDir string) *Runner { return &Runner{dataDir: dataDir} }
 
+func (r *Runner) CleanupArtifacts(cutoff time.Time) (int, error) {
+	dir := filepath.Join(r.dataDir, "artifacts")
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("读取 artifact 目录: %w", err)
+	}
+	removed := 0
+	var cleanupErr error
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".log" {
+			continue
+		}
+		if _, err := uuid.Parse(strings.TrimSuffix(entry.Name(), ".log")); err != nil {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("读取 artifact %s: %w", entry.Name(), err))
+			continue
+		}
+		if !info.ModTime().Before(cutoff) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("删除 artifact %s: %w", entry.Name(), err))
+			continue
+		}
+		removed++
+	}
+	return removed, cleanupErr
+}
+
 func SHQ(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
 func Script(command, cwd string, env map[string]string) string {
 	var b strings.Builder

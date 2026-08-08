@@ -48,25 +48,27 @@ func New(st *store.Store, p *sshpool.Pool, e *execx.Runner, interval time.Durati
 	return &Manager{Store: st, Pool: p, Exec: e, interval: interval, previous: make(map[int64]CPU)}
 }
 func (m *Manager) Start(ctx context.Context) {
-	if m.interval <= 0 {
-		return
-	}
 	ctx, m.cancel = context.WithCancel(ctx)
-	_ = m.Store.Cleanup(ctx, time.Now().Add(-7*24*time.Hour).UnixMilli())
+	m.cleanup(ctx)
 	go func() {
-		poll := time.NewTicker(m.interval)
 		clean := time.NewTicker(time.Hour)
-		defer poll.Stop()
 		defer clean.Stop()
-		m.Poll(ctx)
+		var poll *time.Ticker
+		var pollC <-chan time.Time
+		if m.interval > 0 {
+			poll = time.NewTicker(m.interval)
+			pollC = poll.C
+			defer poll.Stop()
+			m.Poll(ctx)
+		}
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-poll.C:
+			case <-pollC:
 				m.Poll(ctx)
 			case <-clean.C:
-				_ = m.Store.Cleanup(ctx, time.Now().Add(-7*24*time.Hour).UnixMilli())
+				m.cleanup(ctx)
 			}
 		}
 	}()
@@ -74,6 +76,16 @@ func (m *Manager) Start(ctx context.Context) {
 func (m *Manager) Stop() {
 	if m.cancel != nil {
 		m.cancel()
+	}
+}
+
+func (m *Manager) cleanup(ctx context.Context) {
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+	if err := m.Store.CleanupMetrics(ctx, cutoff.UnixMilli()); err != nil {
+		log.Printf("清理过期 metrics 失败: %v", err)
+	}
+	if _, err := m.Exec.CleanupArtifacts(cutoff); err != nil {
+		log.Printf("清理过期 artifact 失败: %v", err)
 	}
 }
 func (m *Manager) Poll(ctx context.Context) {
