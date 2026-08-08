@@ -164,6 +164,22 @@ ONESSH_URL=http://localhost:8866/mcp \
 
 测试覆盖持久 cwd、大输出 artifact、后台任务、结构化文件编辑、跨主机传输、图片、主机授权、现场监控、审计脱敏和 WebSocket 终端。
 
+## GitHub CI 与 GHCR
+
+`.github/workflows/ci.yml` 会在 push、针对 `main` 的 pull request 以及手动触发时执行：
+
+- `gofmt`、`go mod tidy` 差异、`go vet`、单元测试和 CGO-free 构建
+- 前端依赖锁定安装、TypeScript 检查和生产构建
+- Docker Compose 双主机端到端测试
+
+只有 `main` 分支或 `v*` 标签的 push 在全部检查通过后才发布镜像。工作流使用仓库自带的 `GITHUB_TOKEN` 写入 GHCR，并生成镜像来源证明，不需要额外配置 PAT。
+
+```sh
+docker pull ghcr.io/lynricsy/onessh:latest
+```
+
+同时会生成分支、Git 标签和 `sha-<commit>` 镜像标签。GHCR 首次发布的包默认为私有；如需匿名拉取，应在 GitHub Packages 设置中显式改为公开。
+
 ## 数据与安全
 
 - `/data/onessh.db`：主机、加密凭据、令牌哈希、任务、审计和指标。

@@ -1,0 +1,184 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Go checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then
+            printf 'Files need gofmt:\n%s\n' "$unformatted"
+            exit 1
+          fi
+
+      - name: Check module files
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        env:
+          CGO_ENABLED: "0"
+        run: go test -count=1 ./...
+
+      - name: Build CGO-free binary
+        env:
+          CGO_ENABLED: "0"
+        run: go build -trimpath -o /tmp/onessh ./cmd/onessh
+
+  frontend:
+    name: Web checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check and build
+        run: npm run build
+
+  e2e:
+    name: Docker end-to-end
+    runs-on: ubuntu-latest
+    env:
+      ONESSH_MASTER_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      ONESSH_ADMIN_PASSWORD: test123
+      ONESSH_URL: http://localhost:8866/mcp
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Start OneSSH and test hosts
+        run: docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build
+
+      - name: Wait for health check
+        shell: bash
+        run: |
+          for _ in {1..60}; do
+            if curl --fail --silent http://localhost:8866/healthz; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Run end-to-end suite
+        run: go test -count=1 -tags e2e -run TestEndToEnd -v ./e2e
+
+      - name: Print container logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.test.yml logs --no-color
+
+      - name: Stop test environment
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
+
+  publish:
+    name: Publish GHCR image
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    needs:
+      - backend
+      - frontend
+      - e2e
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Normalize image name
+        id: image
+        shell: bash
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+        with:
+          images: ghcr.io/${{ steps.image.outputs.name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push image
+        id: push
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Attest image provenance
+        uses: actions/attest@v4
+        with:
+          subject-name: ghcr.io/${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true

@@ -14,6 +14,8 @@ COPY --from=web /src/web/dist ./web/dist
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/onessh ./cmd/onessh
 
 FROM alpine:3.22
+LABEL org.opencontainers.image.source="https://github.com/Lynricsy/OneSSH" \
+      org.opencontainers.image.description="Centralized SSH gateway with WebUI and MCP"
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=build /out/onessh /usr/local/bin/onessh
 VOLUME ["/data"]
