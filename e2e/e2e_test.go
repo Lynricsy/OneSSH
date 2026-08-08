@@ -82,12 +82,16 @@ type grepResult struct {
 		Text   string `json:"text"`
 		Match  bool   `json:"match"`
 	} `json:"lines"`
-	MatchCount int  `json:"match_count"`
-	Truncated  bool `json:"truncated"`
+	MatchCount int    `json:"match_count"`
+	Truncated  bool   `json:"truncated"`
+	Engine     string `json:"engine"`
+	Warning    string `json:"warning"`
 }
 type findResult struct {
 	Paths     []string `json:"paths"`
 	Truncated bool     `json:"truncated"`
+	Engine    string   `json:"engine"`
+	Warning   string   `json:"warning"`
 }
 
 func request[T any](t *testing.T, c *http.Client, method, url string, body any) T {
@@ -179,7 +183,8 @@ func TestEndToEnd(t *testing.T) {
 	}
 	ssh1 := createHost("ssh1")
 	ssh2 := createHost("ssh2")
-	for _, h := range []hostView{ssh1, ssh2} {
+	sshNoTools := createHost("ssh-no-tools")
+	for _, h := range []hostView{ssh1, ssh2, sshNoTools} {
 		var ok bool
 		for range 20 {
 			req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/api/v1/hosts/%d/test", base, h.ID), strings.NewReader("{}"))
@@ -274,12 +279,17 @@ func TestEndToEnd(t *testing.T) {
 		} {
 			decoded[fileWrite](t, call(t, a, "file_write", map[string]any{"host": "ssh1", "path": path, "content": content}))
 		}
-		found := decoded[grepResult](t, call(t, a, "grep", map[string]any{
+		nativeGrep := call(t, a, "grep", map[string]any{
 			"host": "ssh1", "pattern": "needlealpha", "path": "/tmp/onessh-search",
 			"ignoreCase": true, "context": 1, "limit": 10,
-		}))
-		if found.MatchCount != 2 || found.Truncated {
-			t.Fatalf("grep 结果错误: %+v", found)
+		})
+		rawNativeGrep, _ := json.Marshal(nativeGrep.StructuredContent)
+		if bytes.Contains(rawNativeGrep, []byte(`"warning"`)) {
+			t.Fatalf("原生 grep 不应返回 warning: %s", rawNativeGrep)
+		}
+		found := decoded[grepResult](t, nativeGrep)
+		if found.Engine != "rg" || found.Warning != "" || found.MatchCount != 2 || found.Truncated {
+			t.Fatalf("grep 原生引擎或结果错误: %+v", found)
 		}
 		matches := map[string]bool{}
 		for _, line := range found.Lines {
@@ -290,11 +300,16 @@ func TestEndToEnd(t *testing.T) {
 		if len(matches) != 2 || !matches["main.go"] || !matches["pkg/main_test.go"] {
 			t.Fatalf("grep 路径或 ignore 规则错误: %v", matches)
 		}
-		files := decoded[findResult](t, call(t, a, "find", map[string]any{
+		nativeFind := call(t, a, "find", map[string]any{
 			"host": "ssh1", "pattern": "**/*_test.go", "path": "/tmp/onessh-search",
-		}))
-		if len(files.Paths) != 1 || files.Paths[0] != "pkg/main_test.go" || files.Truncated {
-			t.Fatalf("find 结果错误: %+v", files)
+		})
+		rawNativeFind, _ := json.Marshal(nativeFind.StructuredContent)
+		if bytes.Contains(rawNativeFind, []byte(`"warning"`)) {
+			t.Fatalf("原生 find 不应返回 warning: %s", rawNativeFind)
+		}
+		files := decoded[findResult](t, nativeFind)
+		if files.Engine != "fd" || files.Warning != "" || len(files.Paths) != 1 || files.Paths[0] != "pkg/main_test.go" || files.Truncated {
+			t.Fatalf("find 原生引擎或结果错误: %+v", files)
 		}
 		limited := decoded[grepResult](t, call(t, a, "grep", map[string]any{
 			"host": "ssh1", "pattern": "package|Needle", "path": "/tmp/onessh-search/main.go", "limit": 1,
@@ -315,6 +330,38 @@ func TestEndToEnd(t *testing.T) {
 		}))
 		if !bounded.Truncated || bounded.MatchCount == 0 || bounded.MatchCount >= 100 {
 			t.Fatalf("grep 输出上限未生效: matches=%d truncated=%v", bounded.MatchCount, bounded.Truncated)
+		}
+	})
+	t.Run("search fallback without remote binaries", func(t *testing.T) {
+		for path, content := range map[string]string{
+			"/tmp/onessh-fallback/.gitignore": "ignored.go\n",
+			"/tmp/onessh-fallback/main.go":    "package main\n// FallbackNeedle\n",
+			"/tmp/onessh-fallback/ignored.go": "package ignored\n// FallbackNeedle\n",
+			"/tmp/onessh-fallback/binary.go":  "FallbackNeedle\x00binary\n",
+			"/tmp/onessh-outside.go":          "package outside\n// FallbackNeedle\n",
+		} {
+			decoded[fileWrite](t, call(t, a, "file_write", map[string]any{"host": "ssh-no-tools", "path": path, "content": content}))
+		}
+		decoded[execResult](t, call(t, a, "exec", map[string]any{
+			"host": "ssh-no-tools", "command": "ln -s /tmp/onessh-outside.go /tmp/onessh-fallback/linked.go",
+		}))
+		found := decoded[grepResult](t, call(t, a, "grep", map[string]any{
+			"host": "ssh-no-tools", "pattern": "FallbackNeedle", "path": "/tmp/onessh-fallback", "limit": 10,
+		}))
+		if found.Engine != "sftp" || !strings.Contains(found.Warning, "性能") || found.MatchCount != 1 || found.Truncated || len(found.Lines) != 1 || found.Lines[0].Path != "main.go" {
+			t.Fatalf("SFTP grep 降级元数据或结果错误: %+v", found)
+		}
+		files := decoded[findResult](t, call(t, a, "find", map[string]any{
+			"host": "ssh-no-tools", "pattern": "*.go", "path": "/tmp/onessh-fallback", "limit": 10,
+		}))
+		if files.Engine != "sftp" || !strings.Contains(files.Warning, "性能") || files.Truncated || len(files.Paths) != 2 || files.Paths[0] != "binary.go" || files.Paths[1] != "main.go" {
+			t.Fatalf("SFTP find 降级元数据或结果错误: %+v", files)
+		}
+		invalid := call(t, a, "grep", map[string]any{
+			"host": "ssh-no-tools", "pattern": "[", "path": "/tmp/onessh-fallback",
+		})
+		if !invalid.IsError || !strings.Contains(toolText(invalid), "Go 正则无效") {
+			t.Fatalf("SFTP grep 无效正则未返回错误: %s", toolText(invalid))
 		}
 	})
 	t.Run("image", func(t *testing.T) {

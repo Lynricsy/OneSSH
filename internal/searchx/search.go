@@ -54,6 +54,8 @@ type GrepResult struct {
 	Lines      []GrepLine `json:"lines"`
 	MatchCount int        `json:"match_count"`
 	Truncated  bool       `json:"truncated"`
+	Engine     string     `json:"engine"`
+	Warning    string     `json:"warning,omitempty"`
 }
 
 type FindOptions struct {
@@ -65,6 +67,8 @@ type FindOptions struct {
 type FindResult struct {
 	Paths     []string `json:"paths"`
 	Truncated bool     `json:"truncated"`
+	Engine    string   `json:"engine"`
+	Warning   string   `json:"warning,omitempty"`
 }
 
 type rgText struct {
@@ -129,8 +133,8 @@ func (m *Manager) Grep(ctx context.Context, host string, opt GrepOptions) (GrepR
 
 	ctx, cancel := context.WithTimeout(ctx, searchTimeout)
 	defer cancel()
-	out := GrepResult{Lines: make([]GrepLine, 0, min(opt.Limit, 128))}
-	outputBytes := 64
+	out := GrepResult{Lines: make([]GrepLine, 0, min(opt.Limit, 128)), Engine: "rg"}
+	outputBytes := len(out.Engine) + 64
 	stderr, exitCode, stopped, err := m.stream(ctx, host, command, func(line string) bool {
 		event, ok := decodeRGLine(line)
 		if !ok || (event.Type != "match" && event.Type != "context") {
@@ -161,6 +165,9 @@ func (m *Manager) Grep(ctx context.Context, host string, opt GrepOptions) (GrepR
 		return GrepResult{}, err
 	}
 	out.Truncated = stopped || out.MatchCount >= opt.Limit
+	if exitCode == 127 && !stopped {
+		return m.grepSFTP(ctx, host, opt)
+	}
 	if exitCode != 0 && exitCode != 1 && !stopped {
 		return GrepResult{}, commandError("rg", exitCode, stderr)
 	}
@@ -196,8 +203,8 @@ func (m *Manager) Find(ctx context.Context, host string, opt FindOptions) (FindR
 
 	ctx, cancel := context.WithTimeout(ctx, searchTimeout)
 	defer cancel()
-	out := FindResult{Paths: make([]string, 0, min(opt.Limit, 256))}
-	outputBytes := 64
+	out := FindResult{Paths: make([]string, 0, min(opt.Limit, 256)), Engine: "fd"}
+	outputBytes := len(out.Engine) + 64
 	stderr, exitCode, stopped, err := m.stream(ctx, host, command, func(line string) bool {
 		line = strings.TrimSuffix(line, "\r")
 		if line == "" {
@@ -217,6 +224,9 @@ func (m *Manager) Find(ctx context.Context, host string, opt FindOptions) (FindR
 		return FindResult{}, err
 	}
 	out.Truncated = stopped || len(out.Paths) >= opt.Limit
+	if exitCode == 127 && !stopped {
+		return m.findSFTP(ctx, host, opt)
+	}
 	if exitCode != 0 && !stopped {
 		return FindResult{}, commandError("fd", exitCode, stderr)
 	}

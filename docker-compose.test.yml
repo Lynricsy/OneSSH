@@ -5,6 +5,8 @@ services:
         condition: service_started
       ssh2:
         condition: service_started
+      ssh-no-tools:
+        condition: service_started
   ssh1:
     build:
       context: .
@@ -22,6 +24,15 @@ services:
       context: .
       dockerfile: e2e/Dockerfile.ssh
     image: onessh-ssh-test
+    environment:
+      PASSWORD_ACCESS: "true"
+      USER_PASSWORD: pass
+      USER_NAME: test
+      LOG_STDOUT: "true"
+    expose:
+      - "2222"
+  ssh-no-tools:
+    image: lscr.io/linuxserver/openssh-server:latest
     environment:
       PASSWORD_ACCESS: "true"
       USER_PASSWORD: pass

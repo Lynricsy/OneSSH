@@ -28,7 +28,7 @@ type FindInput struct {
 func (s *Server) registerSearch(search *searchx.Manager) {
 	register[GrepInput, searchx.GrepResult](s, &mcp.Tool{
 		Name:        "grep",
-		Description: "使用远程 ripgrep 搜索文件内容，返回路径、行号、列号和上下文；遵循 .gitignore",
+		Description: "搜索远程文件内容并返回路径、行号、列号和上下文；优先使用 ripgrep，缺失时自动通过 SFTP 降级",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in GrepInput) (*mcp.CallToolResult, searchx.GrepResult, error) {
 		if _, err := AuthorizedHost(ctx, in.Host); err != nil {
 			return errorResult(err.Error()), searchx.GrepResult{}, nil
@@ -44,7 +44,7 @@ func (s *Server) registerSearch(search *searchx.Manager) {
 	})
 	register[FindInput, searchx.FindResult](s, &mcp.Tool{
 		Name:        "find",
-		Description: "使用远程 fd 按 glob 查找路径；遵循 .gitignore",
+		Description: "按 glob 查找远程路径；优先使用 fd/fdfind，缺失时自动通过 SFTP 降级",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in FindInput) (*mcp.CallToolResult, searchx.FindResult, error) {
 		if _, err := AuthorizedHost(ctx, in.Host); err != nil {
 			return errorResult(err.Error()), searchx.FindResult{}, nil

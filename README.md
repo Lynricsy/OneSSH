@@ -118,12 +118,16 @@ Authorization: Bearer osh_...
 | 主机与执行 | `hosts_list`、`exec`、`session_env`、`exec_many`、`output_read` |
 | 后台任务 | `job_start`、`job_list`、`job_status`、`job_logs`、`job_kill` |
 | 文件 | `file_read`、`file_write`、`file_edit`、`file_list`、`file_transfer` |
-| 搜索 | `grep`（ripgrep）、`find`（fd/fdfind） |
+| 搜索 | `grep`（优先 ripgrep，缺失时 SFTP 降级）、`find`（优先 fd/fdfind，缺失时 SFTP 降级） |
 | 资源 | `image_view`、`host_status` |
 
 `file_edit` 支持 `expected_sha256` 乐观锁；冲突时应重新读取。大输出会返回 `artifact_id`，再通过 `output_read` 分段读取或正则过滤。
 
-Pi 风格的简单编码工具已完整覆盖：`file_read`、`file_write`、`file_edit`、`exec`、`grep`、`find`、`file_list` 分别对应 read、write、edit、bash、grep、find、ls。`grep` 和 `find` 直接在目标主机运行 `rg` 与 `fd`（Debian 的 `fdfind` 也受支持），以保留原生性能和 `.gitignore` 语义；OneSSH 不会自动修改远端主机，使用前需自行安装这两个可选命令。搜索请求最多运行 30 秒，结构化结果最大 256 KiB，并受各工具的条目上限约束。
+搜索降级不要求在远端安装额外二进制。降级路径继续遵循项目内忽略文件，跳过二进制、大文件和符号链接，并保留 30 秒超时、256 KiB 输出上限及 100,000 项遍历上限。
+
+`grep` 和 `find` 的结构化结果包含 `engine`：原生路径分别为 `rg`、`fd`，降级路径为 `sftp`。仅在 SFTP 降级时返回 `warning`，提示大型目录上的性能可能低于原生工具。
+
+Pi 风格的简单编码工具已完整覆盖：`file_read`、`file_write`、`file_edit`、`exec`、`grep`、`find`、`file_list` 分别对应 read、write、edit、bash、grep、find、ls。`grep` 和 `find` 优先在目标主机运行 `rg` 与 `fd`（Debian 的 `fdfind` 也受支持）以保留原生性能；命令不可用时自动切换到 SFTP + Go 实现，OneSSH 不会修改远端主机。
 
 ## 本地构建
 
@@ -155,7 +159,7 @@ go test -count=1 ./...
 (cd web && npm run build)
 ```
 
-完整端到端测试会启动 OneSSH 和两个 OpenSSH 容器。该测试固定使用管理员密码 `test123`，并会通过管理 API 创建 `ssh1`、`ssh2` 和测试令牌：
+完整端到端测试会启动 OneSSH、两个带 `rg`/`fd` 的 OpenSSH 容器和一个无搜索二进制的 OpenSSH 容器。该测试固定使用管理员密码 `test123`，并会通过管理 API 创建 `ssh1`、`ssh2`、`ssh-no-tools` 和测试令牌：
 
 ```sh
 export ONESSH_MASTER_KEY="$(openssl rand -hex 32)"
@@ -166,7 +170,7 @@ ONESSH_URL=http://localhost:8866/mcp \
   go test -count=1 -tags e2e -run TestEndToEnd -v ./e2e
 ```
 
-测试覆盖持久 cwd、大输出 artifact、后台任务、结构化文件编辑、跨主机传输、图片、主机授权、现场监控、审计脱敏和 WebSocket 终端。
+测试覆盖持久 cwd、大输出 artifact、后台任务、结构化文件编辑、跨主机传输、原生与 SFTP 降级搜索、图片、主机授权、现场监控、审计脱敏和 WebSocket 终端。
 
 ## GitHub CI 与 GHCR
 
@@ -174,7 +178,7 @@ ONESSH_URL=http://localhost:8866/mcp \
 
 - `gofmt`、`go mod tidy` 差异、`go vet`、单元测试和 CGO-free 构建
 - 前端依赖锁定安装、TypeScript 检查和生产构建
-- Docker Compose 双主机端到端测试
+- Docker Compose 三主机端到端测试（含无 `rg`/`fd` 的降级路径）
 
 只有 `main` 分支或 `v*` 标签的 push 在全部检查通过后才发布镜像。工作流使用仓库自带的 `GITHUB_TOKEN` 写入 GHCR，并生成镜像来源证明，不需要额外配置 PAT。
 
