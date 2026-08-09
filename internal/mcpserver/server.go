@@ -33,12 +33,14 @@ type Server struct {
 	Monitor     *monitor.Manager
 }
 
-func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanager.Manager, dataDir string, pollInterval time.Duration) *Server {
+// New 的 publicURL 必须是已规范化的来源地址（无尾斜杠、无路径），由 oauthserver.New 校验后传入；
+// 这里不再做第二次归一，避免同一份规则出现两套实现。
+func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanager.Manager, dataDir, publicURL string, pollInterval time.Duration) *Server {
 	s := &Server{Store: st, Pool: pool, Events: bus, HostManager: hosts, Exec: execx.New(dataDir)}
 	s.Jobs = jobs.New(st, pool, s.Exec, bus)
 	s.Files = files.New(pool, s.Exec)
 	s.Monitor = monitor.New(st, pool, s.Exec, pollInterval)
-	s.MCP = mcp.NewServer(&mcp.Implementation{Name: "OneSSH", Version: "dev"}, nil)
+	s.MCP = mcp.NewServer(serverInfo(publicURL), nil)
 	s.registerHosts()
 	s.registerExec(s.Exec)
 	s.registerJobs(s.Jobs)
@@ -49,6 +51,27 @@ func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanage
 	s.registerFanout()
 	s.Monitor.Start(context.Background())
 	return s
+}
+
+// serverInfo 组装 initialize 回给客户端的 serverInfo。
+//
+// 图标走 spec 2025-11-25 起的 Implementation.icons。选 PNG 不是因为 SVG 不合规——服务器发 SVG
+// 完全合法——而是互操作性：规范只要求「支持渲染图标的客户端」必须认 image/png 和 image/jpeg，
+// SVG 与 WebP 仅为 SHOULD，且 SVG 可内嵌可执行脚本，客户端有理由拒绝渲染。
+//
+// src 要求是绝对 URI，而 initialize 时拿不到 http.Request，无法像 OAuth 元数据那样按请求推导；
+// 因此未配置 ONESSH_PUBLIC_URL 时宁可不发图标，也不发一个客户端解析不了的相对路径。
+// 该地址与 /mcp 同源，满足规范「图标 URL 应来自同域或可信域」的建议。
+func serverInfo(publicURL string) *mcp.Implementation {
+	info := &mcp.Implementation{Name: "OneSSH", Version: "dev"}
+	if publicURL != "" {
+		info.Icons = []mcp.Icon{{
+			Source:   publicURL + "/logo.png",
+			MIMEType: "image/png",
+			Sizes:    []string{"256x256"},
+		}}
+	}
+	return info
 }
 func (s *Server) Close() {
 	s.Monitor.Stop()

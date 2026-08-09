@@ -39,14 +39,15 @@ func main() {
 	defer pool.Close()
 	hosts := hostmanager.New(st, box, pool)
 	bus := events.New()
-	mcpService := mcpserver.New(st, pool, bus, hosts, cfg.DataDir, cfg.PollInterval)
-	defer mcpService.Close()
-	adminAuth := webapi.NewAdminAuth(cfg.AdminPassword, cfg.MasterKey)
-	adminAPI := webapi.NewAPI(st, box, pool, hosts, mcpService.Exec, mcpService.Files, mcpService.Jobs, mcpService.Monitor, bus)
+	// oauthService 先建：它会校验并规范化 ONESSH_PUBLIC_URL，MCP 的 serverInfo 图标直接复用该结果
 	oauthService, err := oauthserver.New(st, cfg.PublicURL)
 	if err != nil {
 		log.Fatal(err)
 	}
+	mcpService := mcpserver.New(st, pool, bus, hosts, cfg.DataDir, oauthService.PublicURL, cfg.PollInterval)
+	defer mcpService.Close()
+	adminAuth := webapi.NewAdminAuth(cfg.AdminPassword, cfg.MasterKey)
+	adminAPI := webapi.NewAPI(st, box, pool, hosts, mcpService.Exec, mcpService.Files, mcpService.Jobs, mcpService.Monitor, bus)
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /api/v1/login", http.HandlerFunc(adminAuth.Login))

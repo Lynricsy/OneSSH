@@ -174,6 +174,16 @@ Authorization: Bearer osh_...
 
 </details>
 
+### 服务器图标
+
+设置 `ONESSH_PUBLIC_URL` 后，`initialize` 返回的 `serverInfo` 会带上 `icons`（MCP 2025-11-25 起的字段），指向与 `/mcp` 同源的 `/logo.png`：
+
+```json
+"icons": [{ "src": "https://ssh.example.com/logo.png", "mimeType": "image/png", "sizes": ["256x256"] }]
+```
+
+用 PNG 而非 SVG 是为了互操作性：规范只要求支持渲染图标的客户端必须认 `image/png` 与 `image/jpeg`，SVG 与 WebP 仅为 SHOULD。`src` 必须是绝对 URI，而 `initialize` 时拿不到请求上下文推导地址，所以未配置 `ONESSH_PUBLIC_URL` 时不发布图标。客户端是否渲染由客户端决定。
+
 ### 工具清单
 
 | 类别 | 工具 |
@@ -213,7 +223,7 @@ Authorization: Bearer osh_...
 | `ONESSH_MASTER_KEY` | ✅ | — | 64 位十六进制字符串，即 32 字节主密钥 |
 | `ONESSH_ADMIN_PASSWORD` | ✅ | — | WebUI 管理员密码 |
 | `ONESSH_LISTEN` | | `:8866` | HTTP 监听地址 |
-| `ONESSH_PUBLIC_URL` | | 按请求推导 | 对外访问来源，如 `https://ssh.example.com`；生产 OAuth 部署应显式设置 |
+| `ONESSH_PUBLIC_URL` | | 按请求推导 | 对外访问来源，如 `https://ssh.example.com`；生产 OAuth 部署应显式设置，同时决定是否发布 MCP 服务器图标 |
 | `ONESSH_DATA_DIR` | | `/data` | SQLite 与 artifact 数据目录 |
 | `ONESSH_POLL_INTERVAL` | | `60` | 监控轮询秒数，设为 `0` 关闭 |
 
