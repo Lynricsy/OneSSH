@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -28,6 +29,23 @@ type OAuthAuthorizationCode struct {
 	HostIDs       []int64
 	ExpiresAt     int64
 	CreatedAt     int64
+	UsedAt        sql.NullInt64
+	GrantID       sql.NullString
+}
+
+type OAuthAuthorizationCodeExchange struct {
+	CodeHash         string
+	ClientID         string
+	RedirectURI      string
+	Resource         string
+	CodeChallenge    string
+	GrantID          string
+	AccessTokenName  string
+	AccessTokenHash  string
+	RefreshTokenHash string
+	Now              int64
+	AccessExpiresAt  int64
+	RefreshExpiresAt int64
 }
 type OAuthRefreshToken struct {
 	TokenHash     string
@@ -46,8 +64,9 @@ type OAuthRefreshToken struct {
 }
 
 var (
-	ErrOAuthRefreshReuse = errors.New("OAuth refresh token reuse detected")
-	ErrOAuthGrantRevoked = errors.New("OAuth grant revoked")
+	ErrOAuthAuthorizationCodeReuse = errors.New("OAuth authorization code reuse detected")
+	ErrOAuthRefreshReuse           = errors.New("OAuth refresh token reuse detected")
+	ErrOAuthGrantRevoked           = errors.New("OAuth grant revoked")
 )
 
 func (s *Store) CreateOAuthClient(ctx context.Context, client OAuthClient) (OAuthClient, error) {
@@ -89,7 +108,7 @@ func (s *Store) CreateOAuthAuthorizationCode(ctx context.Context, code OAuthAuth
 	return err
 }
 
-func (s *Store) ConsumeOAuthAuthorizationCode(ctx context.Context, codeHash string) (OAuthAuthorizationCode, error) {
+func (s *Store) ExchangeOAuthAuthorizationCode(ctx context.Context, in OAuthAuthorizationCodeExchange) (OAuthAuthorizationCode, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return OAuthAuthorizationCode{}, err
@@ -99,7 +118,7 @@ func (s *Store) ConsumeOAuthAuthorizationCode(ctx context.Context, codeHash stri
 	var code OAuthAuthorizationCode
 	var allHosts, manageHosts int
 	var rawHostIDs string
-	err = tx.QueryRowContext(ctx, `SELECT code_hash,client_id,redirect_uri,resource,code_challenge,scope,all_hosts,manage_hosts,host_ids_json,expires_at,created_at FROM oauth_authorization_codes WHERE code_hash=?`, codeHash).Scan(&code.CodeHash, &code.ClientID, &code.RedirectURI, &code.Resource, &code.CodeChallenge, &code.Scope, &allHosts, &manageHosts, &rawHostIDs, &code.ExpiresAt, &code.CreatedAt)
+	err = tx.QueryRowContext(ctx, `SELECT code_hash,client_id,redirect_uri,resource,code_challenge,scope,all_hosts,manage_hosts,host_ids_json,expires_at,created_at,used_at,grant_id FROM oauth_authorization_codes WHERE code_hash=?`, in.CodeHash).Scan(&code.CodeHash, &code.ClientID, &code.RedirectURI, &code.Resource, &code.CodeChallenge, &code.Scope, &allHosts, &manageHosts, &rawHostIDs, &code.ExpiresAt, &code.CreatedAt, &code.UsedAt, &code.GrantID)
 	if err != nil {
 		return OAuthAuthorizationCode{}, err
 	}
@@ -108,20 +127,59 @@ func (s *Store) ConsumeOAuthAuthorizationCode(ctx context.Context, codeHash stri
 	if err = json.Unmarshal([]byte(rawHostIDs), &code.HostIDs); err != nil {
 		return OAuthAuthorizationCode{}, err
 	}
-	result, err := tx.ExecContext(ctx, `DELETE FROM oauth_authorization_codes WHERE code_hash=?`, codeHash)
-	if err != nil {
-		return OAuthAuthorizationCode{}, err
-	}
-	deleted, err := result.RowsAffected()
-	if err != nil {
-		return OAuthAuthorizationCode{}, err
-	}
-	if deleted != 1 {
+	valid := subtle.ConstantTimeCompare([]byte(code.CodeChallenge), []byte(in.CodeChallenge)) == 1 &&
+		code.ClientID == in.ClientID &&
+		code.RedirectURI == in.RedirectURI &&
+		code.Resource == in.Resource &&
+		code.ExpiresAt > in.Now
+	if !valid {
 		return OAuthAuthorizationCode{}, sql.ErrNoRows
+	}
+	if code.UsedAt.Valid {
+		if !code.GrantID.Valid {
+			return OAuthAuthorizationCode{}, errors.New("OAuth authorization code tombstone is missing its grant ID")
+		}
+		if err = revokeOAuthGrantTx(ctx, tx, code.GrantID.String, in.Now); err != nil {
+			return OAuthAuthorizationCode{}, err
+		}
+		if err = tx.Commit(); err != nil {
+			return OAuthAuthorizationCode{}, err
+		}
+		return OAuthAuthorizationCode{}, ErrOAuthAuthorizationCodeReuse
+	}
+
+	result, err := tx.ExecContext(ctx, `INSERT INTO tokens(name,token_hash,all_hosts,manage_hosts,created_at,source,expires_at,resource,client_id) VALUES(?,?,?,?,?,'oauth',?,?,?)`, in.AccessTokenName, in.AccessTokenHash, boolInt(code.AllHosts), boolInt(code.ManageHosts), in.Now, in.AccessExpiresAt, code.Resource, code.ClientID)
+	if err != nil {
+		return OAuthAuthorizationCode{}, err
+	}
+	accessTokenID, err := result.LastInsertId()
+	if err != nil {
+		return OAuthAuthorizationCode{}, err
+	}
+	for _, hostID := range code.HostIDs {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO token_hosts(token_id,host_id) VALUES(?,?)`, accessTokenID, hostID); err != nil {
+			return OAuthAuthorizationCode{}, err
+		}
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(token_hash,grant_id,access_token_id,client_id,resource,scope,all_hosts,manage_hosts,host_ids_json,expires_at,created_at,used_at,revoked_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,NULL,NULL)`, in.RefreshTokenHash, in.GrantID, accessTokenID, code.ClientID, code.Resource, code.Scope, boolInt(code.AllHosts), boolInt(code.ManageHosts), rawHostIDs, in.RefreshExpiresAt, in.Now); err != nil {
+		return OAuthAuthorizationCode{}, err
+	}
+	result, err = tx.ExecContext(ctx, `UPDATE oauth_authorization_codes SET used_at=?,grant_id=? WHERE code_hash=? AND used_at IS NULL`, in.Now, in.GrantID, in.CodeHash)
+	if err != nil {
+		return OAuthAuthorizationCode{}, err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return OAuthAuthorizationCode{}, err
+	}
+	if updated != 1 {
+		return OAuthAuthorizationCode{}, ErrOAuthAuthorizationCodeReuse
 	}
 	if err = tx.Commit(); err != nil {
 		return OAuthAuthorizationCode{}, err
 	}
+	code.UsedAt = sql.NullInt64{Int64: in.Now, Valid: true}
+	code.GrantID = sql.NullString{String: in.GrantID, Valid: true}
 	return code, nil
 }
 func (s *Store) CreateOAuthRefreshToken(ctx context.Context, token OAuthRefreshToken) error {

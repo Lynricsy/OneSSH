@@ -207,6 +207,90 @@ func TestOAuthRejectsUnsafeRedirectAndInvalidPKCE(t *testing.T) {
 	}
 }
 
+func TestOAuthAuthorizationCodeInvalidAttemptDoesNotConsumeAndReplayRevokesGrant(t *testing.T) {
+	server, st := newTestServer(t)
+	ctx := context.Background()
+	const (
+		clientID    = "replay-client"
+		redirectURI = "http://localhost:3000/callback"
+		resource    = "http://localhost:8866/mcp"
+		plainCode   = "osh_code_replay_test"
+	)
+	if _, err := st.CreateOAuthClient(ctx, store.OAuthClient{
+		ClientID:     clientID,
+		ClientName:   "Replay test",
+		RedirectURIs: []string{redirectURI},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	verifier := strings.Repeat("v", 64)
+	challengeHash := sha256.Sum256([]byte(verifier))
+	if err := st.CreateOAuthAuthorizationCode(ctx, store.OAuthAuthorizationCode{
+		CodeHash:      store.TokenHash(plainCode),
+		ClientID:      clientID,
+		RedirectURI:   redirectURI,
+		Resource:      resource,
+		CodeChallenge: base64.RawURLEncoding.EncodeToString(challengeHash[:]),
+		Scope:         "mcp",
+		AllHosts:      true,
+		ExpiresAt:     time.Now().Add(time.Minute).Unix(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{
+		"grant_type":   {"authorization_code"},
+		"client_id":    {clientID},
+		"redirect_uri": {redirectURI},
+		"code":         {plainCode},
+		"resource":     {resource},
+	}
+	exchange := func(verifier string) *httptest.ResponseRecorder {
+		t.Helper()
+		form.Set("code_verifier", verifier)
+		request := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := httptest.NewRecorder()
+		server.Token(response, request)
+		return response
+	}
+
+	invalid := exchange(strings.Repeat("x", 64))
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("错误 verifier 状态码 %d: %s", invalid.Code, invalid.Body.String())
+	}
+	success := exchange(verifier)
+	if success.Code != http.StatusOK {
+		t.Fatalf("错误请求消耗了授权码: %d %s", success.Code, success.Body.String())
+	}
+	var issued struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(success.Body).Decode(&issued); err != nil {
+		t.Fatal(err)
+	}
+	replay := exchange(verifier)
+	if replay.Code != http.StatusBadRequest {
+		t.Fatalf("授权码重放状态码 %d: %s", replay.Code, replay.Body.String())
+	}
+	if _, _, err := st.FindTokenForResource(ctx, store.TokenHash(issued.AccessToken), resource); err == nil {
+		t.Fatal("授权码重放后关联 access token 仍有效")
+	}
+	refreshForm := url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {clientID},
+		"refresh_token": {issued.RefreshToken},
+		"resource":      {resource},
+	}
+	refreshRequest := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(refreshForm.Encode()))
+	refreshRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	refreshResponse := httptest.NewRecorder()
+	server.Token(refreshResponse, refreshRequest)
+	if refreshResponse.Code != http.StatusBadRequest {
+		t.Fatalf("授权码重放后关联 refresh token 仍有效: %d %s", refreshResponse.Code, refreshResponse.Body.String())
+	}
+}
+
 func TestOAuthMetadataAdvertisesMCPDiscovery(t *testing.T) {
 	server, _ := newTestServer(t)
 	asResponse := httptest.NewRecorder()

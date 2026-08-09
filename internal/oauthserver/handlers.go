@@ -2,7 +2,6 @@ package oauthserver
 
 import (
 	"crypto/sha256"
-	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -273,31 +272,48 @@ func (s *Server) exchangeAuthorizationCode(w http.ResponseWriter, r *http.Reques
 		oauthTokenError(w, "invalid_grant", "授权码或 PKCE verifier 无效")
 		return
 	}
-	code, err := s.Store.ConsumeOAuthAuthorizationCode(r.Context(), store.TokenHash(plainCode))
-	if err != nil {
-		oauthTokenError(w, "invalid_grant", "授权码无效、已使用或已过期")
-		return
-	}
 	verifierHash := sha256.Sum256([]byte(verifier))
 	expectedChallenge := base64.RawURLEncoding.EncodeToString(verifierHash[:])
-	resource, normalizeErr := normalizeResource(r.PostForm.Get("resource"))
-	valid := subtle.ConstantTimeCompare([]byte(expectedChallenge), []byte(code.CodeChallenge)) == 1 &&
-		code.ClientID == r.PostForm.Get("client_id") &&
-		code.RedirectURI == r.PostForm.Get("redirect_uri") &&
-		normalizeErr == nil && code.Resource == resource &&
-		s.now().Unix() < code.ExpiresAt
-	if !valid {
+	resource, err := normalizeResource(r.PostForm.Get("resource"))
+	if err != nil {
 		oauthTokenError(w, "invalid_grant", "授权码校验失败")
 		return
 	}
-	s.issueTokens(w, r, tokenGrant{
-		ClientID:    code.ClientID,
-		Resource:    code.Resource,
-		Scope:       code.Scope,
-		AllHosts:    code.AllHosts,
-		ManageHosts: code.ManageHosts,
-		HostIDs:     code.HostIDs,
+	plainToken, err := randomValue("osh_oauth_", 32)
+	if err != nil {
+		oauthTokenError(w, "server_error", "无法生成访问令牌")
+		return
+	}
+	plainRefreshToken, err := randomValue("osh_refresh_", 48)
+	if err != nil {
+		oauthTokenError(w, "server_error", "无法生成刷新令牌")
+		return
+	}
+	grantID, err := randomValue("osg_", 24)
+	if err != nil {
+		oauthTokenError(w, "server_error", "无法生成授权标识")
+		return
+	}
+	now := s.now()
+	code, err := s.Store.ExchangeOAuthAuthorizationCode(r.Context(), store.OAuthAuthorizationCodeExchange{
+		CodeHash:         store.TokenHash(plainCode),
+		ClientID:         r.PostForm.Get("client_id"),
+		RedirectURI:      r.PostForm.Get("redirect_uri"),
+		Resource:         resource,
+		CodeChallenge:    expectedChallenge,
+		GrantID:          grantID,
+		AccessTokenName:  fmt.Sprintf("OAuth · %s · %s", r.PostForm.Get("client_id"), plainToken[len(plainToken)-8:]),
+		AccessTokenHash:  store.TokenHash(plainToken),
+		RefreshTokenHash: store.TokenHash(plainRefreshToken),
+		Now:              now.Unix(),
+		AccessExpiresAt:  now.Add(tokenLifetime).Unix(),
+		RefreshExpiresAt: now.Add(refreshLifetime).Unix(),
 	})
+	if err != nil {
+		oauthTokenError(w, "invalid_grant", "授权码无效、已使用、被撤销或已过期")
+		return
+	}
+	writeTokenResponse(w, plainToken, plainRefreshToken, code.Scope)
 }
 
 func (s *Server) refreshAccessToken(w http.ResponseWriter, r *http.Request) {
@@ -374,6 +390,10 @@ func (s *Server) issueTokens(w http.ResponseWriter, r *http.Request, grant token
 		oauthTokenError(w, "server_error", "无法保存刷新令牌")
 		return
 	}
+	writeTokenResponse(w, plainToken, plainRefreshToken, grant.Scope)
+}
+
+func writeTokenResponse(w http.ResponseWriter, plainToken, plainRefreshToken, scope string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
@@ -382,7 +402,7 @@ func (s *Server) issueTokens(w http.ResponseWriter, r *http.Request, grant token
 		"refresh_token": plainRefreshToken,
 		"token_type":    "Bearer",
 		"expires_in":    int64(tokenLifetime.Seconds()),
-		"scope":         grant.Scope,
+		"scope":         scope,
 	})
 }
 
