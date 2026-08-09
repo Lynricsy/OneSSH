@@ -286,10 +286,11 @@ export function MetricsPage() {
             <CardHeader className="flex-wrap">
               <CardTitle>
                 系统负载与磁盘占用
-                {/* 只画首个挂载点，标题里点名是哪个盘，否则「磁盘」是句无从核对的话 */}
+                {/* 只画首个挂载点，标题里点名是哪个盘，否则「磁盘」是句无从核对的话。
+                    带上「挂载点」前缀：根分区的 mount 就是一个 "/"，裸挂在标题后像打错的斜杠 */}
                 {diskMount && (
-                  <span className="ml-2 font-mono text-[11px] font-normal text-muted">
-                    {diskMount}
+                  <span className="ml-2 text-[11px] font-normal text-muted">
+                    挂载点 <span className="font-mono">{diskMount}</span>
                   </span>
                 )}
               </CardTitle>
