@@ -25,7 +25,7 @@ export function AppShell() {
   if (hosts.isLoading) {
     return (
       <div className="flex h-dvh flex-col items-center justify-center gap-4 bg-bg">
-        <LogoTile className="size-11 rounded-[12px]" />
+        <LogoTile className="size-11" />
         <Spinner className="size-5 text-accent" />
       </div>
     )

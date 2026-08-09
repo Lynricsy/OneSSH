@@ -56,7 +56,7 @@ export function LoginPage() {
         transition={{ duration: 0.28, ease: 'easeOut' }}
         className="relative w-full max-w-[380px] rounded-[12px] border border-border bg-surface p-7 shadow-card sm:p-8"
       >
-        <LogoTile className="size-10 rounded-[10px]" />
+        <LogoTile className="size-10" />
         <h1 className="mt-5 text-[22px] leading-none font-semibold tracking-tight text-text">OneSSH</h1>
         <p className="mt-2 text-[13px] text-muted">集中式 SSH 网关控制台</p>
 
