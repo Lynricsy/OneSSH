@@ -31,9 +31,11 @@
 export ONESSH_MASTER_KEY="$(openssl rand -hex 32)"
 export ONESSH_ADMIN_PASSWORD='replace-with-a-strong-password'
 
-docker compose up -d --build
+docker compose up -d
 curl --fail http://localhost:8866/healthz
 ```
+
+默认的 `docker-compose.yml` 会直接拉取 `ghcr.io/lynricsy/onessh:latest`，无需在部署机器上构建镜像。
 
 打开 <http://localhost:8866/>，然后：
 
@@ -288,7 +290,14 @@ ONESSH_URL=http://localhost:8866/mcp \
 - **frontend** — 锁定依赖安装、TypeScript 检查、生产构建
 - **e2e** — Docker Compose 三主机端到端（含无 `rg` / `fd` 的降级路径）
 
-只有 `main` 分支或 `v*` 标签的 push 在全部检查通过后才发布镜像。工作流使用仓库自带的 `GITHUB_TOKEN` 写入 GHCR 并生成来源证明，不需要额外配置 PAT。
+只有 `main` 分支或 `v*` 标签的 push 在全部检查通过后才发布镜像。工作流使用仓库自带的 `GITHUB_TOKEN` 写入 GHCR 并生成来源证明，不需要额外配置 PAT。默认的 `docker-compose.yml` 使用 `latest` 标签；更新部署时先拉取新镜像再重建容器：
+
+```sh
+docker compose pull
+docker compose up -d
+```
+
+也可以直接拉取镜像：
 
 ```sh
 docker pull ghcr.io/lynricsy/onessh:latest

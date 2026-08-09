@@ -1,5 +1,7 @@
 services:
   onessh:
+    build: .
+    image: onessh-e2e-local
     depends_on:
       ssh1:
         condition: service_started
