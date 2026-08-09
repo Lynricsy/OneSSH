@@ -64,7 +64,7 @@ curl --fail http://localhost:8866/healthz
 1. 使用 `ONESSH_ADMIN_PASSWORD` 登录。
 2. 在“密钥”页面生成 ed25519 密钥或导入 OpenSSH 私钥；也可直接使用主机密码。
 3. 在“主机”页面添加目标并执行“测试”，首次连接会记录 TOFU 指纹。
-4. 在“令牌”页面创建 Agent 令牌，并选择全部主机或指定主机。
+4. 在“令牌”页面创建 Agent 令牌，选择全部主机或指定主机的执行范围；仅在需要时单独启用主机管理权限。
 5. 令牌明文只显示一次，立即复制到 Agent 的安全配置中。
 
 停止服务不会删除数据：
@@ -111,11 +111,14 @@ Authorization: Bearer osh_...
 
 具体字段名取决于 MCP 客户端。若客户端没有独立的 `headers` 配置，需要通过其 HTTP transport 注入 `Authorization`。
 
+令牌的 `all_hosts`/`host_ids` 只控制命令、文件、任务等远程执行工具可访问的主机。`manage_hosts` 是默认关闭的独立全局配置管理权限：启用后可维护全部 SSH 目标，但不会扩大执行范围，也不会把新建目标自动加入令牌授权。主机密码通过管理工具只写不读；所有管理调用及权限拒绝都会写入审计记录，密码参数固定脱敏。
+
 主要工具：
 
 | 类别 | 工具 |
 |---|---|
 | 主机与执行 | `hosts_list`、`exec`、`session_env`、`exec_many`、`output_read` |
+| 主机管理 | `hosts_manage_list`、`host_create`、`host_update`、`host_test`、`host_reset_fingerprint`、`host_delete` |
 | 后台任务 | `job_start`、`job_list`、`job_status`、`job_logs`、`job_kill` |
 | 文件 | `file_read`、`file_write`、`file_edit`、`file_list`、`file_transfer` |
 | 搜索 | `grep`（优先 ripgrep，缺失时 SFTP 降级）、`find`（优先 fd/fdfind，缺失时 SFTP 降级） |

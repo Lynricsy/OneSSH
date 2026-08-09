@@ -10,6 +10,7 @@ import (
 	"onessh/internal/config"
 	"onessh/internal/cryptox"
 	"onessh/internal/events"
+	"onessh/internal/hostmanager"
 	"onessh/internal/mcpserver"
 	"onessh/internal/sshpool"
 	"onessh/internal/store"
@@ -35,11 +36,12 @@ func main() {
 	}
 	pool := sshpool.New(st, box)
 	defer pool.Close()
+	hosts := hostmanager.New(st, box, pool)
 	bus := events.New()
-	mcpService := mcpserver.New(st, pool, bus, cfg.DataDir, cfg.PollInterval)
+	mcpService := mcpserver.New(st, pool, bus, hosts, cfg.DataDir, cfg.PollInterval)
 	defer mcpService.Close()
 	adminAuth := webapi.NewAdminAuth(cfg.AdminPassword, cfg.MasterKey)
-	adminAPI := webapi.NewAPI(st, box, pool, mcpService.Exec, mcpService.Files, mcpService.Jobs, mcpService.Monitor, bus)
+	adminAPI := webapi.NewAPI(st, box, pool, hosts, mcpService.Exec, mcpService.Files, mcpService.Jobs, mcpService.Monitor, bus)
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /api/v1/login", http.HandlerFunc(adminAuth.Login))

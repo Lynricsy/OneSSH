@@ -15,7 +15,7 @@ func TestBearerAttachesPrincipal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if _, err = st.CreateToken(context.Background(), "agent", store.TokenHash("secret"), true, nil); err != nil {
+	if _, err = st.CreateToken(context.Background(), store.TokenCreate{Name: "agent", Hash: store.TokenHash("secret"), AllHosts: true}); err != nil {
 		t.Fatal(err)
 	}
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -54,5 +54,25 @@ func TestAuthorizedHostDistinguishesUnknown(t *testing.T) {
 	}
 	if _, err = AuthorizedHost(ctx, "known"); err == nil || err.Error() != "host not authorized: known" {
 		t.Fatalf("越权主机错误: %v", err)
+	}
+}
+
+func TestAuthorizedHostManagementDoesNotExpandExecutionHosts(t *testing.T) {
+	if _, err := AuthorizedHostManagement(context.Background()); err == nil || err.Error() != "unauthorized" {
+		t.Fatalf("缺少身份错误: %v", err)
+	}
+	denied := context.WithValue(context.Background(), principalKey{}, Principal{Token: store.Token{ManageHosts: false}})
+	if _, err := AuthorizedHostManagement(denied); err == nil || err.Error() != "host management not authorized" {
+		t.Fatalf("缺少管理权限错误: %v", err)
+	}
+	ctx := context.WithValue(context.Background(), principalKey{}, Principal{
+		Token: store.Token{ManageHosts: true},
+		Hosts: map[string]store.Host{},
+	})
+	if _, err := AuthorizedHostManagement(ctx); err != nil {
+		t.Fatalf("管理权限被拒绝: %v", err)
+	}
+	if _, err := AuthorizedHost(ctx, "any"); err == nil || err.Error() != "host not authorized: any" {
+		t.Fatalf("管理权限扩张了执行授权: %v", err)
 	}
 }

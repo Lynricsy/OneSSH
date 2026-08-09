@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -22,6 +21,7 @@ import (
 	"onessh/internal/events"
 	"onessh/internal/execx"
 	"onessh/internal/files"
+	"onessh/internal/hostmanager"
 	"onessh/internal/jobs"
 	"onessh/internal/monitor"
 	"onessh/internal/sshpool"
@@ -32,6 +32,7 @@ type API struct {
 	Store   *store.Store
 	Box     *cryptox.Box
 	Pool    *sshpool.Pool
+	Hosts   *hostmanager.Manager
 	Exec    *execx.Runner
 	Files   *files.Manager
 	Jobs    *jobs.Manager
@@ -39,8 +40,8 @@ type API struct {
 	Events  *events.Bus
 }
 
-func NewAPI(st *store.Store, box *cryptox.Box, pool *sshpool.Pool, exec *execx.Runner, files *files.Manager, jobs *jobs.Manager, mon *monitor.Manager, bus *events.Bus) *API {
-	return &API{Store: st, Box: box, Pool: pool, Exec: exec, Files: files, Jobs: jobs, Monitor: mon, Events: bus}
+func NewAPI(st *store.Store, box *cryptox.Box, pool *sshpool.Pool, hosts *hostmanager.Manager, exec *execx.Runner, files *files.Manager, jobs *jobs.Manager, mon *monitor.Manager, bus *events.Bus) *API {
+	return &API{Store: st, Box: box, Pool: pool, Hosts: hosts, Exec: exec, Files: files, Jobs: jobs, Monitor: mon, Events: bus}
 }
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -78,17 +79,22 @@ func apiError(w http.ResponseWriter, status int, err error) {
 func parseID(r *http.Request, name string) (int64, error) {
 	return strconv.ParseInt(r.PathValue(name), 10, 64)
 }
-
-type hostInput struct {
-	Name           string  `json:"name"`
-	Addr           string  `json:"addr"`
-	Port           int     `json:"port"`
-	Username       string  `json:"username"`
-	AuthType       string  `json:"auth_type"`
-	KeyID          *int64  `json:"key_id"`
-	Password       *string `json:"password"`
-	MonitorEnabled *bool   `json:"monitor_enabled"`
+func hostErrorStatus(err error) int {
+	switch hostmanager.KindOf(err) {
+	case hostmanager.ErrorInvalid:
+		return http.StatusBadRequest
+	case hostmanager.ErrorNotFound:
+		return http.StatusNotFound
+	case hostmanager.ErrorConflict:
+		return http.StatusConflict
+	case hostmanager.ErrorConnection:
+		return http.StatusBadGateway
+	default:
+		return http.StatusInternalServerError
+	}
 }
+
+type hostInput = hostmanager.Input
 
 func (a *API) hosts(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
@@ -109,14 +115,9 @@ func (a *API) hosts(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, err)
 		return
 	}
-	h, err := a.hostFromInput(r.Context(), store.Host{}, in, false)
+	h, err := a.Hosts.Create(r.Context(), in)
 	if err != nil {
-		apiError(w, 400, err)
-		return
-	}
-	h, err = a.Store.CreateHost(r.Context(), h)
-	if err != nil {
-		apiError(w, 409, err)
+		apiError(w, hostErrorStatus(err), err)
 		return
 	}
 	jsonOut(w, 201, h.View())
@@ -127,15 +128,9 @@ func (a *API) host(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, err)
 		return
 	}
-	old, err := a.Store.GetHost(r.Context(), id)
-	if err != nil {
-		apiError(w, 404, err)
-		return
-	}
 	if r.Method == http.MethodDelete {
-		a.Pool.Invalidate(old.Name)
-		if err = a.Store.DeleteHost(r.Context(), id); err != nil {
-			apiError(w, 409, err)
+		if err = a.Hosts.Delete(r.Context(), id); err != nil {
+			apiError(w, hostErrorStatus(err), err)
 			return
 		}
 		w.WriteHeader(204)
@@ -146,65 +141,12 @@ func (a *API) host(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, err)
 		return
 	}
-	h, err := a.hostFromInput(r.Context(), old, in, true)
+	h, err := a.Hosts.Update(r.Context(), id, in)
 	if err != nil {
-		apiError(w, 400, err)
+		apiError(w, hostErrorStatus(err), err)
 		return
-	}
-	if err = a.Store.UpdateHost(r.Context(), h); err != nil {
-		apiError(w, 409, err)
-		return
-	}
-	a.Pool.Invalidate(old.Name)
-	if h.Name != old.Name {
-		a.Pool.Invalidate(h.Name)
 	}
 	jsonOut(w, 200, h.View())
-}
-func (a *API) hostFromInput(ctx context.Context, old store.Host, in hostInput, updating bool) (store.Host, error) {
-	h := old
-	h.Name = strings.TrimSpace(in.Name)
-	h.Addr = strings.TrimSpace(in.Addr)
-	h.Port = in.Port
-	if h.Port == 0 {
-		h.Port = 22
-	}
-	h.Username = strings.TrimSpace(in.Username)
-	h.AuthType = in.AuthType
-	if in.MonitorEnabled != nil {
-		h.MonitorEnabled = *in.MonitorEnabled
-	} else if !updating {
-		h.MonitorEnabled = true
-	}
-	if h.Name == "" || h.Addr == "" || h.Username == "" {
-		return h, fmt.Errorf("name、addr、username 不能为空")
-	}
-	switch h.AuthType {
-	case "key":
-		if in.KeyID == nil {
-			return h, fmt.Errorf("key 认证必须提供 key_id")
-		}
-		if _, err := a.Store.GetKey(ctx, *in.KeyID); err != nil {
-			return h, fmt.Errorf("key_id 不存在")
-		}
-		h.KeyID = sql.NullInt64{Int64: *in.KeyID, Valid: true}
-		h.PasswordEnc = nil
-	case "password":
-		h.KeyID = sql.NullInt64{}
-		if in.Password != nil && *in.Password != "" {
-			enc, err := a.Box.Seal([]byte(*in.Password))
-			if err != nil {
-				return h, err
-			}
-			h.PasswordEnc = enc
-		}
-		if len(h.PasswordEnc) == 0 {
-			return h, fmt.Errorf("password 认证必须提供 password")
-		}
-	default:
-		return h, fmt.Errorf("auth_type 必须是 key 或 password")
-	}
-	return h, nil
 }
 func (a *API) hostTest(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r, "id")
@@ -212,23 +154,12 @@ func (a *API) hostTest(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, err)
 		return
 	}
-	h, err := a.Store.GetHost(r.Context(), id)
+	result, err := a.Hosts.Test(r.Context(), id, a.Exec)
 	if err != nil {
-		apiError(w, 404, err)
+		apiError(w, hostErrorStatus(err), err)
 		return
 	}
-	a.Pool.Invalidate(h.Name)
-	client, err := a.Pool.Get(r.Context(), h.Name)
-	if err != nil {
-		apiError(w, 502, err)
-		return
-	}
-	res, err := a.Exec.Run(r.Context(), client, "uptime", "~", nil, execx.Options{Timeout: 15 * time.Second, MaxLines: 20})
-	if err != nil {
-		apiError(w, 502, err)
-		return
-	}
-	jsonOut(w, 200, res)
+	jsonOut(w, 200, result)
 }
 func (a *API) resetFingerprint(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r, "id")
@@ -236,16 +167,10 @@ func (a *API) resetFingerprint(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, err)
 		return
 	}
-	h, err := a.Store.GetHost(r.Context(), id)
-	if err != nil {
-		apiError(w, 404, err)
+	if err = a.Hosts.ResetFingerprint(r.Context(), id); err != nil {
+		apiError(w, hostErrorStatus(err), err)
 		return
 	}
-	if err = a.Store.UpdateHostFingerprint(r.Context(), id, nil); err != nil {
-		apiError(w, 500, err)
-		return
-	}
-	a.Pool.Invalidate(h.Name)
 	jsonOut(w, 200, map[string]bool{"ok": true})
 }
 
@@ -332,9 +257,10 @@ func (a *API) key(w http.ResponseWriter, r *http.Request) {
 }
 
 type tokenInput struct {
-	Name     string  `json:"name"`
-	AllHosts bool    `json:"all_hosts"`
-	HostIDs  []int64 `json:"host_ids"`
+	Name        string  `json:"name"`
+	AllHosts    bool    `json:"all_hosts"`
+	ManageHosts bool    `json:"manage_hosts"`
+	HostIDs     []int64 `json:"host_ids"`
 }
 type tokenView struct {
 	store.Token
@@ -368,7 +294,7 @@ func (a *API) tokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	plain := "osh_" + base64.RawURLEncoding.EncodeToString(raw)
-	t, err := a.Store.CreateToken(r.Context(), in.Name, store.TokenHash(plain), in.AllHosts, in.HostIDs)
+	t, err := a.Store.CreateToken(r.Context(), store.TokenCreate{Name: in.Name, Hash: store.TokenHash(plain), AllHosts: in.AllHosts, ManageHosts: in.ManageHosts, HostIDs: in.HostIDs})
 	if err != nil {
 		apiError(w, 409, err)
 		return

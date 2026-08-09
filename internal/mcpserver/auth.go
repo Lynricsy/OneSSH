@@ -57,6 +57,17 @@ func AuthorizedHost(ctx context.Context, name string) (store.Host, error) {
 	return store.Host{}, toolError("host not authorized: " + name)
 }
 
+func AuthorizedHostManagement(ctx context.Context) (Principal, error) {
+	p, ok := FromContext(ctx)
+	if !ok {
+		return Principal{}, toolError("unauthorized")
+	}
+	if !p.Token.ManageHosts {
+		return Principal{}, toolError("host management not authorized")
+	}
+	return p, nil
+}
+
 type toolError string
 
 func (e toolError) Error() string { return string(e) }

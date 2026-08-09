@@ -1,19 +1,19 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"net"
 	"reflect"
-	"strconv"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"onessh/internal/events"
 	"onessh/internal/execx"
 	"onessh/internal/files"
+	"onessh/internal/hostmanager"
 	"onessh/internal/jobs"
 	"onessh/internal/monitor"
 	"onessh/internal/searchx"
@@ -22,23 +22,24 @@ import (
 )
 
 type Server struct {
-	MCP     *mcp.Server
-	Store   *store.Store
-	Pool    *sshpool.Pool
-	Events  *events.Bus
-	Exec    *execx.Runner
-	Files   *files.Manager
-	Jobs    *jobs.Manager
-	Monitor *monitor.Manager
+	MCP         *mcp.Server
+	Store       *store.Store
+	Pool        *sshpool.Pool
+	Events      *events.Bus
+	HostManager *hostmanager.Manager
+	Exec        *execx.Runner
+	Files       *files.Manager
+	Jobs        *jobs.Manager
+	Monitor     *monitor.Manager
 }
 
-func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, dataDir string, pollInterval time.Duration) *Server {
-	s := &Server{Store: st, Pool: pool, Events: bus, Exec: execx.New(dataDir)}
+func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanager.Manager, dataDir string, pollInterval time.Duration) *Server {
+	s := &Server{Store: st, Pool: pool, Events: bus, HostManager: hosts, Exec: execx.New(dataDir)}
 	s.Jobs = jobs.New(st, pool, s.Exec, bus)
 	s.Files = files.New(pool, s.Exec)
 	s.Monitor = monitor.New(st, pool, s.Exec, pollInterval)
 	s.MCP = mcp.NewServer(&mcp.Implementation{Name: "OneSSH", Version: "dev"}, nil)
-	register[Empty, HostsOutput](s, &mcp.Tool{Name: "hosts_list", Description: "列出当前令牌可访问的 SSH 主机及连接状态"}, s.hostsList)
+	s.registerHosts()
 	s.registerExec(s.Exec)
 	s.registerJobs(s.Jobs)
 	s.registerFiles(s.Files)
@@ -55,27 +56,7 @@ func (s *Server) Close() {
 }
 
 type Empty struct{}
-type HostItem struct {
-	Name     string `json:"name"`
-	Addr     string `json:"addr"`
-	Username string `json:"username"`
-	Online   bool   `json:"online"`
-}
-type HostsOutput struct {
-	Hosts []HostItem `json:"hosts"`
-}
 
-func (s *Server) hostsList(ctx context.Context, _ *mcp.CallToolRequest, _ Empty) (*mcp.CallToolResult, HostsOutput, error) {
-	p, ok := FromContext(ctx)
-	if !ok {
-		return errorResult("unauthorized"), HostsOutput{}, nil
-	}
-	out := HostsOutput{Hosts: make([]HostItem, 0, len(p.Hosts))}
-	for _, h := range p.Hosts {
-		out.Hosts = append(out.Hosts, HostItem{Name: h.Name, Addr: net.JoinHostPort(h.Addr, strconv.Itoa(h.Port)), Username: h.Username, Online: s.Pool.IsOnline(h.Name)})
-	}
-	return nil, out, nil
-}
 func errorResult(message string) *mcp.CallToolResult {
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: message}}, IsError: true}
 }
@@ -107,17 +88,23 @@ func redactedJSON(v any) string {
 	b, _ := json.Marshal(v)
 	_ = json.Unmarshal(b, &raw)
 	redact(raw)
-	out, _ := json.Marshal(raw)
-	return string(out)
+	var out bytes.Buffer
+	encoder := json.NewEncoder(&out)
+	encoder.SetEscapeHTML(false)
+	_ = encoder.Encode(raw)
+	return string(bytes.TrimSuffix(out.Bytes(), []byte("\n")))
 }
 func redact(v any) {
 	switch x := v.(type) {
 	case map[string]any:
 		for k, val := range x {
-			if k == "content" || k == "edits" {
+			switch k {
+			case "password":
+				x[k] = "<redacted>"
+			case "content", "edits":
 				b, _ := json.Marshal(val)
 				x[k] = fmt.Sprintf("<len=%d>", len(b))
-			} else {
+			default:
 				redact(val)
 			}
 		}
@@ -130,9 +117,11 @@ func redact(v any) {
 func hostOf(v any) string {
 	rv := reflect.Indirect(reflect.ValueOf(v))
 	if rv.IsValid() && rv.Kind() == reflect.Struct {
-		f := rv.FieldByName("Host")
-		if f.IsValid() && f.Kind() == reflect.String {
-			return f.String()
+		for _, name := range []string{"Host", "Name"} {
+			f := rv.FieldByName(name)
+			if f.IsValid() && f.Kind() == reflect.String && f.String() != "" {
+				return f.String()
+			}
 		}
 	}
 	return ""

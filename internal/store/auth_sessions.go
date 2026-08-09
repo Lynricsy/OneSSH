@@ -13,19 +13,28 @@ func TokenHash(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
-func (s *Store) CreateToken(ctx context.Context, name, hash string, all bool, hostIDs []int64) (Token, error) {
+
+type TokenCreate struct {
+	Name        string
+	Hash        string
+	AllHosts    bool
+	ManageHosts bool
+	HostIDs     []int64
+}
+
+func (s *Store) CreateToken(ctx context.Context, in TokenCreate) (Token, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return Token{}, err
 	}
 	defer tx.Rollback()
 	now := time.Now().Unix()
-	res, err := tx.ExecContext(ctx, `INSERT INTO tokens(name,token_hash,all_hosts,created_at) VALUES(?,?,?,?)`, name, hash, boolInt(all), now)
+	res, err := tx.ExecContext(ctx, `INSERT INTO tokens(name,token_hash,all_hosts,manage_hosts,created_at) VALUES(?,?,?,?,?)`, in.Name, in.Hash, boolInt(in.AllHosts), boolInt(in.ManageHosts), now)
 	if err != nil {
 		return Token{}, err
 	}
 	id, _ := res.LastInsertId()
-	for _, hid := range hostIDs {
+	for _, hid := range in.HostIDs {
 		if _, err = tx.ExecContext(ctx, `INSERT INTO token_hosts(token_id,host_id) VALUES(?,?)`, id, hid); err != nil {
 			return Token{}, err
 		}
@@ -33,16 +42,17 @@ func (s *Store) CreateToken(ctx context.Context, name, hash string, all bool, ho
 	if err = tx.Commit(); err != nil {
 		return Token{}, err
 	}
-	return Token{ID: id, Name: name, AllHosts: all, CreatedAt: now}, nil
+	return Token{ID: id, Name: in.Name, AllHosts: in.AllHosts, ManageHosts: in.ManageHosts, CreatedAt: now}, nil
 }
 func (s *Store) FindToken(ctx context.Context, hash string) (Token, []Host, error) {
 	var t Token
-	var all int
-	err := s.DB.QueryRowContext(ctx, `SELECT id,name,all_hosts,created_at,last_used_at FROM tokens WHERE token_hash=?`, hash).Scan(&t.ID, &t.Name, &all, &t.CreatedAt, &t.LastUsedAt)
+	var all, manage int
+	err := s.DB.QueryRowContext(ctx, `SELECT id,name,all_hosts,manage_hosts,created_at,last_used_at FROM tokens WHERE token_hash=?`, hash).Scan(&t.ID, &t.Name, &all, &manage, &t.CreatedAt, &t.LastUsedAt)
 	if err != nil {
 		return t, nil, err
 	}
 	t.AllHosts = all != 0
+	t.ManageHosts = manage != 0
 	_, _ = s.DB.ExecContext(ctx, `UPDATE tokens SET last_used_at=? WHERE id=?`, time.Now().Unix(), t.ID)
 	q := `SELECT h.id,h.name,h.addr,h.port,h.username,h.auth_type,h.key_id,h.password_enc,h.hostkey_fp,h.monitor_enabled,h.created_at FROM hosts h`
 	args := []any{}
@@ -67,7 +77,7 @@ func (s *Store) FindToken(ctx context.Context, hash string) (Token, []Host, erro
 	return t, hosts, rows.Err()
 }
 func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,all_hosts,created_at,last_used_at FROM tokens ORDER BY name`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,all_hosts,manage_hosts,created_at,last_used_at FROM tokens ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -75,11 +85,12 @@ func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
 	out := make([]Token, 0)
 	for rows.Next() {
 		var t Token
-		var a int
-		if err := rows.Scan(&t.ID, &t.Name, &a, &t.CreatedAt, &t.LastUsedAt); err != nil {
+		var all, manage int
+		if err := rows.Scan(&t.ID, &t.Name, &all, &manage, &t.CreatedAt, &t.LastUsedAt); err != nil {
 			return nil, err
 		}
-		t.AllHosts = a != 0
+		t.AllHosts = all != 0
+		t.ManageHosts = manage != 0
 		out = append(out, t)
 	}
 	return out, rows.Err()

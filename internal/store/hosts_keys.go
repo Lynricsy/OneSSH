@@ -3,9 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
+
+var ErrHostHasRunningJobs = errors.New("主机存在运行中的后台任务")
 
 func (s *Store) CreateKey(ctx context.Context, name string, enc []byte, public string) (Key, error) {
 	now := time.Now().Unix()
@@ -71,8 +74,40 @@ func (s *Store) UpdateHost(ctx context.Context, h Host) error {
 	return err
 }
 func (s *Store) DeleteHost(ctx context.Context, id int64) error {
-	_, err := s.DB.ExecContext(ctx, `DELETE FROM hosts WHERE id=?`, id)
-	return err
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var running int
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM jobs WHERE host_id=? AND status='running'`, id).Scan(&running); err != nil {
+		return err
+	}
+	if running != 0 {
+		return ErrHostHasRunningJobs
+	}
+	for _, query := range []string{
+		`DELETE FROM token_hosts WHERE host_id=?`,
+		`DELETE FROM sessions WHERE host_id=?`,
+		`DELETE FROM jobs WHERE host_id=?`,
+		`DELETE FROM metrics WHERE host_id=?`,
+	} {
+		if _, err = tx.ExecContext(ctx, query, id); err != nil {
+			return err
+		}
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM hosts WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return tx.Commit()
 }
 func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,monitor_enabled,created_at FROM hosts ORDER BY name`)

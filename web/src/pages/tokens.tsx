@@ -25,12 +25,14 @@ import { formatTime } from '@/lib/format'
 type TokenFormValues = {
   name: string
   all_hosts: boolean
+  manage_hosts: boolean
   host_ids: number[]
 }
 
 const defaultValues: TokenFormValues = {
   name: '',
   all_hosts: true,
+  manage_hosts: false,
   host_ids: [],
 }
 
@@ -60,18 +62,24 @@ function copyByExecCommand(text: string) {
  * 用文本枚举——十几台主机时比一串 badge 更易读，也不会跟状态色抢注意力。
  */
 function TokenPermissions({ token, hosts }: { token: Token; hosts: Host[] | undefined }) {
-  if (token.all_hosts) return <Badge variant="accent">全部主机</Badge>
-
   const names = (token.host_ids ?? []).map(
     (id) => hosts?.find((host) => host.id === id)?.name ?? `#${id}`,
   )
-  if (names.length === 0) return <span className="text-[13px] text-muted">无授权主机</span>
-
-  const text = names.join('、')
-  return (
-    <span className="line-clamp-2 text-[13px] text-muted" title={text}>
-      {text}
+  const scope = token.all_hosts ? (
+    <Badge variant="accent">全部主机</Badge>
+  ) : names.length === 0 ? (
+    <span className="text-[13px] text-muted">无授权主机</span>
+  ) : (
+    <span className="line-clamp-2 text-[13px] text-muted" title={names.join('、')}>
+      {names.join('、')}
     </span>
+  )
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {scope}
+      {token.manage_hosts && <Badge variant="warning">管理主机</Badge>}
+    </div>
   )
 }
 
@@ -95,6 +103,7 @@ export function TokensPage() {
     formState: { errors },
   } = useForm<TokenFormValues>({ defaultValues })
   const allHosts = watch('all_hosts')
+  const manageHosts = watch('manage_hosts')
 
   const openCreate = () => {
     reset(defaultValues)
@@ -110,6 +119,7 @@ export function TokensPage() {
     const payload: TokenPayload = {
       name: values.name,
       all_hosts: values.all_hosts,
+      manage_hosts: values.manage_hosts,
       host_ids: values.all_hosts ? undefined : values.host_ids,
     }
     const created = await createToken.mutateAsync(payload)
@@ -321,6 +331,26 @@ export function TokensPage() {
             />
           </div>
 
+          <div className="flex items-center justify-between gap-4 rounded-[8px] border border-border bg-surface-2 px-3 py-2.5">
+            <div className="min-w-0">
+              <Label htmlFor="token-manage-hosts">允许管理主机</Label>
+              <p className="mt-0.5 text-[12px] text-muted">
+                可新增、编辑、测试和删除全部 SSH 主机；不会扩大命令执行范围
+              </p>
+            </div>
+            <Controller
+              name="manage_hosts"
+              control={control}
+              render={({ field }) => (
+                <Switch
+                  id="token-manage-hosts"
+                  checked={field.value}
+                  onCheckedChange={field.onChange}
+                />
+              )}
+            />
+          </div>
+
           {/* 主机选择器是条件字段，直接挂载会让弹层高度硬跳 86px；连 margin 一起动画消掉跳动 */}
           <AnimatePresence initial={false}>
             {!allHosts && (
@@ -332,13 +362,13 @@ export function TokensPage() {
                 exit={reduce ? {} : { height: 0, opacity: 0, marginTop: 0 }}
                 transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
               >
-                <Field label="允许主机" required error={errors.host_ids?.message}>
+                <Field label="允许主机" required={!manageHosts} error={errors.host_ids?.message}>
                   {(id) => (
                     <Controller
                       name="host_ids"
                       control={control}
                       rules={{
-                        validate: (value) => value.length > 0 || '请至少选择一台主机',
+                        validate: (value) => manageHosts || value.length > 0 || '请至少选择一台主机',
                       }}
                       render={({ field }) => (
                         <MultiSelect

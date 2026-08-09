@@ -29,8 +29,12 @@ func (t authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 type hostView struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
+	ID        int64   `json:"id"`
+	Name      string  `json:"name"`
+	HostKeyFP *string `json:"hostkey_fp"`
+}
+type managedHosts struct {
+	Hosts []hostView `json:"hosts"`
 }
 type tokenView struct {
 	Token string `json:"token"`
@@ -206,10 +210,104 @@ func TestEndToEnd(t *testing.T) {
 	}
 	tokenA := request[tokenView](t, admin, http.MethodPost, base+"/api/v1/tokens", map[string]any{"name": "all", "all_hosts": true})
 	tokenB := request[tokenView](t, admin, http.MethodPost, base+"/api/v1/tokens", map[string]any{"name": "ssh1-only", "all_hosts": false, "host_ids": []int64{ssh1.ID}})
+	managerToken := request[tokenView](t, admin, http.MethodPost, base+"/api/v1/tokens", map[string]any{"name": "host-manager", "all_hosts": false, "manage_hosts": true, "host_ids": []int64{ssh1.ID}})
 	a := connect(t, url, tokenA.Token)
 	defer a.Close()
 	b := connect(t, url, tokenB.Token)
 	defer b.Close()
+	manager := connect(t, url, managerToken.Token)
+	defer manager.Close()
+	t.Run("host management lifecycle and authorization isolation", func(t *testing.T) {
+		deniedList := call(t, b, "hosts_manage_list", map[string]any{})
+		if !deniedList.IsError || !strings.Contains(toolText(deniedList), "host management not authorized") {
+			t.Fatalf("普通令牌未拒绝管理列表: %s", toolText(deniedList))
+		}
+		deniedCreate := call(t, b, "host_create", map[string]any{
+			"name": "denied", "addr": "ssh1", "port": 2222, "username": "test", "auth_type": "password", "password": "pass",
+		})
+		if !deniedCreate.IsError || !strings.Contains(toolText(deniedCreate), "host management not authorized") {
+			t.Fatalf("普通令牌未拒绝创建主机: %s", toolText(deniedCreate))
+		}
+
+		listed := decoded[managedHosts](t, call(t, manager, "hosts_manage_list", map[string]any{}))
+		names := make(map[string]bool, len(listed.Hosts))
+		for _, host := range listed.Hosts {
+			names[host.Name] = true
+		}
+		if !names["ssh1"] || !names["ssh2"] {
+			t.Fatalf("管理列表未覆盖全局主机: %#v", names)
+		}
+
+		created := decoded[hostView](t, call(t, manager, "host_create", map[string]any{
+			"name": "managed-host", "addr": "ssh1", "port": 2222, "username": "test", "auth_type": "password", "password": "pass", "monitor_enabled": false,
+		}))
+		managerExec := call(t, manager, "exec", map[string]any{"host": created.Name, "command": "true"})
+		if !managerExec.IsError || !strings.Contains(toolText(managerExec), "host not authorized") {
+			t.Fatalf("管理权限扩张了新主机执行范围: %s", toolText(managerExec))
+		}
+		tested := decoded[execResult](t, call(t, manager, "host_test", map[string]any{"host": created.Name}))
+		if tested.ExitCode != 0 {
+			t.Fatalf("新主管理测试失败: %+v", tested)
+		}
+		hostsAfterTest := request[[]hostView](t, admin, http.MethodGet, base+"/api/v1/hosts", nil)
+		var fingerprinted bool
+		for _, host := range hostsAfterTest {
+			if host.Name == created.Name && host.HostKeyFP != nil && *host.HostKeyFP != "" {
+				fingerprinted = true
+			}
+		}
+		if !fingerprinted {
+			t.Fatal("主机测试未固定 TOFU 指纹")
+		}
+
+		updated := decoded[hostView](t, call(t, manager, "host_update", map[string]any{
+			"host": created.Name, "name": "managed-renamed", "addr": "ssh1", "port": 2222, "username": "test", "auth_type": "password",
+		}))
+		if updated.Name != "managed-renamed" {
+			t.Fatalf("主机改名失败: %+v", updated)
+		}
+		decoded[execResult](t, call(t, manager, "host_test", map[string]any{"host": updated.Name}))
+		if call(t, manager, "host_reset_fingerprint", map[string]any{"host": updated.Name}).IsError {
+			t.Fatal("重置指纹失败")
+		}
+		hostsAfterReset := request[[]hostView](t, admin, http.MethodGet, base+"/api/v1/hosts", nil)
+		for _, host := range hostsAfterReset {
+			if host.Name == updated.Name && host.HostKeyFP != nil {
+				t.Fatalf("重置后指纹仍存在: %q", *host.HostKeyFP)
+			}
+		}
+		decoded[execResult](t, call(t, manager, "host_test", map[string]any{"host": updated.Name}))
+
+		restrictedToken := request[tokenView](t, admin, http.MethodPost, base+"/api/v1/tokens", map[string]any{
+			"name": "managed-only", "all_hosts": false, "host_ids": []int64{updated.ID},
+		})
+		restricted := connect(t, url, restrictedToken.Token)
+		defer restricted.Close()
+		if call(t, manager, "host_delete", map[string]any{"host": updated.Name}).IsError {
+			t.Fatal("删除受管主机失败")
+		}
+		replacement := decoded[hostView](t, call(t, manager, "host_create", map[string]any{
+			"name": "replacement", "addr": "ssh2", "port": 2222, "username": "test", "auth_type": "password", "password": "pass", "monitor_enabled": false,
+		}))
+		if replacement.ID != updated.ID {
+			t.Fatalf("测试前提不成立，SQLite 未复用最大主机 ID: old=%d new=%d", updated.ID, replacement.ID)
+		}
+		for label, session := range map[string]*mcp.ClientSession{"旧受限令牌": restricted, "管理令牌": manager} {
+			result := call(t, session, "exec", map[string]any{"host": replacement.Name, "command": "true"})
+			if !result.IsError || !strings.Contains(toolText(result), "host not authorized") {
+				t.Fatalf("%s 越权执行替代主机: %s", label, toolText(result))
+			}
+		}
+		if call(t, manager, "host_delete", map[string]any{"host": replacement.Name}).IsError {
+			t.Fatal("删除替代主机失败")
+		}
+		finalList := decoded[managedHosts](t, call(t, manager, "hosts_manage_list", map[string]any{}))
+		for _, host := range finalList.Hosts {
+			if host.Name == updated.Name || host.Name == replacement.Name {
+				t.Fatalf("已删除主机仍在管理列表: %+v", host)
+			}
+		}
+	})
 	t.Run("session cwd", func(t *testing.T) {
 		first := decoded[execResult](t, call(t, a, "exec", map[string]any{"host": "ssh1", "command": "cd /tmp && pwd", "session": "cwd"}))
 		if first.ExitCode != 0 || !strings.Contains(first.Output, "/tmp") {
@@ -423,14 +521,55 @@ func TestEndToEnd(t *testing.T) {
 	if len(audit) == 0 {
 		t.Fatal("审计为空")
 	}
+	expectedManagement := map[string]bool{
+		"hosts_manage_list":      false,
+		"host_create":            false,
+		"host_update":            false,
+		"host_test":              false,
+		"host_reset_fingerprint": false,
+		"host_delete":            false,
+	}
+	deniedManagement := map[string]bool{"hosts_manage_list": false, "host_create": false}
+	fileEditSeen := false
+	hostCreateRedacted := false
 	for _, row := range audit {
-		if row["Tool"] == "file_edit" {
-			params, _ := row["ParamsJSON"].(string)
+		tool, _ := row["Tool"].(string)
+		ok, _ := row["OK"].(bool)
+		params, _ := row["ParamsJSON"].(string)
+		if tool == "file_edit" {
+			fileEditSeen = true
 			if strings.Contains(params, "old_text") || strings.Contains(params, "second") {
 				t.Fatalf("审计泄漏 edits 正文: %s", params)
 			}
-			return
+		}
+		if _, tracked := expectedManagement[tool]; tracked {
+			if strings.Contains(params, `"password":"pass"`) {
+				t.Fatalf("主机管理审计泄漏密码: %s", params)
+			}
+			if ok {
+				expectedManagement[tool] = true
+			} else if _, trackedDenied := deniedManagement[tool]; trackedDenied {
+				deniedManagement[tool] = true
+			}
+			if tool == "host_create" && strings.Contains(params, `"<redacted>"`) {
+				hostCreateRedacted = true
+			}
 		}
 	}
-	t.Fatal("审计缺少 file_edit")
+	if !fileEditSeen {
+		t.Fatal("审计缺少 file_edit")
+	}
+	for tool, seen := range expectedManagement {
+		if !seen {
+			t.Fatalf("审计缺少成功管理调用 %s", tool)
+		}
+	}
+	for tool, seen := range deniedManagement {
+		if !seen {
+			t.Fatalf("审计缺少失败管理调用 %s", tool)
+		}
+	}
+	if !hostCreateRedacted {
+		t.Fatal("host_create 审计未记录脱敏占位符")
+	}
 }

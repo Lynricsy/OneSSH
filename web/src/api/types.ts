@@ -24,6 +24,7 @@ export type Token = {
   id: number
   name: string
   all_hosts: boolean
+  manage_hosts: boolean
   host_ids?: number[]
   created_at: number
   /** 仅创建响应携带的一次性明文 */
@@ -100,5 +101,6 @@ export type KeyPayload = {
 export type TokenPayload = {
   name: string
   all_hosts: boolean
+  manage_hosts: boolean
   host_ids?: number[]
 }
