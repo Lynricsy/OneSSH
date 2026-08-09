@@ -74,8 +74,20 @@ export function useTerminal() {
       terminal.current?.dispose()
       mount.innerHTML = ''
 
-      // WASM canvas 若在字体加载前测量字宽会永久使用错误的单元格尺寸，因此先等待字体可用
-      await document.fonts.load('14px "JetBrainsMono Nerd Font Mono"').catch(() => {})
+      // Canvas 不会在字体晚到后自动重绘；常规与粗体都必须先就绪，否则 ANSI Bold 会用
+      // 非等宽 fallback 画进既定单元格，造成字符重叠。
+      try {
+        const loaded = await Promise.all([
+          document.fonts.load('400 14px "JetBrainsMono Nerd Font Mono"'),
+          document.fonts.load('700 14px "JetBrainsMono Nerd Font Mono"'),
+        ])
+        if (loaded.some((faces) => faces.length === 0)) throw new Error('font face missing')
+      } catch {
+        if (attempt.current !== token) return
+        toast.error('终端字体加载失败，请刷新页面后重试')
+        setStatus('error')
+        return
+      }
       if (attempt.current !== token) return
 
       const term = new GhosttyTerminal({
