@@ -34,9 +34,17 @@ func (a *AdminAuth) Login(w http.ResponseWriter, r *http.Request) {
 	mac := hmac.New(sha256.New, a.key)
 	mac.Write([]byte(msg))
 	value := msg + "." + hex.EncodeToString(mac.Sum(nil))
-	http.SetCookie(w, &http.Cookie{Name: "onessh_session", Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil, MaxAge: 86400})
+	http.SetCookie(w, &http.Cookie{Name: "onessh_session", Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: requestIsHTTPS(r), MaxAge: 86400})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+func requestIsHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	forwardedProto := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])
+	return strings.EqualFold(forwardedProto, "https")
 }
 func (a *AdminAuth) valid(r *http.Request) bool {
 	c, err := r.Cookie("onessh_session")
