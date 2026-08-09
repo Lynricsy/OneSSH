@@ -1,3 +1,5 @@
+<img src="web/public/logo.svg" alt="OneSSH" width="72" height="72" />
+
 # OneSSH
 
 OneSSH 是面向 AI Agent 的集中式 SSH 网关。它以单个 Go 二进制运行，通过 WebUI 管理 SSH 主机、密钥和 Agent 令牌，并在同一端口提供 Streamable HTTP MCP、管理 API、SSE 活动流和 WebSocket 终端。

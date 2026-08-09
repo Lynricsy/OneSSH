@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { useHosts } from '@/api/queries'
+import { LogoTile } from '@/components/brand/logo'
 import { Sheet } from '@/components/ui/sheet'
 import { Spinner } from '@/components/ui/spinner'
 import { Brand, NavList, Sidebar } from './sidebar'
@@ -24,9 +25,7 @@ export function AppShell() {
   if (hosts.isLoading) {
     return (
       <div className="flex h-dvh flex-col items-center justify-center gap-4 bg-bg">
-        <span className="flex size-11 items-center justify-center rounded-[12px] bg-gradient-to-br from-accent to-accent-hover text-sm font-bold text-accent-fg">
-          OS
-        </span>
+        <LogoTile className="size-11 rounded-[12px]" />
         <Spinner className="size-5 text-accent" />
       </div>
     )

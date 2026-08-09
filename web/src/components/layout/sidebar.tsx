@@ -1,15 +1,14 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { CaretLineLeft, CaretLineRight } from '@phosphor-icons/react'
 import { cn } from '@/lib/cn'
+import { LogoTile } from '@/components/brand/logo'
 import { Tooltip } from '@/components/ui/tooltip'
 import { navGroups } from './nav-items'
 
 export function Brand({ collapsed, className }: { collapsed?: boolean; className?: string }) {
   return (
     <div className={cn('flex items-center gap-2.5', collapsed ? 'justify-center' : 'px-3', className)}>
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-[8px] bg-gradient-to-br from-accent to-accent-hover text-[13px] font-bold text-accent-fg">
-        OS
-      </span>
+      <LogoTile className="size-8" />
       {!collapsed && <span className="text-[15px] font-semibold tracking-tight text-text">OneSSH</span>}
     </div>
   )

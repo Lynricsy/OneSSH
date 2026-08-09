@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { motion } from 'motion/react'
 import { WarningCircle } from '@phosphor-icons/react'
 import { post, type ApiError } from '@/api/client'
+import { LogoTile } from '@/components/brand/logo'
 import { Button } from '@/components/ui/button'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -26,8 +27,10 @@ export function LoginPage() {
       await post('/login', { password })
       // 换会话必须丢弃旧缓存，否则上一个身份的数据会闪现
       queryClient.clear()
+      // from 已带查询串（OAuth 授权链接全靠它）；只认站内相对路径，"//host" 会被浏览器当协议相对 URL 跳走
       const from = (location.state as { from?: string } | null)?.from
-      navigate(from ?? '/', { replace: true })
+      const back = from && from.startsWith('/') && !from.startsWith('//') ? from : '/'
+      navigate(back, { replace: true })
     } catch (e) {
       // 后端 401 只会回 "Unauthorized"，直接透出对中文界面既突兀也没信息量
       const err = e as ApiError
@@ -53,9 +56,7 @@ export function LoginPage() {
         transition={{ duration: 0.28, ease: 'easeOut' }}
         className="relative w-full max-w-[380px] rounded-[12px] border border-border bg-surface p-7 shadow-card sm:p-8"
       >
-        <span className="flex size-10 items-center justify-center rounded-[8px] bg-gradient-to-br from-accent to-accent-hover text-[13px] font-bold text-accent-fg">
-          OS
-        </span>
+        <LogoTile className="size-10 rounded-[10px]" />
         <h1 className="mt-5 text-[22px] leading-none font-semibold tracking-tight text-text">OneSSH</h1>
         <p className="mt-2 text-[13px] text-muted">集中式 SSH 网关控制台</p>
 
