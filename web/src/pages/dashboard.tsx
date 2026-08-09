@@ -9,7 +9,7 @@ import type { Host, Metric } from '@/api/types'
 import { Badge, Dot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { Code } from '@/components/ui/code'
+import { HostConnection } from '@/components/host-connection'
 import { EmptyState } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
 import { PageTransition } from '@/components/ui/page-transition'
@@ -42,9 +42,7 @@ function HostPulseCard({ host }: { host: Host }) {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-text">{host.name}</p>
-            <div className="mt-1 min-w-0">
-              <Code>{`${host.username}@${host.addr}:${host.port}`}</Code>
-            </div>
+            <HostConnection host={host} />
           </div>
           {metric ? (
             <Badge variant="accent">已采样</Badge>

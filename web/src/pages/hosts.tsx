@@ -11,6 +11,7 @@ import {
   useTestHost,
 } from '@/api/queries'
 import type { Host, HostPayload } from '@/api/types'
+import { HostConnection } from '@/components/host-connection'
 import { ConfirmDialog } from '@/components/ui/alert-dialog'
 import { Dot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -70,6 +71,7 @@ const MonitorCell = ({ host }: { host: Host }) => (
     {host.monitor_enabled ? '启用' : '关闭'}
   </span>
 )
+
 
 export function HostsPage() {
   const hosts = useHosts()
@@ -160,8 +162,7 @@ export function HostsPage() {
       render: (host) => (
         <div className="min-w-0">
           <div className="truncate leading-5 font-medium">{host.name}</div>
-          {/* 连接串按 `ssh user@addr -p port` 的心智拼成一行，比拆成两列更易核对 */}
-          <Code className="mt-0.5 max-w-full">{`${host.username}@${host.addr}:${host.port}`}</Code>
+          <HostConnection host={host} />
         </div>
       ),
     },
@@ -261,7 +262,7 @@ export function HostsPage() {
               <div className="flex min-w-0 items-start justify-between gap-2">
                 <div className="min-w-0 pt-0.5">
                   <div className="truncate leading-5 font-medium text-text">{host.name}</div>
-                  <Code className="mt-0.5 max-w-full">{`${host.username}@${host.addr}:${host.port}`}</Code>
+                  <HostConnection host={host} />
                 </div>
                 {hostMenu(host)}
               </div>

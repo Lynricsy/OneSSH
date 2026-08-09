@@ -2,6 +2,22 @@
 @import '@fontsource-variable/geist';
 @import '@fontsource-variable/jetbrains-mono';
 
+@font-face {
+  font-family: 'JetBrainsMono Nerd Font Mono';
+  src: url('../assets/fonts/JetBrainsMonoNerdFontMono-Regular.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrainsMono Nerd Font Mono';
+  src: url('../assets/fonts/JetBrainsMonoNerdFontMono-Bold.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ── 设计令牌：浅色为默认，.dark 覆盖 ───────────────────────────── */

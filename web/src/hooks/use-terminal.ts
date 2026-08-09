@@ -75,12 +75,12 @@ export function useTerminal() {
       mount.innerHTML = ''
 
       // WASM canvas 若在字体加载前测量字宽会永久使用错误的单元格尺寸，因此先等待字体可用
-      await document.fonts.load('14px "JetBrains Mono Variable"').catch(() => {})
+      await document.fonts.load('14px "JetBrainsMono Nerd Font Mono"').catch(() => {})
       if (attempt.current !== token) return
 
       const term = new GhosttyTerminal({
         cursorBlink: true,
-        fontFamily: 'JetBrains Mono Variable, ui-monospace, monospace',
+        fontFamily: '"JetBrainsMono Nerd Font Mono", "PingFang SC", monospace',
         fontSize: 14,
         theme: { background: '#0b0d10', foreground: '#d6e4ff' },
       })

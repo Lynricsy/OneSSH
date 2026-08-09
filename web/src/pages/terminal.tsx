@@ -35,10 +35,7 @@ export function TerminalPage() {
       <PageTransition>
         <div className="flex min-h-0 flex-1 flex-col gap-3 px-4 py-4 md:px-8">
           <div className="shrink-0 [&>div]:mb-0">
-            <PageHeader
-              title="交互终端"
-              subtitle="Ghostty WASM · xterm-256color WebSocket PTY"
-            />
+            <PageHeader title="交互终端" />
           </div>
 
           <Card className="flex shrink-0 flex-wrap items-center gap-2 p-2.5">
