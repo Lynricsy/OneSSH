@@ -6,7 +6,7 @@
 
 **面向 AI Agent 的集中式 SSH 网关**
 
-一个 Go 二进制，同时提供 Streamable HTTP MCP、OAuth 2.1 授权、管理 API、实时活动流和浏览器终端。
+一个 Go 二进制，同时提供无状态 Streamable HTTP MCP、OAuth 2.1 授权、管理 API、实时活动流和浏览器终端。
 
 [![CI](https://github.com/Lynricsy/OneSSH/actions/workflows/ci.yml/badge.svg)](https://github.com/Lynricsy/OneSSH/actions/workflows/ci.yml) [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod) [![MCP](https://img.shields.io/badge/MCP-Streamable%20HTTP-0d9488)](#mcp-接入) [![GHCR](https://img.shields.io/badge/ghcr.io-lynricsy%2Fonessh-2dd4bf?logo=docker&logoColor=white)](https://github.com/Lynricsy/OneSSH/pkgs/container/onessh)
 
@@ -77,7 +77,7 @@ flowchart LR
         H2["SSH 主机 B"]
     end
 
-    Agent -->|"MCP over HTTP<br/>OAuth 2.1 / Bearer"| Gateway
+    Agent -->|"无状态 Streamable HTTP<br/>OAuth 2.1 / Bearer"| Gateway
     Browser -->|"REST · SSE · WebSocket"| Gateway
     Gateway --> DB
     Gateway --> Art
@@ -114,6 +114,8 @@ flowchart LR
 ```text
 http://localhost:8866/mcp
 ```
+
+端点采用无状态 Streamable HTTP：每个请求独立鉴权，响应可按协议使用请求级 SSE；不依赖 `MCP-Session-Id`。
 
 ### 两种凭据
 

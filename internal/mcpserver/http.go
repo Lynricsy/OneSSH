@@ -8,5 +8,11 @@ import (
 )
 
 func Handler(st *store.Store, s *Server, resolve ResourceResolver) http.Handler {
-	return Bearer(st, resolve, mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s.MCP }, nil))
+	return Bearer(st, resolve, mcp.NewStreamableHTTPHandler(
+		func(*http.Request) *mcp.Server { return s.MCP },
+		&mcp.StreamableHTTPOptions{
+			Stateless:                    true,
+			PropagateRequestCancellation: true,
+		},
+	))
 }
