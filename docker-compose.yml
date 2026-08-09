@@ -8,6 +8,7 @@ services:
       ONESSH_ADMIN_PASSWORD: ${ONESSH_ADMIN_PASSWORD:?required}
       ONESSH_LISTEN: :8866
       ONESSH_DATA_DIR: /data
+      ONESSH_PUBLIC_URL: ${ONESSH_PUBLIC_URL:-}
     volumes:
       - onessh-data:/data
     restart: unless-stopped

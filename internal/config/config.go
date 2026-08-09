@@ -14,6 +14,7 @@ type Config struct {
 	AdminPassword string
 	Listen        string
 	DataDir       string
+	PublicURL     string
 	PollInterval  time.Duration
 }
 
@@ -31,6 +32,7 @@ func Load() (Config, error) {
 	}
 	cfg.Listen = envDefault("ONESSH_LISTEN", ":8866")
 	cfg.DataDir = envDefault("ONESSH_DATA_DIR", "/data")
+	cfg.PublicURL = os.Getenv("ONESSH_PUBLIC_URL")
 	seconds, err := strconv.Atoi(envDefault("ONESSH_POLL_INTERVAL", "60"))
 	if err != nil || seconds < 0 {
 		return cfg, fmt.Errorf("ONESSH_POLL_INTERVAL 必须是非负整数")

@@ -18,6 +18,9 @@ func TestBearerAttachesPrincipal(t *testing.T) {
 	if _, err = st.CreateToken(context.Background(), store.TokenCreate{Name: "agent", Hash: store.TokenHash("secret"), AllHosts: true}); err != nil {
 		t.Fatal(err)
 	}
+	resolve := func(*http.Request) (string, string) {
+		return "https://onessh.example/mcp", "https://onessh.example/.well-known/oauth-protected-resource/mcp"
+	}
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := FromContext(r.Context())
 		if !ok || p.Token.Name != "agent" {
@@ -28,14 +31,17 @@ func TestBearerAttachesPrincipal(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	rr := httptest.NewRecorder()
-	Bearer(st, next).ServeHTTP(rr, req)
+	Bearer(st, resolve, next).ServeHTTP(rr, req)
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("状态码 %d", rr.Code)
 	}
 	bad := httptest.NewRecorder()
-	Bearer(st, next).ServeHTTP(bad, httptest.NewRequest(http.MethodPost, "/mcp", nil))
+	Bearer(st, resolve, next).ServeHTTP(bad, httptest.NewRequest(http.MethodPost, "/mcp", nil))
 	if bad.Code != http.StatusUnauthorized {
 		t.Fatalf("未授权状态码 %d", bad.Code)
+	}
+	if challenge := bad.Header().Get("WWW-Authenticate"); challenge != `Bearer resource_metadata="https://onessh.example/.well-known/oauth-protected-resource/mcp", scope="mcp"` {
+		t.Fatalf("鉴权挑战异常: %s", challenge)
 	}
 }
 

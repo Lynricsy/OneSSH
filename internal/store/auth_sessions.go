@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"time"
 )
 
@@ -20,6 +21,10 @@ type TokenCreate struct {
 	AllHosts    bool
 	ManageHosts bool
 	HostIDs     []int64
+	Source      string
+	ExpiresAt   int64
+	Resource    string
+	ClientID    string
 }
 
 func (s *Store) CreateToken(ctx context.Context, in TokenCreate) (Token, error) {
@@ -29,7 +34,15 @@ func (s *Store) CreateToken(ctx context.Context, in TokenCreate) (Token, error) 
 	}
 	defer tx.Rollback()
 	now := time.Now().Unix()
-	res, err := tx.ExecContext(ctx, `INSERT INTO tokens(name,token_hash,all_hosts,manage_hosts,created_at) VALUES(?,?,?,?,?)`, in.Name, in.Hash, boolInt(in.AllHosts), boolInt(in.ManageHosts), now)
+	source := in.Source
+	if source == "" {
+		source = "manual"
+	}
+	var expiresAt any
+	if in.ExpiresAt > 0 {
+		expiresAt = in.ExpiresAt
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO tokens(name,token_hash,all_hosts,manage_hosts,created_at,source,expires_at,resource,client_id) VALUES(?,?,?,?,?,?,?,?,?)`, in.Name, in.Hash, boolInt(in.AllHosts), boolInt(in.ManageHosts), now, source, expiresAt, nullableString(in.Resource), nullableString(in.ClientID))
 	if err != nil {
 		return Token{}, err
 	}
@@ -42,42 +55,60 @@ func (s *Store) CreateToken(ctx context.Context, in TokenCreate) (Token, error) 
 	if err = tx.Commit(); err != nil {
 		return Token{}, err
 	}
-	return Token{ID: id, Name: in.Name, AllHosts: in.AllHosts, ManageHosts: in.ManageHosts, CreatedAt: now}, nil
+	token := Token{ID: id, Name: in.Name, AllHosts: in.AllHosts, ManageHosts: in.ManageHosts, Source: source, CreatedAt: now}
+	token.ExpiresAt = sql.NullInt64{Int64: in.ExpiresAt, Valid: in.ExpiresAt > 0}
+	token.Resource = sql.NullString{String: in.Resource, Valid: in.Resource != ""}
+	token.ClientID = sql.NullString{String: in.ClientID, Valid: in.ClientID != ""}
+	return token, nil
 }
 func (s *Store) FindToken(ctx context.Context, hash string) (Token, []Host, error) {
+	return s.findToken(ctx, hash, "", false)
+}
+
+func (s *Store) FindTokenForResource(ctx context.Context, hash, resource string) (Token, []Host, error) {
+	return s.findToken(ctx, hash, resource, true)
+}
+
+func (s *Store) findToken(ctx context.Context, hash, resource string, requireResource bool) (Token, []Host, error) {
 	var t Token
 	var all, manage int
-	err := s.DB.QueryRowContext(ctx, `SELECT id,name,all_hosts,manage_hosts,created_at,last_used_at FROM tokens WHERE token_hash=?`, hash).Scan(&t.ID, &t.Name, &all, &manage, &t.CreatedAt, &t.LastUsedAt)
+	q := `SELECT id,name,all_hosts,manage_hosts,source,created_at,last_used_at,expires_at,resource,client_id FROM tokens WHERE token_hash=? AND (expires_at IS NULL OR expires_at>?)`
+	args := []any{hash, time.Now().Unix()}
+	if requireResource {
+		q += ` AND (source='manual' OR resource=?)`
+		args = append(args, resource)
+	}
+	err := s.DB.QueryRowContext(ctx, q, args...).Scan(&t.ID, &t.Name, &all, &manage, &t.Source, &t.CreatedAt, &t.LastUsedAt, &t.ExpiresAt, &t.Resource, &t.ClientID)
 	if err != nil {
 		return t, nil, err
 	}
 	t.AllHosts = all != 0
 	t.ManageHosts = manage != 0
 	_, _ = s.DB.ExecContext(ctx, `UPDATE tokens SET last_used_at=? WHERE id=?`, time.Now().Unix(), t.ID)
-	q := `SELECT h.id,h.name,h.addr,h.port,h.username,h.auth_type,h.key_id,h.password_enc,h.hostkey_fp,h.monitor_enabled,h.created_at FROM hosts h`
-	args := []any{}
+	hostQuery := `SELECT h.id,h.name,h.addr,h.port,h.username,h.auth_type,h.key_id,h.password_enc,h.hostkey_fp,h.monitor_enabled,h.created_at FROM hosts h`
+	hostArgs := []any{}
 	if !t.AllHosts {
-		q += ` JOIN token_hosts th ON th.host_id=h.id WHERE th.token_id=?`
-		args = append(args, t.ID)
+		hostQuery += ` JOIN token_hosts th ON th.host_id=h.id WHERE th.token_id=?`
+		hostArgs = append(hostArgs, t.ID)
 	}
-	q += ` ORDER BY h.name`
-	rows, err := s.DB.QueryContext(ctx, q, args...)
+	hostQuery += ` ORDER BY h.name`
+	rows, err := s.DB.QueryContext(ctx, hostQuery, hostArgs...)
 	if err != nil {
 		return t, nil, err
 	}
 	defer rows.Close()
 	var hosts []Host
 	for rows.Next() {
-		h, e := scanHost(rows)
-		if e != nil {
-			return t, nil, e
+		h, scanErr := scanHost(rows)
+		if scanErr != nil {
+			return t, nil, scanErr
 		}
 		hosts = append(hosts, h)
 	}
 	return t, hosts, rows.Err()
 }
 func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,all_hosts,manage_hosts,created_at,last_used_at FROM tokens ORDER BY name`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,all_hosts,manage_hosts,source,created_at,last_used_at,expires_at,resource,client_id FROM tokens ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +117,7 @@ func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
 	for rows.Next() {
 		var t Token
 		var all, manage int
-		if err := rows.Scan(&t.ID, &t.Name, &all, &manage, &t.CreatedAt, &t.LastUsedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &all, &manage, &t.Source, &t.CreatedAt, &t.LastUsedAt, &t.ExpiresAt, &t.Resource, &t.ClientID); err != nil {
 			return nil, err
 		}
 		t.AllHosts = all != 0
@@ -101,6 +132,15 @@ func (s *Store) DeleteToken(ctx context.Context, id int64) error {
 		return err
 	}
 	defer tx.Rollback()
+	var grantID sql.NullString
+	if err = tx.QueryRowContext(ctx, `SELECT grant_id FROM oauth_refresh_tokens WHERE access_token_id=? LIMIT 1`, id).Scan(&grantID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if grantID.Valid {
+		if err = revokeOAuthGrantTx(ctx, tx, grantID.String, time.Now().Unix()); err != nil {
+			return err
+		}
+	}
 	for _, q := range []string{`DELETE FROM token_hosts WHERE token_id=?`, `DELETE FROM tokens WHERE id=?`} {
 		if _, err = tx.ExecContext(ctx, q, id); err != nil {
 			return err

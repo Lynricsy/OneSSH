@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestOpenCreatesSchema(t *testing.T) {
@@ -13,7 +15,7 @@ func TestOpenCreatesSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	for _, table := range []string{"keys", "hosts", "tokens", "sessions", "jobs", "audit", "metrics"} {
+	for _, table := range []string{"keys", "hosts", "tokens", "sessions", "jobs", "audit", "metrics", "oauth_clients", "oauth_authorization_codes", "oauth_refresh_tokens"} {
 		var name string
 		if err := s.DB.QueryRowContext(context.Background(), `SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name); err != nil {
 			t.Fatalf("缺少表 %s: %v", table, err)
@@ -66,10 +68,10 @@ func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 		}
 	}
 	var versions int
-	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (1,2,3)`).Scan(&versions); err != nil {
+	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (1,2,3,4)`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 3 {
+	if versions != 4 {
 		t.Fatalf("迁移版本数 = %d", versions)
 	}
 	if err = st.Close(); err != nil {
@@ -83,7 +85,7 @@ func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 3 {
+	if versions != 4 {
 		t.Fatalf("二次迁移版本数 = %d", versions)
 	}
 }
@@ -112,7 +114,7 @@ func TestOpenRecordsPreexistingManageHostsColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 3 {
+	if versions != 4 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 }
@@ -219,5 +221,35 @@ func TestDeleteHostProtectsRunningJobsAndCleansReferences(t *testing.T) {
 	}
 	if len(hosts) != 0 {
 		t.Fatalf("旧令牌授权附着到替代主机: %#v", hosts)
+	}
+}
+
+func TestDeleteHostRevokesRestrictedOAuthRefreshToken(t *testing.T) {
+	ctx := context.Background()
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	host, err := st.CreateHost(ctx, Host{Name: "ephemeral", Addr: "127.0.0.1", Port: 22, Username: "user", AuthType: "password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := st.CreateOAuthClient(ctx, OAuthClient{ClientID: "client", ClientName: "client", RedirectURIs: []string{"http://localhost/callback"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accessToken, err := st.CreateToken(ctx, TokenCreate{Name: "oauth", Hash: "access-hash", HostIDs: []int64{host.ID}, Source: "oauth", Resource: "http://localhost/mcp", ClientID: client.ClientID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = st.CreateOAuthRefreshToken(ctx, OAuthRefreshToken{TokenHash: "refresh-hash", GrantID: "grant", AccessTokenID: accessToken.ID, ClientID: client.ClientID, Resource: "http://localhost/mcp", Scope: "mcp", HostIDs: []int64{host.ID}, ExpiresAt: time.Now().Add(time.Hour).Unix()}); err != nil {
+		t.Fatal(err)
+	}
+	if err = st.DeleteHost(ctx, host.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = st.UseOAuthRefreshToken(ctx, "refresh-hash", client.ClientID, "http://localhost/mcp", time.Now().Unix()); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("删除主机后受限刷新授权仍存在: %v", err)
 	}
 }

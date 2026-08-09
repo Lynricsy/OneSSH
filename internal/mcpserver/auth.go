@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -21,16 +22,20 @@ func FromContext(ctx context.Context) (Principal, bool) {
 	p, ok := ctx.Value(principalKey{}).(Principal)
 	return p, ok
 }
-func Bearer(st *store.Store, next http.Handler) http.Handler {
+
+type ResourceResolver func(*http.Request) (resource, metadataURL string)
+
+func Bearer(st *store.Store, resolve ResourceResolver, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if raw == "" || raw == r.Header.Get("Authorization") {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		resource, metadataURL := resolve(r)
+		authorization := strings.Fields(r.Header.Get("Authorization"))
+		if len(authorization) != 2 || !strings.EqualFold(authorization[0], "Bearer") {
+			bearerUnauthorized(w, metadataURL, "")
 			return
 		}
-		token, hosts, err := st.FindToken(r.Context(), store.TokenHash(raw))
+		token, hosts, err := st.FindTokenForResource(r.Context(), store.TokenHash(authorization[1]), resource)
 		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			bearerUnauthorized(w, metadataURL, "invalid_token")
 			return
 		}
 		allowed := make(map[string]store.Host, len(hosts))
@@ -40,6 +45,15 @@ func Bearer(st *store.Store, next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), principalKey{}, Principal{Token: token, Hosts: allowed, Store: st})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func bearerUnauthorized(w http.ResponseWriter, metadataURL, errorCode string) {
+	challenge := fmt.Sprintf(`Bearer resource_metadata=%q, scope="mcp"`, metadataURL)
+	if errorCode != "" {
+		challenge += fmt.Sprintf(`, error=%q`, errorCode)
+	}
+	w.Header().Set("WWW-Authenticate", challenge)
+	http.Error(w, "unauthorized", http.StatusUnauthorized)
 }
 func AuthorizedHost(ctx context.Context, name string) (store.Host, error) {
 	p, ok := FromContext(ctx)

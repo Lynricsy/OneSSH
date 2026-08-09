@@ -16,6 +16,7 @@ import { KeysPage } from '@/pages/keys'
 import { LoginPage } from '@/pages/login'
 import { MetricsPage } from '@/pages/metrics'
 import { NotFoundPage } from '@/pages/not-found'
+import { OAuthAuthorizePage } from '@/pages/oauth-authorize'
 import { TerminalPage } from '@/pages/terminal'
 import { TokensPage } from '@/pages/tokens'
 
@@ -33,11 +34,15 @@ function AuthGuard() {
   useEffect(() => {
     const onUnauthorized = () => {
       if (location.pathname === '/login') return
-      navigate('/login', { replace: true, state: { from: location.pathname } })
+      // 必须连查询串一起记：OAuth 授权入口的全部参数都在 search 里，丢了就只能让用户从客户端重来
+      navigate('/login', {
+        replace: true,
+        state: { from: location.pathname + location.search },
+      })
     }
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
-  }, [navigate, location.pathname])
+  }, [navigate, location.pathname, location.search])
 
   return null
 }
@@ -68,6 +73,8 @@ export default function App() {
               <AuthGuard />
               <Routes>
                 <Route path="/login" element={<LoginPage />} />
+                {/* 授权页是给第三方客户端看的独立全页，不套 AppShell 的导航与顶栏 */}
+                <Route path="/oauth/authorize" element={<OAuthAuthorizePage />} />
                 <Route element={<AppShell />}>
                   <Route index element={<DashboardPage />} />
                   <Route path="hosts" element={<HostsPage />} />

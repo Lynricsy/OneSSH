@@ -9,6 +9,7 @@ OneSSH 是面向 AI Agent 的集中式 SSH 网关。它以单个 Go 二进制运
 - SSH 主机与 OpenSSH 密钥管理，支持密码和密钥认证
 - AES-256-GCM 信封加密；私钥和密码仅在拨号时解密
 - TOFU 主机指纹、指纹变更拒绝、连接复用与 keepalive
+- MCP OAuth 2.1 授权码流程，支持 PKCE、动态客户端注册、刷新令牌轮换和授权时选择主机权限
 - Streamable HTTP MCP，支持按令牌限制可访问主机
 - 持久 cwd/env 的命令会话、超时、并发执行和大输出 artifact
 - 无远端常驻组件的后台任务启动、状态、日志与终止
@@ -39,6 +40,7 @@ flowchart LR
 | `ONESSH_MASTER_KEY` | 是 | — | 64 位十六进制字符串，即 32 字节主密钥 |
 | `ONESSH_ADMIN_PASSWORD` | 是 | — | WebUI 管理员密码 |
 | `ONESSH_LISTEN` | 否 | `:8866` | HTTP 监听地址 |
+| `ONESSH_PUBLIC_URL` | 否 | 按请求推导 | 对外访问来源地址，例如 `https://ssh.example.com`；生产 OAuth 部署应显式设置 |
 | `ONESSH_DATA_DIR` | 否 | `/data` | SQLite 和 artifact 数据目录 |
 | `ONESSH_POLL_INTERVAL` | 否 | `60` | 监控轮询秒数；设为 `0` 关闭 |
 
@@ -66,8 +68,8 @@ curl --fail http://localhost:8866/healthz
 1. 使用 `ONESSH_ADMIN_PASSWORD` 登录。
 2. 在“密钥”页面生成 ed25519 密钥或导入 OpenSSH 私钥；也可直接使用主机密码。
 3. 在“主机”页面添加目标并执行“测试”，首次连接会记录 TOFU 指纹。
-4. 在“令牌”页面创建 Agent 令牌，选择全部主机或指定主机的执行范围；仅在需要时单独启用主机管理权限。
-5. 令牌明文只显示一次，立即复制到 Agent 的安全配置中。
+4. 在“令牌”页面创建 Agent 令牌并选择执行范围；或让支持 MCP OAuth 的客户端连接 `/mcp`，在授权页选择同样的主机与管理权限。
+5. 手工令牌明文只显示一次，立即复制到 Agent 的安全配置中。
 
 停止服务不会删除数据：
 
@@ -89,7 +91,10 @@ MCP 端点为：
 http://localhost:8866/mcp
 ```
 
-所有请求必须携带创建令牌时返回的 Bearer Token：
+MCP 支持两种 Bearer 凭据：
+
+- **OAuth 2.1**：推荐用于支持 MCP OAuth 的客户端。客户端会通过资源元数据发现内置授权服务器，使用 S256 PKCE 完成授权码流程；管理员登录后可选择全部主机、指定主机以及独立的主机管理权限。访问令牌有效期为 1 小时，刷新令牌有效期为 30 天且每次使用都会轮换。
+- **手工令牌**：兼容不能执行 OAuth 流程的客户端。所有请求携带“令牌”页面创建的 Bearer Token：
 
 ```http
 Authorization: Bearer osh_...
@@ -112,6 +117,18 @@ Authorization: Bearer osh_...
 ```
 
 具体字段名取决于 MCP 客户端。若客户端没有独立的 `headers` 配置，需要通过其 HTTP transport 注入 `Authorization`。
+
+OAuth 客户端会自动发现以下端点：
+
+```text
+/.well-known/oauth-protected-resource/mcp
+/.well-known/oauth-authorization-server
+/oauth/register
+/oauth/authorize
+/oauth/token
+```
+
+生产环境必须通过 HTTPS 暴露 OAuth 端点，并将 `ONESSH_PUBLIC_URL` 设置为浏览器与 MCP 客户端实际访问的来源地址。只有 `localhost` 或回环地址的回调 URI 可以使用 HTTP。
 
 令牌的 `all_hosts`/`host_ids` 只控制命令、文件、任务等远程执行工具可访问的主机。`manage_hosts` 是默认关闭的独立全局配置管理权限：启用后可维护全部 SSH 目标，但不会扩大执行范围，也不会把新建目标自动加入令牌授权。主机密码通过管理工具只写不读；所有管理调用及权限拒绝都会写入审计记录，密码参数固定脱敏。
 
@@ -197,8 +214,12 @@ docker pull ghcr.io/lynricsy/onessh:latest
 
 - `/data/onessh.db`：主机、加密凭据、令牌哈希、任务、审计和指标。
 - `/data/artifacts/`：截断命令输出；服务启动时及每小时删除超过 7 天的文件。指标数据采用相同保留策略。
-- Agent 令牌明文不入库；数据库只保存 SHA-256 哈希。
-- WebUI 使用 24 小时 HMAC Cookie；生产环境应通过 HTTPS 反向代理访问。
+- 升级现有数据目录时会自动执行 OAuth 表与令牌字段迁移；启动失败时不会跳过或部分登记迁移版本。
+- Agent 手工令牌、OAuth 访问令牌、授权码和刷新令牌都只以 SHA-256 哈希形式入库。
+- OAuth 访问令牌绑定到授权请求中的 `/mcp` 资源，其他资源不能复用；授权码五分钟过期且单次使用，刷新令牌轮换后旧值立即失效。
+- OAuth 刷新令牌属于稳定授权族：轮换后的旧值若被重放，会撤销该授权族现存的访问令牌与刷新令牌。
+- OAuth 授权页与登录页返回 `frame-ancestors 'none'` 和 `X-Frame-Options: DENY`，禁止第三方页面嵌入发起点击劫持。
+- WebUI 使用 24 小时 HMAC Cookie；OAuth 授权同意页复用该管理员会话。生产环境必须通过 HTTPS 反向代理访问。
 - 首次连接会接受并保存主机指纹。指纹变化会拒绝连接，确认主机已重装后才能在 WebUI 重置。
-- 不要将 `ONESSH_MASTER_KEY`、管理员密码、Agent 令牌或导出的数据卷提交到版本控制。
-- 令牌应按最小权限分配主机；不再使用时立即删除。
+- 不要将 `ONESSH_MASTER_KEY`、管理员密码、Agent 令牌、OAuth 令牌或导出的数据卷提交到版本控制。
+- 令牌和 OAuth 授权都应按最小权限分配主机；不再使用时立即删除。

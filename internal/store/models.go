@@ -51,12 +51,16 @@ func (h Host) View() HostView {
 }
 
 type Token struct {
-	ID          int64         `json:"id"`
-	Name        string        `json:"name"`
-	AllHosts    bool          `json:"all_hosts"`
-	ManageHosts bool          `json:"manage_hosts"`
-	CreatedAt   int64         `json:"created_at"`
-	LastUsedAt  sql.NullInt64 `json:"-"`
+	ID          int64          `json:"id"`
+	Name        string         `json:"name"`
+	AllHosts    bool           `json:"all_hosts"`
+	ManageHosts bool           `json:"manage_hosts"`
+	Source      string         `json:"source"`
+	CreatedAt   int64          `json:"created_at"`
+	LastUsedAt  sql.NullInt64  `json:"-"`
+	ExpiresAt   sql.NullInt64  `json:"-"`
+	Resource    sql.NullString `json:"-"`
+	ClientID    sql.NullString `json:"-"`
 }
 
 type Session struct {

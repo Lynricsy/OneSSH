@@ -86,6 +86,14 @@ func (s *Store) DeleteHost(ctx context.Context, id int64) error {
 	if running != 0 {
 		return ErrHostHasRunningJobs
 	}
+	now := time.Now().Unix()
+	restrictedGrant := `SELECT DISTINCT grant_id FROM oauth_refresh_tokens WHERE all_hosts=0 AND EXISTS (SELECT 1 FROM json_each(oauth_refresh_tokens.host_ids_json) WHERE json_each.value=?)`
+	if _, err = tx.ExecContext(ctx, `UPDATE tokens SET expires_at=? WHERE id IN (SELECT access_token_id FROM oauth_refresh_tokens WHERE grant_id IN (`+restrictedGrant+`))`, now, id); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE oauth_refresh_tokens SET revoked_at=? WHERE grant_id IN (`+restrictedGrant+`) AND revoked_at IS NULL`, now, id); err != nil {
+		return err
+	}
 	for _, query := range []string{
 		`DELETE FROM token_hosts WHERE host_id=?`,
 		`DELETE FROM sessions WHERE host_id=?`,

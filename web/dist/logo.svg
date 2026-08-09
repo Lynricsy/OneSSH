@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="OneSSH">
+  <defs>
+    <linearGradient id="onessh-tile" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0d9488"/>
+      <stop offset="1" stop-color="#2dd4bf"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="8" fill="url(#onessh-tile)"/>
+  <path d="M7.8 9.2 13.6 16 7.8 22.8" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <g stroke="#fff" stroke-width="2.7" stroke-linecap="round">
+    <path d="M19.2 10.6h5.2"/>
+    <path d="M19.2 16h5.2"/>
+    <path d="M19.2 21.4h5.2"/>
+  </g>
+</svg>

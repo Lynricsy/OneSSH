@@ -7,6 +7,6 @@ import (
 	"onessh/internal/store"
 )
 
-func Handler(st *store.Store, s *Server) http.Handler {
-	return Bearer(st, mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s.MCP }, nil))
+func Handler(st *store.Store, s *Server, resolve ResourceResolver) http.Handler {
+	return Bearer(st, resolve, mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s.MCP }, nil))
 }

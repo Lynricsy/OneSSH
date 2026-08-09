@@ -104,3 +104,24 @@ export type TokenPayload = {
   manage_hosts: boolean
   host_ids?: number[]
 }
+
+/** OAuth 授权页上下文：GET /oauth/authorization?<浏览器入口的原始查询串> */
+export type OAuthAuthorizationInfo = {
+  client_name: string
+  client_uri?: string
+  redirect_uri: string
+  requested_scopes: string[]
+  hosts: Host[]
+}
+
+/** 授权决定：POST /oauth/authorization，query 必须是未经改写的原始查询串 */
+export type OAuthDecisionPayload = {
+  query: string
+  decision: 'approve' | 'deny'
+  all_hosts: boolean
+  manage_hosts: boolean
+  host_ids?: number[]
+}
+
+/** 无论批准还是拒绝，后端都给出下一跳；拒绝时带 error=access_denied */
+export type OAuthDecisionResult = { redirect_uri: string }
