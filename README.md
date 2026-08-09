@@ -324,3 +324,7 @@ docker pull ghcr.io/lynricsy/onessh:latest
 - 首次连接会接受并保存主机指纹；指纹变化即拒绝连接，确认主机确实重装后才能在 WebUI 重置。
 - 令牌与 OAuth 授权都按最小权限分配主机，不再使用立即删除。
 - 不要把 `ONESSH_MASTER_KEY`、管理员密码、Agent 令牌、OAuth 令牌或导出的数据卷提交到版本控制。
+
+## 友情链接
+
+- [LINUX DO](https://linux.do/)
