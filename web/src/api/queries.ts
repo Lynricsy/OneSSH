@@ -1,0 +1,142 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { api, del, post, put, uploadFile } from './client'
+import type {
+  Audit,
+  FileEntry,
+  Host,
+  HostPayload,
+  JobStatus,
+  KeyPayload,
+  Metric,
+  SSHKey,
+  Token,
+  TokenPayload,
+} from './types'
+
+export const queryKeys = {
+  hosts: ['hosts'] as const,
+  keys: ['keys'] as const,
+  tokens: ['tokens'] as const,
+  jobs: ['jobs'] as const,
+  audit: ['audit'] as const,
+  metrics: (hostId: number, hours: number) => ['metrics', hostId, hours] as const,
+  sftp: (hostId: number, path: string) => ['sftp', hostId, path] as const,
+}
+
+/** 所有 mutation 的统一失败提示；成功提示由调用方按语义给 */
+const onError = (e: unknown) => toast.error((e as Error).message)
+
+/** mutation 收敛：成功后失效指定 key + 弹成功 toast */
+function useInvalidatingMutation<TVars, TData>(
+  fn: (vars: TVars) => Promise<TData>,
+  key: readonly unknown[],
+  successText?: string,
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      if (successText) toast.success(successText)
+      void qc.invalidateQueries({ queryKey: key })
+    },
+    onError,
+  })
+}
+
+/* ── 查询 ───────────────────────────────────────────────────────── */
+
+export const useHosts = () =>
+  useQuery({ queryKey: queryKeys.hosts, queryFn: () => api<Host[]>('/hosts') })
+
+export const useKeys = () =>
+  useQuery({ queryKey: queryKeys.keys, queryFn: () => api<SSHKey[]>('/keys') })
+
+export const useTokens = () =>
+  useQuery({ queryKey: queryKeys.tokens, queryFn: () => api<Token[]>('/tokens') })
+
+export const useJobs = () =>
+  useQuery({
+    queryKey: queryKeys.jobs,
+    queryFn: () => api<JobStatus[]>('/jobs'),
+    refetchInterval: 4000,
+  })
+
+export const useAudit = () =>
+  useQuery({ queryKey: queryKeys.audit, queryFn: () => api<Audit[]>('/audit?limit=100') })
+
+export const useMetrics = (hostId: number | undefined, hours: number) =>
+  useQuery({
+    queryKey: queryKeys.metrics(hostId ?? 0, hours),
+    queryFn: () => api<Metric[]>(`/metrics/${hostId}?hours=${hours}`),
+    enabled: hostId != null,
+  })
+
+export const useSftpList = (hostId: number | undefined, path: string) =>
+  useQuery({
+    queryKey: queryKeys.sftp(hostId ?? 0, path),
+    queryFn: () => api<FileEntry[]>(`/sftp/${hostId}/list?path=${encodeURIComponent(path)}`),
+    enabled: hostId != null,
+    retry: false,
+  })
+
+/* ── 主机 ───────────────────────────────────────────────────────── */
+
+export const useSaveHost = (id?: number) =>
+  useInvalidatingMutation<HostPayload, Host>(
+    (v) => (id ? put<Host>(`/hosts/${id}`, v) : post<Host>('/hosts', v)),
+    queryKeys.hosts,
+    '主机已保存',
+  )
+
+export const useDeleteHost = () =>
+  useInvalidatingMutation<number, void>((id) => del(`/hosts/${id}`), queryKeys.hosts, '主机已删除')
+
+export const useResetFingerprint = () =>
+  useInvalidatingMutation<number, unknown>(
+    (id) => post(`/hosts/${id}/reset-fingerprint`, {}),
+    queryKeys.hosts,
+    '指纹已重置',
+  )
+
+/** 测试连接不改数据，失败提示由 toast.promise 承担，故不走统一 onError */
+export const useTestHost = () =>
+  useMutation({ mutationFn: (id: number) => post<{ output?: string }>(`/hosts/${id}/test`, {}) })
+
+/* ── 密钥 / 令牌 / 任务 ─────────────────────────────────────────── */
+
+export const useCreateKey = () =>
+  useInvalidatingMutation<KeyPayload, SSHKey>((v) => post<SSHKey>('/keys', v), queryKeys.keys, '密钥已创建')
+
+export const useDeleteKey = () =>
+  useInvalidatingMutation<number, void>((id) => del(`/keys/${id}`), queryKeys.keys, '密钥已删除')
+
+export const useCreateToken = () =>
+  useInvalidatingMutation<TokenPayload, Token>((v) => post<Token>('/tokens', v), queryKeys.tokens)
+
+export const useDeleteToken = () =>
+  useInvalidatingMutation<number, void>((id) => del(`/tokens/${id}`), queryKeys.tokens, '令牌已删除')
+
+export const useKillJob = () =>
+  useInvalidatingMutation<string, unknown>(
+    (id) => post(`/jobs/${id}/kill`, {}),
+    queryKeys.jobs,
+    '已发送终止信号',
+  )
+
+/* ── SFTP 上传 ──────────────────────────────────────────────────── */
+
+export function useUpload(hostId: number | undefined, path: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (file: File) => {
+      if (hostId == null) throw new Error('请先选择主机')
+      return uploadFile(hostId, path.replace(/\/$/, '') + '/', file)
+    },
+    onSuccess: () => {
+      toast.success('上传完成')
+      void qc.invalidateQueries({ queryKey: queryKeys.sftp(hostId ?? 0, path) })
+    },
+    onError,
+  })
+}

@@ -1,3 +1,21 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><meta name="theme-color" content="#07111f"/><title>OneSSH 控制台</title>  <script type="module" crossorigin src="/assets/index-D1lFAVrA.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-D9NE7-DS.css">
-</head><body><div id="root"></div></body></html>
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <script>
+      (function () {
+        var m = localStorage.getItem('onessh-theme')
+        var d = m === 'dark' || (m !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+        if (d) document.documentElement.classList.add('dark')
+      })()
+    </script>
+    <meta name="theme-color" content="#f6f7f8" />
+    <title>OneSSH 控制台</title>
+    <script type="module" crossorigin src="/assets/index-B7HEpI3c.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-ehucF9tR.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

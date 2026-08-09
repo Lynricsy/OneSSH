@@ -28,7 +28,7 @@ flowchart LR
     Gateway -->|SSH + SFTP| Hosts[SSH Hosts]
 ```
 
-后端使用 Go 标准库 HTTP 路由、`modelcontextprotocol/go-sdk`、`x/crypto/ssh`、`pkg/sftp` 和 CGO-free SQLite。前端使用 React 18、antd、Ghostty Web 和 Recharts，并通过 `go:embed` 打入二进制。
+后端使用 Go 标准库 HTTP 路由、`modelcontextprotocol/go-sdk`、`x/crypto/ssh`、`pkg/sftp` 和 CGO-free SQLite。前端使用 React 18、React Router、TanStack Query、Tailwind CSS v4 与 Radix UI 自建组件体系（支持浅色/深色/跟随系统三档主题），配合 Ghostty Web 和 Recharts，并通过 `go:embed` 打入二进制。
 
 ## 环境变量
 
