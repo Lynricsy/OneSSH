@@ -18,7 +18,7 @@
 
 让 Agent 直接持有 SSH 私钥，安全性并非无解——`authorized_keys` 的 `command=`、`from=`、`restrict`、`permitopen=`，以及 CA 证书的有效期和 principals，都能实打实地收窄一把钥匙。真正的问题是这些控制点**分散在每一台主机上**：调整一次授权要遍历所有机器，撤销同理；而 sshd 的日志只到会话粒度，看不出 Agent 究竟读写了哪些文件。OneSSH 把这些控制点收敛到网关一侧：
 
-- **凭据不出网关。** 私钥和密码以 AES-256-GCM 信封加密存放，只在拨号瞬间解密，Agent 永远拿不到明文。
+- **凭据不出网关。** 私钥和密码由 32 字节主密钥经 AES-256-GCM 加密存储，只在建立 SSH 连接时解密，Agent 永远拿不到明文。
 - **权限可收敛。** 每个令牌绑定一组主机；执行权限与主机配置管理权限彼此独立，默认关闭后者。
 - **随时可撤销。** 令牌是网关侧的一行记录，删掉即失效，不需要登录每台机器轮换 `authorized_keys`。
 - **全程留痕。** 每次调用、每次权限拒绝都写审计；文件正文和编辑内容只记长度摘要，不落盘敏感数据。
@@ -95,7 +95,7 @@ flowchart LR
 | 领域 | 能力 |
 |---|---|
 | **连接** | SSH 主机与 OpenSSH 密钥管理，密码与密钥两种认证；连接复用与 keepalive |
-| **凭据** | AES-256-GCM 信封加密，私钥和密码仅在拨号时解密 |
+| **凭据** | 私钥与密码经 AES-256-GCM 加密存储，仅在建立 SSH 连接时解密 |
 | **信任** | TOFU 主机指纹，指纹变更直接拒绝连接，重装后需在 WebUI 显式重置 |
 | **授权** | MCP OAuth 2.1 授权码流程：S256 PKCE、动态客户端注册、刷新令牌轮换、授权时选择主机范围 |
 | **执行** | 持久 cwd/env 的命令会话、超时控制、并发批量执行、大输出转 artifact |
@@ -292,7 +292,7 @@ docker pull ghcr.io/lynricsy/onessh:latest
 **存储布局**
 
 - `/data/onessh.db` — 主机、加密凭据、令牌哈希、任务、审计与指标。
-- `/data/artifacts/` — 被截断的命令输出；启动时以及每小时清理超过 7 天的文件，指标数据同样保留 7 天。
+- `/data/artifacts/` — 被截断的命令输出；启动时以及每小时清理超过 7 天的文件，指标数据同样保留 7 天。该清理独立于监控轮询，`ONESSH_POLL_INTERVAL=0` 也照常执行。
 - 升级既有数据目录会自动执行 OAuth 表与令牌字段迁移；迁移失败时不会跳过，也不会部分登记版本号。
 
 **凭据与令牌**
@@ -304,7 +304,7 @@ docker pull ghcr.io/lynricsy/onessh:latest
 **Web 会话**
 
 - WebUI 使用 24 小时 HMAC Cookie，OAuth 同意页复用同一个管理员会话。
-- 授权页与登录页返回 `frame-ancestors 'none'` 与 `X-Frame-Options: DENY`，阻断第三方页面嵌入发起的点击劫持。
+- WebUI 的每一个响应（含登录页与 OAuth 同意页）都带 `Content-Security-Policy: frame-ancestors 'none'` 与 `X-Frame-Options: DENY`，阻断第三方页面嵌入发起的点击劫持。
 - 生产环境必须通过 HTTPS 反向代理访问。
 
 **运维约束**
