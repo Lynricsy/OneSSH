@@ -36,12 +36,13 @@ func New(st *store.Store, cfg EmbeddingConfig) *Engine {
 }
 
 type RememberInput struct {
-	HostID     sql.NullInt64
-	Content    string
-	Source     string
-	Veracity   string
-	Importance float64
-	TokenID    sql.NullInt64
+	HostID        sql.NullInt64
+	Content       string
+	Source        string
+	Veracity      string
+	Importance    float64
+	ImportanceSet bool
+	TokenID       sql.NullInt64
 }
 
 type RecallResult struct {
@@ -71,7 +72,7 @@ func (e *Engine) Remember(ctx context.Context, in RememberInput) (id int64, dedu
 		return 0, false, false, fmt.Errorf("content 不能为空")
 	}
 	importance := in.Importance
-	if importance == 0 {
+	if !in.ImportanceSet && importance == 0 {
 		importance = defaultImportance
 	}
 	importance = clamp(importance, 0, 1)

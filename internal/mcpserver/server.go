@@ -48,6 +48,7 @@ func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanage
 	s.registerJobs(s.Jobs)
 	s.registerFiles(s.Files)
 	s.registerSearch(searchx.New(pool))
+	s.registerMemory()
 	s.registerImage(s.Files)
 	s.registerMonitor(s.Monitor)
 	s.registerFanout()
