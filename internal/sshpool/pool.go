@@ -77,14 +77,25 @@ func (p *Pool) get(ctx context.Context, name string, via []string) (*ssh.Client,
 	return client, nil
 }
 func (p *Pool) dial(ctx context.Context, h store.Host, via []string) (*ssh.Client, error) {
-	var auth ssh.AuthMethod
+	var auths []ssh.AuthMethod
 	switch h.AuthType {
 	case "password":
 		plain, err := p.box.Open(h.PasswordEnc)
 		if err != nil {
 			return nil, err
 		}
-		auth = ssh.Password(string(plain))
+		// ESXi 等设备只接受 keyboard-interactive，不接受 password 方法。
+		// 同时提供两种 AuthMethod，Go SSH 客户端会自动选择服务器支持的方式。
+		password := string(plain)
+		auths = append(auths, ssh.Password(password), ssh.KeyboardInteractive(
+			func(name, instruction string, questions []string, echos []bool) ([]string, error) {
+				answers := make([]string, len(questions))
+				for i := range questions {
+					answers[i] = password
+				}
+				return answers, nil
+			},
+		))
 		for i := range plain {
 			plain[i] = 0
 		}
@@ -107,7 +118,7 @@ func (p *Pool) dial(ctx context.Context, h store.Host, via []string) (*ssh.Clien
 		if err != nil {
 			return nil, fmt.Errorf("解析私钥: %w", err)
 		}
-		auth = ssh.PublicKeys(signer)
+		auths = append(auths, ssh.PublicKeys(signer))
 	default:
 		return nil, fmt.Errorf("不支持的认证类型 %q", h.AuthType)
 	}
@@ -124,7 +135,7 @@ func (p *Pool) dial(ctx context.Context, h store.Host, via []string) (*ssh.Clien
 		}
 		return nil
 	}
-	config := &ssh.ClientConfig{User: h.Username, Auth: []ssh.AuthMethod{auth}, HostKeyCallback: callback, Timeout: 15 * time.Second}
+	config := &ssh.ClientConfig{User: h.Username, Auth: auths, HostKeyCallback: callback, Timeout: 15 * time.Second}
 	addr := net.JoinHostPort(h.Addr, strconv.Itoa(h.Port))
 	var conn net.Conn
 	var err error
