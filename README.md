@@ -23,7 +23,7 @@
 - **随时可撤销。** 令牌是网关侧的一行记录，删掉即失效，不需要登录每台机器轮换 `authorized_keys`。
 - **全程留痕。** 每次调用、每次权限拒绝都写审计；文件正文和编辑内容只记长度摘要，不落盘敏感数据。
 
-对 Agent 侧则是一个标准 MCP 服务：`exec`、`file_read`、`file_edit`、`grep`、`find` 等工具开箱即用，语义与本地编码工具一一对应。
+对 Agent 侧则是一个标准 MCP 服务：`exec`、`file_read`、`file_edit`、`grep`、`find`、`memory_remember`、`memory_recall` 等工具开箱即用；运维事实按主机跨会话持久保存。
 
 ## 快速开始
 
@@ -106,7 +106,8 @@ flowchart LR
 | **搜索** | `grep` / `find` 优先调用远端 ripgrep / fd，遵循项目忽略规则，缺失时自动降级 |
 | **多媒体** | PNG、JPEG、GIF 首帧、WebP 的查看与缩放 |
 | **监控** | Linux CPU、内存、负载、磁盘指标采集，保留 7 天 |
-| **控制台** | React 管理界面、SSE 实时活动流、Ghostty Web 浏览器终端 |
+| **记忆** | 每台主机独立 bank + 全局 bank；FTS5、重要度与时近度混合召回，可选 OpenAI 兼容语义向量 |
+| **控制台** | React 管理界面、记忆筛选与删除、SSE 实时活动流、Ghostty Web 浏览器终端 |
 | **审计** | 结构化审计记录；文件正文与编辑内容只留长度摘要 |
 
 ## MCP 接入
@@ -197,11 +198,16 @@ Authorization: Bearer osh_...
 | 后台任务 | `job_start` · `job_list` · `job_status` · `job_logs` · `job_kill` |
 | 文件 | `file_read` · `file_write` · `file_edit` · `file_list` · `file_transfer` |
 | 搜索 | `grep` · `find` |
+| 记忆 | `memory_remember` · `memory_recall` · `memory_list` · `memory_update` · `memory_forget` · `memory_stats` · `memory_sleep` |
 | 资源 | `image_view` · `host_status` |
 
 常用编码工具是完整对齐的：`file_read`、`file_write`、`file_edit`、`exec`、`grep`、`find`、`file_list` 分别对应 read、write、edit、bash、grep、find、ls。
 
 `file_edit` 支持 `expected_sha256` 乐观锁，冲突时应重新读取。大输出会返回 `artifact_id`，再用 `output_read` 分段读取或正则过滤。
+
+记忆按 `host_id` 绑定到主机 bank；主机改名不会丢失，删除主机时对应记忆一并清理。不带 `host` 写入或召回全局 bank；指定主机召回时会同时合并该主机与全局记忆。`memory_sleep` 不调用 LLM，只执行确定性去重、长期未使用记忆衰减和低分旧记忆清理。正文参数在审计中只记录长度。
+
+默认召回使用 trigram FTS5、重要度和 72 小时时近度衰减。配置 OpenAI 兼容 embedding 后自动加入余弦相似度；embedding 写入或查询失败会记录服务端日志并退化到纯 FTS，不中断 Agent 调用。
 
 <details>
 <summary><b>搜索的原生路径与 SFTP 降级</b></summary>
@@ -218,6 +224,8 @@ Authorization: Bearer osh_...
 
 令牌的 `all_hosts` / `host_ids` 只约束命令、文件、任务这类**远程执行**工具能访问哪些主机。
 
+记忆工具沿用同一主机授权：令牌可读写其 `host_ids` 范围内的主机 bank，不能通过记忆 ID 越权更新或删除其他主机记忆。全局 bank 对所有有效令牌开放读写；`memory_stats` 只返回当前令牌可见的 bank。
+
 `manage_hosts` 是一项独立的全局配置管理权限，默认关闭。开启后可以维护全部 SSH 目标，但**既不扩大执行范围，也不会把新建的目标自动加进该令牌的授权列表**。主机密码经管理工具只写不读；所有管理调用和权限拒绝都会写入审计，密码参数固定脱敏。
 
 ## 配置
@@ -230,6 +238,9 @@ Authorization: Bearer osh_...
 | `ONESSH_PUBLIC_URL` | | 按请求推导 | 对外访问来源，如 `https://ssh.example.com`；生产 OAuth 部署应显式设置，同时决定是否发布 MCP 服务器图标 |
 | `ONESSH_DATA_DIR` | | `/data` | SQLite 与 artifact 数据目录 |
 | `ONESSH_POLL_INTERVAL` | | `60` | 监控轮询秒数，设为 `0` 关闭 |
+| `ONESSH_EMBEDDING_API_URL` | | — | OpenAI 兼容 API 根地址，如 `https://api.example.com/v1`；需同时设置模型才启用 |
+| `ONESSH_EMBEDDING_API_KEY` | | — | embedding 服务 Bearer 密钥；服务不需要鉴权时可留空 |
+| `ONESSH_EMBEDDING_MODEL` | | — | embedding 模型名；换模型后旧向量自然不参与召回 |
 
 生成主密钥：
 
@@ -278,7 +289,7 @@ ONESSH_URL=http://localhost:8866/mcp \
   go test -count=1 -tags e2e -run TestEndToEnd -v ./e2e
 ```
 
-覆盖范围：持久 cwd、大输出 artifact、后台任务、结构化文件编辑、跨主机传输、原生与 SFTP 降级搜索、图片、主机授权、现场监控、审计脱敏和 WebSocket 终端。
+覆盖范围：持久 cwd、大输出 artifact、后台任务、结构化文件编辑、跨主机传输、原生与 SFTP 降级搜索、图片、记忆写入/召回/删除与 bank 鉴权、主机授权、现场监控、审计脱敏和 WebSocket 终端。
 
 </details>
 
@@ -312,9 +323,9 @@ docker pull ghcr.io/lynricsy/onessh:latest
 
 **存储布局**
 
-- `/data/onessh.db` — 主机、加密凭据、令牌哈希、任务、审计与指标。
+- `/data/onessh.db` — 主机、加密凭据、令牌哈希、记忆、任务、审计与指标。记忆正文和可选 embedding 向量同库存储。
 - `/data/artifacts/` — 被截断的命令输出；启动时以及每小时清理超过 7 天的文件，指标数据同样保留 7 天。该清理独立于监控轮询，`ONESSH_POLL_INTERVAL=0` 也照常执行。
-- 升级既有数据目录会自动执行 OAuth 表与令牌字段迁移；迁移失败时不会跳过，也不会部分登记版本号。
+- 升级既有数据目录会自动执行数据库迁移；迁移失败时不会跳过，也不会部分登记版本号。
 
 **凭据与令牌**
 
