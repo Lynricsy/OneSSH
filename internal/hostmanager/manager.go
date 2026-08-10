@@ -16,14 +16,14 @@ import (
 )
 
 type Input struct {
-	Name           string  `json:"name"`
-	Addr           string  `json:"addr"`
-	Port           int     `json:"port"`
-	Username       string  `json:"username"`
-	AuthType       string  `json:"auth_type"`
-	KeyID          *int64  `json:"key_id,omitempty"`
-	Password       *string `json:"password,omitempty"`
-	MonitorEnabled *bool   `json:"monitor_enabled,omitempty"`
+	Name           string  `json:"name" jsonschema:"主机名，网关内唯一，后续所有工具用它引用这台主机"`
+	Addr           string  `json:"addr" jsonschema:"主机地址或 IP"`
+	Port           int     `json:"port" jsonschema:"SSH 端口，省略或 0 表示 22"`
+	Username       string  `json:"username" jsonschema:"SSH 登录用户名"`
+	AuthType       string  `json:"auth_type" jsonschema:"认证方式：key 或 password"`
+	KeyID          *int64  `json:"key_id,omitempty" jsonschema:"key 认证使用的密钥 ID，auth_type=key 时必填"`
+	Password       *string `json:"password,omitempty" jsonschema:"登录密码；auth_type 为 password 时必填，只写不可读，审计中固定脱敏"`
+	MonitorEnabled *bool   `json:"monitor_enabled,omitempty" jsonschema:"是否纳入后台资源监控轮询，新建时默认开启"`
 }
 
 type ErrorKind uint8

@@ -41,8 +41,8 @@ type WriteResult struct {
 	Warning   string `json:"warning,omitempty"`
 }
 type Edit struct {
-	OldText string `json:"old_text"`
-	NewText string `json:"new_text"`
+	OldText string `json:"old_text" jsonschema:"要被替换的原文，必须在文件中唯一匹配；建议带足上下文以保证唯一"`
+	NewText string `json:"new_text" jsonschema:"替换后的新文本，空字符串表示删除这段内容"`
 }
 type EditResult struct {
 	WriteResult

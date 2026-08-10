@@ -222,6 +222,16 @@ Authorization: Bearer osh_...
 
 </details>
 
+### 给 Agent 的说明层
+
+工具选得对不对，取决于服务器把话说清楚了没有。OneSSH 在三处提供说明，都会随 `initialize` 和 `tools/list` 一次性交给客户端：
+
+- **服务器 instructions**：网关整体工作协议——`hosts_list` 是所有 `host` 参数的唯一来源、`manage_hosts` 是独立权限、优先用专用工具而不是拿 `exec` 拼命令、长任务走 `job_start`、截断输出走 `output_read`、破坏性操作前先确认现状，以及记忆的读写与安全红线。
+- **工具 `description` 与 `title`**：每个工具写清适用场景、与相邻工具的取舍、默认值和硬上限、失败时该怎么办。
+- **参数 `description` 与 `annotations`**：每个入参都有说明，每个工具都标注 `readOnlyHint` / `destructiveHint` / `idempotentHint` / `openWorldHint`，客户端据此决定是否需要用户确认。
+
+`TestToolCatalogGivesAgentsEnoughContext` 把这套说明固化为契约：新增工具若缺标题、描述过短、没有注解或有参数没写说明，测试直接失败。注意 `jsonschema` 标签的首个空格前不能出现 `=`，否则 schema 推导会 panic。
+
 ### 权限模型
 
 令牌的 `all_hosts` / `host_ids` 只约束命令、文件、任务这类**远程执行**工具能访问哪些主机。

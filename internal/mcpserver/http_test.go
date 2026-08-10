@@ -64,9 +64,16 @@ func TestHandlerUsesModernStatelessTransport(t *testing.T) {
 		t.Fatalf("协议版本 = %q，期望 2026-07-28", got)
 	}
 	instructions := session.InitializeResult().Instructions
-	for _, required := range []string{"memory_recall", "memory_remember", "memory_update", "memory_forget", "不得保存密码", "不得替代现场"} {
-		if !strings.Contains(instructions, required) {
-			t.Fatalf("初始化提示词缺少 %q: %s", required, instructions)
+	// instructions 是 Agent 唯一能在调用前读到的全局说明：授权入口、工具选型、长任务与截断输出的处置、
+	// 以及记忆读写与安全红线都必须写进去，缺一项模型就会退回 exec 硬拼命令或凭空猜测。
+	required := []string{
+		"hosts_list", "manage_hosts", "job_start", "output_read", "file_edit", "exec_many",
+		"memory_recall", "memory_remember", "memory_update", "memory_forget",
+		"不得保存密码", "不得替代现场",
+	}
+	for _, keyword := range required {
+		if !strings.Contains(instructions, keyword) {
+			t.Fatalf("初始化提示词缺少 %q: %s", keyword, instructions)
 		}
 	}
 
