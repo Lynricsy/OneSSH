@@ -20,6 +20,7 @@ type Host struct {
 	KeyID          sql.NullInt64  `json:"-"`
 	PasswordEnc    []byte         `json:"-"`
 	HostKeyFP      sql.NullString `json:"-"`
+	ProxyJumpHost  sql.NullString `json:"-"` // 引用另一台主机的 name 作为跳板机
 	MonitorEnabled bool           `json:"monitor_enabled"`
 	CreatedAt      int64          `json:"created_at"`
 }
@@ -33,6 +34,7 @@ type HostView struct {
 	AuthType       string  `json:"auth_type"`
 	KeyID          *int64  `json:"key_id"`
 	HostKeyFP      *string `json:"hostkey_fp"`
+	ProxyJumpHost  *string `json:"proxy_jump_host"`
 	MonitorEnabled bool    `json:"monitor_enabled"`
 	CreatedAt      int64   `json:"created_at"`
 }
@@ -46,6 +48,10 @@ func (h Host) View() HostView {
 	if h.HostKeyFP.Valid {
 		x := h.HostKeyFP.String
 		v.HostKeyFP = &x
+	}
+	if h.ProxyJumpHost.Valid && h.ProxyJumpHost.String != "" {
+		x := h.ProxyJumpHost.String
+		v.ProxyJumpHost = &x
 	}
 	return v
 }
