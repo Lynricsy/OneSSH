@@ -386,13 +386,15 @@ docker pull ghcr.io/lynricsy/onessh:latest
 
 <div align="center">
 
-<a href="https://star-history.com/#Lynricsy/OneSSH&Date">
+<a href="https://github.com/Lynricsy/OneSSH/stargazers">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Lynricsy/OneSSH&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Lynricsy/OneSSH&type=Date" />
-    <img alt="OneSSH Star History" src="https://api.star-history.com/svg?repos=Lynricsy/OneSSH&type=Date" width="640" />
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/star-history-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset=".github/assets/star-history-light.svg" />
+    <img alt="OneSSH Star History" src=".github/assets/star-history-light.svg" width="720" />
   </picture>
 </a>
+
+<sub>由 <a href="./.github/workflows/star-history.yml">Star History workflow</a> 每日用仓库自身的 <code>GITHUB_TOKEN</code> 离线渲染——GitHub 已把 stargazers API 收窄到仓库协作者，外部图表服务需要托管带写权限的 token，这里不这么做。</sub>
 
 </div>
 

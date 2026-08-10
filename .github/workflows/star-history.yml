@@ -1,0 +1,51 @@
+name: Star History
+
+# GitHub 自 2026-06-30 起把 stargazers API 限制为仓库 admin/collaborator 可读，
+# star-history.com 之类的外部渲染服务已无法为 README 出图，其补救方案要求把带
+# Contents 写权限的 token 托管给第三方。这里改由仓库自身的 GITHUB_TOKEN 拉数据、
+# 离线渲染 SVG 并提交回仓库，凭据不出 GitHub。
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/star-history.yml
+      - .github/scripts/star_history.py
+
+concurrency:
+  group: star-history
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  chart:
+    name: Render star history
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Render charts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 .github/scripts/star_history.py "${GITHUB_REPOSITORY}" .github/assets
+
+      - name: Commit when changed
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          if git diff --quiet -- .github/assets; then
+            echo "star history unchanged"
+            exit 0
+          fi
+          git add .github/assets
+          git commit -m "chore(assets): 📈 更新 star history 图表 [skip ci]"
+          git push
