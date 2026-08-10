@@ -1,4 +1,5 @@
 import {
+  Brain,
   Broadcast,
   ChartLine,
   FolderOpen,
@@ -37,6 +38,7 @@ export const navGroups: NavGroup[] = [
     items: [
       { to: '/activity', label: '活动', icon: Pulse },
       { to: '/metrics', label: '指标', icon: ChartLine },
+      { to: '/memories', label: '记忆', icon: Brain },
     ],
   },
 ]

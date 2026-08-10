@@ -14,6 +14,7 @@ import { HostsPage } from '@/pages/hosts'
 import { JobsPage } from '@/pages/jobs'
 import { KeysPage } from '@/pages/keys'
 import { LoginPage } from '@/pages/login'
+import { MemoriesPage } from '@/pages/memories'
 import { MetricsPage } from '@/pages/metrics'
 import { NotFoundPage } from '@/pages/not-found'
 import { OAuthAuthorizePage } from '@/pages/oauth-authorize'
@@ -85,6 +86,7 @@ export default function App() {
                   <Route path="jobs" element={<JobsPage />} />
                   <Route path="activity" element={<ActivityPage />} />
                   <Route path="metrics" element={<MetricsPage />} />
+                  <Route path="memories" element={<MemoriesPage />} />
                   {/* 未知路径仍留在 AppShell 内，用户可直接从侧边栏跳走 */}
                   <Route path="*" element={<NotFoundPage />} />
                 </Route>

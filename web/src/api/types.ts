@@ -73,6 +73,32 @@ export type Audit = {
   BytesOut: number
 }
 
+/** 记忆行：host_id 为 null 即全局记忆库；host_name 由后端 LEFT JOIN 带出 */
+export type MemoryRow = {
+  id: number
+  host_id: number | null
+  host_name: string | null
+  content: string
+  source: string
+  /** 0–1 连续值 */
+  importance: number
+  /** stated | inferred | tool | unknown，后端可扩展故不收窄为联合类型 */
+  veracity: string
+  created_at: number
+  updated_at: number
+  recall_count: number
+}
+
+/** 按记忆库聚合的统计；host_id 为 null 即全局库 */
+export type MemoryBankStat = {
+  host_id: number | null
+  host_name: string | null
+  count: number
+  /** 已生成向量的条数，未配置 embedding 时恒为 0 */
+  embedded: number
+  last_written: number | null
+}
+
 /** SSE 事件流载荷 */
 export type StreamEvent = {
   type: string

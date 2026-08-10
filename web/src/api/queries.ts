@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api, del, post, put, uploadFile } from './client'
 import type {
@@ -8,6 +8,8 @@ import type {
   HostPayload,
   JobStatus,
   KeyPayload,
+  MemoryBankStat,
+  MemoryRow,
   Metric,
   SSHKey,
   Token,
@@ -22,6 +24,11 @@ export const queryKeys = {
   audit: ['audit'] as const,
   metrics: (hostId: number, hours: number) => ['metrics', hostId, hours] as const,
   sftp: (hostId: number, path: string) => ['sftp', hostId, path] as const,
+  /** 记忆列表与统计共用 ['memories'] 前缀：删除后一次前缀失效即可覆盖所有筛选与翻页缓存 */
+  memories: ['memories'] as const,
+  memoryList: (hostId: number | 'all', q: string, limit: number, offset: number) =>
+    ['memories', 'list', hostId, q, limit, offset] as const,
+  memoryStats: ['memories', 'stats'] as const,
 }
 
 /** 所有 mutation 的统一失败提示；成功提示由调用方按语义给 */
@@ -80,6 +87,28 @@ export const useSftpList = (hostId: number | undefined, path: string) =>
     retry: false,
   })
 
+/** hostId 缺省 = 全部记忆库，0 = 全局库，其余 = 该主机库 */
+export type MemoryFilter = { hostId?: number; q?: string; limit?: number; offset?: number }
+
+/**
+ * 翻页与搜索沿用上一页数据（keepPreviousData）：记忆列表是阅读型页面，
+ * 每改一次筛选就整块塌成骨架屏会让人丢失阅读位置，改为原地渐隐更稳。
+ */
+export const useMemories = ({ hostId, q = '', limit = 50, offset = 0 }: MemoryFilter = {}) =>
+  useQuery({
+    queryKey: queryKeys.memoryList(hostId ?? 'all', q, limit, offset),
+    queryFn: () => {
+      const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+      if (hostId != null) params.set('host_id', String(hostId))
+      if (q) params.set('q', q)
+      return api<MemoryRow[]>(`/memories?${params}`)
+    },
+    placeholderData: keepPreviousData,
+  })
+
+export const useMemoryStats = () =>
+  useQuery({ queryKey: queryKeys.memoryStats, queryFn: () => api<MemoryBankStat[]>('/memories/stats') })
+
 /* ── 主机 ───────────────────────────────────────────────────────── */
 
 export const useSaveHost = (id?: number) =>
@@ -122,6 +151,16 @@ export const useKillJob = () =>
     (id) => post(`/jobs/${id}/kill`, {}),
     queryKeys.jobs,
     '已发送终止信号',
+  )
+
+/* ── 记忆 ───────────────────────────────────────────────────────── */
+
+/** 删除同时改变列表与库统计，故失效整个 ['memories'] 前缀而不是单条列表 key */
+export const useDeleteMemory = () =>
+  useInvalidatingMutation<number, void>(
+    (id) => del(`/memories/${id}`),
+    queryKeys.memories,
+    '记忆已删除',
   )
 
 /* ── SFTP 上传 ──────────────────────────────────────────────────── */
