@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,7 +35,7 @@ func TestHandlerUsesModernStatelessTransport(t *testing.T) {
 
 	started := make(chan struct{})
 	cancelled := make(chan struct{}, 1)
-	server := &Server{MCP: mcp.NewServer(&mcp.Implementation{Name: "OneSSH", Version: "test"}, nil)}
+	server := &Server{MCP: newProtocolServer("")}
 	mcp.AddTool(server.MCP, &mcp.Tool{Name: "wait"}, func(ctx context.Context, _ *mcp.CallToolRequest, _ Empty) (*mcp.CallToolResult, Empty, error) {
 		close(started)
 		<-ctx.Done()
@@ -61,6 +62,12 @@ func TestHandlerUsesModernStatelessTransport(t *testing.T) {
 	defer session.Close()
 	if got := session.InitializeResult().ProtocolVersion; got != "2026-07-28" {
 		t.Fatalf("协议版本 = %q，期望 2026-07-28", got)
+	}
+	instructions := session.InitializeResult().Instructions
+	for _, required := range []string{"memory_recall", "memory_remember", "memory_update", "memory_forget", "不得保存密码", "不得替代现场"} {
+		if !strings.Contains(instructions, required) {
+			t.Fatalf("初始化提示词缺少 %q: %s", required, instructions)
+		}
 	}
 
 	callCtx, cancelCall := context.WithCancel(context.Background())

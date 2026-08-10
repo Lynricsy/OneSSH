@@ -120,6 +120,8 @@ http://localhost:8866/mcp
 
 端点采用无状态 Streamable HTTP：每个请求独立鉴权，响应可按协议使用请求级 SSE；不依赖 `MCP-Session-Id`。
 
+`initialize` 响应会提供服务器级 `instructions`，提示 Agent 在主机任务前按需召回、在确认长期有效事实后写入、禁止保存秘密、校验记忆时效，并在事实变化时更新或删除旧记录。是否自动注入模型上下文取决于 MCP 客户端实现。
+
 ### 两种凭据
 
 <table>
