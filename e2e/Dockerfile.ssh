@@ -1,3 +1,4 @@
 FROM lscr.io/linuxserver/openssh-server:latest
 
-RUN apk add --no-cache fd ripgrep
+RUN sed -i 's/^AllowTcpForwarding no$/AllowTcpForwarding yes/' /etc/ssh/sshd_config \
+    && apk add --no-cache fd ripgrep
