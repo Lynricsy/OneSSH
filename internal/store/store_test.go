@@ -15,7 +15,7 @@ func TestOpenCreatesSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	for _, table := range []string{"keys", "hosts", "tokens", "sessions", "jobs", "audit", "metrics", "oauth_clients", "oauth_authorization_codes", "oauth_refresh_tokens"} {
+	for _, table := range []string{"keys", "hosts", "tokens", "sessions", "jobs", "audit", "metrics", "oauth_clients", "oauth_authorization_codes", "oauth_refresh_tokens", "memories", "memories_fts"} {
 		var name string
 		if err := s.DB.QueryRowContext(context.Background(), `SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name); err != nil {
 			t.Fatalf("缺少表 %s: %v", table, err)
@@ -68,10 +68,10 @@ func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 		}
 	}
 	var versions int
-	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (1,2,3,4,5)`).Scan(&versions); err != nil {
+	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (1,2,3,4,5,6)`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 5 {
+	if versions != 6 {
 		t.Fatalf("迁移版本数 = %d", versions)
 	}
 	if err = st.Close(); err != nil {
@@ -85,7 +85,7 @@ func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 5 {
+	if versions != 6 {
 		t.Fatalf("二次迁移版本数 = %d", versions)
 	}
 }
@@ -114,7 +114,7 @@ func TestOpenRecordsPreexistingManageHostsColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 5 {
+	if versions != 6 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 }
@@ -180,10 +180,16 @@ func TestDeleteHostProtectsRunningJobsAndCleansReferences(t *testing.T) {
 	if _, err = st.DB.ExecContext(ctx, `INSERT INTO metrics(host_id,ts) VALUES(?,?)`, host.ID, 1); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = st.AddMemory(ctx, Memory{
+		HostID: sql.NullInt64{Int64: host.ID, Valid: true}, Content: "主机删除时一并清理",
+		Source: "test", Importance: 0.5, Veracity: "stated", CreatedAt: 1, UpdatedAt: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err = st.DeleteHost(ctx, host.ID); err != ErrHostHasRunningJobs {
 		t.Fatalf("运行任务未阻止删除: %v", err)
 	}
-	for _, table := range []string{"hosts", "token_hosts", "sessions", "jobs", "metrics"} {
+	for _, table := range []string{"hosts", "token_hosts", "sessions", "jobs", "metrics", "memories"} {
 		var count int
 		if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM `+table).Scan(&count); err != nil {
 			t.Fatal(err)
@@ -199,7 +205,7 @@ func TestDeleteHostProtectsRunningJobsAndCleansReferences(t *testing.T) {
 	if err = st.DeleteHost(ctx, host.ID); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"hosts", "token_hosts", "sessions", "jobs", "metrics"} {
+	for _, table := range []string{"hosts", "token_hosts", "sessions", "jobs", "metrics", "memories"} {
 		var count int
 		if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM `+table).Scan(&count); err != nil {
 			t.Fatal(err)
@@ -221,6 +227,80 @@ func TestDeleteHostProtectsRunningJobsAndCleansReferences(t *testing.T) {
 	}
 	if len(hosts) != 0 {
 		t.Fatalf("旧令牌授权附着到替代主机: %#v", hosts)
+	}
+}
+
+func TestMemoryCRUDAndFTS(t *testing.T) {
+	ctx := context.Background()
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	host, err := st.CreateHost(ctx, Host{Name: "memory-host", Addr: "127.0.0.1", Port: 22, Username: "user", AuthType: "password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostID := sql.NullInt64{Int64: host.ID, Valid: true}
+	id, err := st.AddMemory(ctx, Memory{
+		HostID: hostID, Content: "部署目录在 /opt/app", Source: "test", Importance: 0.6, Veracity: "stated",
+		CreatedAt: 10, UpdatedAt: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetMemory(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Content != "部署目录在 /opt/app" || got.HostID != hostID {
+		t.Fatalf("读取记忆异常: %#v", got)
+	}
+	found, err := st.FindMemoryByContent(ctx, hostID, got.Content)
+	if err != nil || found.ID != id {
+		t.Fatalf("按内容查找失败: memory=%#v err=%v", found, err)
+	}
+	matches, err := st.SearchMemoriesFTS(ctx, hostID, false, `"部署目录"`, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].ID != id {
+		t.Fatalf("中文 FTS 未命中: %#v", matches)
+	}
+	got.Content = "服务目录在 /srv/app"
+	got.Importance = 0.9
+	got.UpdatedAt = 20
+	got.Embedding = []byte{1, 2, 3, 4}
+	got.EmbeddingModel = sql.NullString{String: "test-model", Valid: true}
+	if err = st.UpdateMemory(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := st.ListMemories(ctx, hostID, 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].Content != got.Content || listed[0].Importance != 0.9 {
+		t.Fatalf("更新或列表异常: %#v", listed)
+	}
+	vectors, err := st.ListMemoryVectors(ctx, hostID, false, "test-model")
+	if err != nil || len(vectors) != 1 || vectors[0].ID != id {
+		t.Fatalf("向量列表异常: vectors=%#v err=%v", vectors, err)
+	}
+	if err = st.TouchMemoryRecalls(ctx, []int64{id}, 30); err != nil {
+		t.Fatal(err)
+	}
+	got, err = st.GetMemory(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.RecallCount != 1 || !got.LastRecalled.Valid || got.LastRecalled.Int64 != 30 {
+		t.Fatalf("召回计数异常: %#v", got)
+	}
+	if err = st.DeleteMemory(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = st.GetMemory(ctx, id); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("删除后仍能读取: %v", err)
 	}
 }
 

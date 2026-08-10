@@ -102,3 +102,50 @@ type Metric struct {
 	Load1                 sql.NullFloat64
 	DisksJSON             string
 }
+
+type Memory struct {
+	ID             int64          `json:"id"`
+	HostID         sql.NullInt64  `json:"-"`
+	Content        string         `json:"content"`
+	Source         string         `json:"source"`
+	Importance     float64        `json:"importance"`
+	Veracity       string         `json:"veracity"`
+	TokenID        sql.NullInt64  `json:"-"`
+	CreatedAt      int64          `json:"created_at"`
+	UpdatedAt      int64          `json:"updated_at"`
+	RecallCount    int64          `json:"recall_count"`
+	LastRecalled   sql.NullInt64  `json:"-"`
+	Embedding      []byte         `json:"-"`
+	EmbeddingModel sql.NullString `json:"-"`
+}
+
+type MemoryWithRank struct {
+	Memory
+	Rank float64
+}
+
+type MemoryVector struct {
+	ID        int64
+	Embedding []byte
+}
+
+type MemoryAdminRow struct {
+	ID           int64         `json:"id"`
+	HostID       *int64        `json:"host_id"`
+	HostName     *string       `json:"host_name"`
+	Content      string        `json:"content"`
+	Source       string        `json:"source"`
+	Importance   float64       `json:"importance"`
+	Veracity     string        `json:"veracity"`
+	CreatedAt    int64         `json:"created_at"`
+	UpdatedAt    int64         `json:"updated_at"`
+	RecallCount  int64         `json:"recall_count"`
+	LastRecalled sql.NullInt64 `json:"-"`
+}
+
+type MemoryBankStat struct {
+	HostID      sql.NullInt64 `json:"-"`
+	Count       int64         `json:"count"`
+	Embedded    int64         `json:"embedded"`
+	LastWritten sql.NullInt64 `json:"-"`
+}

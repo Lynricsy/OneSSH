@@ -99,6 +99,7 @@ func (s *Store) DeleteHost(ctx context.Context, id int64) error {
 		`DELETE FROM sessions WHERE host_id=?`,
 		`DELETE FROM jobs WHERE host_id=?`,
 		`DELETE FROM metrics WHERE host_id=?`,
+		`DELETE FROM memories WHERE host_id=?`,
 	} {
 		if _, err = tx.ExecContext(ctx, query, id); err != nil {
 			return err
