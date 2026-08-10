@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,7 +41,33 @@ func (p *Pool) getEntry(name string) *entry {
 	}
 	return e
 }
+
+// jumpChainKey is used to detect circular proxy-jump references via context.
+type jumpChainKey struct{}
+
+func jumpChain(ctx context.Context) []string {
+	v, _ := ctx.Value(jumpChainKey{}).([]string)
+	return v
+}
+
+func withJump(ctx context.Context, name string) context.Context {
+	chain := jumpChain(ctx)
+	newChain := make([]string, len(chain), len(chain)+1)
+	copy(newChain, chain)
+	newChain = append(newChain, name)
+	return context.WithValue(ctx, jumpChainKey{}, newChain)
+}
+
 func (p *Pool) Get(ctx context.Context, name string) (*ssh.Client, error) {
+	// Check for circular proxy-jump before locking: if name already appears
+	// in the jump chain, its entry lock is held by a caller up the stack,
+	// so locking here would deadlock.
+	chain := jumpChain(ctx)
+	for _, n := range chain {
+		if n == name {
+			return nil, fmt.Errorf("跳板机循环引用: %s → %s", strings.Join(append(chain, name), " → "), name)
+		}
+	}
 	e := p.getEntry(name)
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -61,7 +88,15 @@ func (p *Pool) Get(ctx context.Context, name string) (*ssh.Client, error) {
 	go p.keepalive(name, e, client)
 	return client, nil
 }
+
+const maxJumpDepth = 5
+
 func (p *Pool) dial(ctx context.Context, h store.Host) (*ssh.Client, error) {
+	// Secondary defense: depth-based limit on jump chain length.
+	depth := len(jumpChain(ctx))
+	if depth > maxJumpDepth {
+		return nil, fmt.Errorf("跳板链路过深（超过 %d 层），可能存在循环引用", maxJumpDepth)
+	}
 	var auth ssh.AuthMethod
 	switch h.AuthType {
 	case "password":
@@ -111,10 +146,25 @@ func (p *Pool) dial(ctx context.Context, h store.Host) (*ssh.Client, error) {
 	}
 	config := &ssh.ClientConfig{User: h.Username, Auth: []ssh.AuthMethod{auth}, HostKeyCallback: callback, Timeout: 15 * time.Second}
 	addr := net.JoinHostPort(h.Addr, strconv.Itoa(h.Port))
-	d := net.Dialer{Timeout: 15 * time.Second}
-	conn, err := d.DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("连接 %s: %w", nameAddr(h), err)
+	var conn net.Conn
+	var err error
+	if h.ProxyJumpHost.Valid && h.ProxyJumpHost.String != "" {
+		// Dial through a jump host: add current host to chain (for cycle detection)
+		// then recursively Get the jump host's SSH client (cached or freshly dialed).
+		jumpClient, err := p.Get(withJump(ctx, h.Name), h.ProxyJumpHost.String)
+		if err != nil {
+			return nil, fmt.Errorf("跳板机 %s: %w", h.ProxyJumpHost.String, err)
+		}
+		conn, err = jumpClient.Dial("tcp", addr)
+		if err != nil {
+			return nil, fmt.Errorf("经跳板机 %s 连接 %s: %w", h.ProxyJumpHost.String, nameAddr(h), err)
+		}
+	} else {
+		d := net.Dialer{Timeout: 15 * time.Second}
+		conn, err = d.DialContext(ctx, "tcp", addr)
+		if err != nil {
+			return nil, fmt.Errorf("连接 %s: %w", nameAddr(h), err)
+		}
 	}
 	cc, chans, reqs, err := ssh.NewClientConn(conn, addr, config)
 	if err != nil {

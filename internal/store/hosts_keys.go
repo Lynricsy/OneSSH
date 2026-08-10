@@ -55,13 +55,13 @@ func (s *Store) DeleteKey(ctx context.Context, id int64) error {
 func scanHost(row interface{ Scan(...any) error }) (Host, error) {
 	var h Host
 	var enabled int
-	err := row.Scan(&h.ID, &h.Name, &h.Addr, &h.Port, &h.Username, &h.AuthType, &h.KeyID, &h.PasswordEnc, &h.HostKeyFP, &enabled, &h.CreatedAt)
+	err := row.Scan(&h.ID, &h.Name, &h.Addr, &h.Port, &h.Username, &h.AuthType, &h.KeyID, &h.PasswordEnc, &h.HostKeyFP, &h.ProxyJumpHost, &enabled, &h.CreatedAt)
 	h.MonitorEnabled = enabled != 0
 	return h, err
 }
 func (s *Store) CreateHost(ctx context.Context, h Host) (Host, error) {
 	now := time.Now().Unix()
-	res, err := s.DB.ExecContext(ctx, `INSERT INTO hosts(name,addr,port,username,auth_type,key_id,password_enc,monitor_enabled,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, h.Name, h.Addr, h.Port, h.Username, h.AuthType, nullInt(h.KeyID), h.PasswordEnc, boolInt(h.MonitorEnabled), now)
+	res, err := s.DB.ExecContext(ctx, `INSERT INTO hosts(name,addr,port,username,auth_type,key_id,password_enc,proxy_jump_host,monitor_enabled,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, h.Name, h.Addr, h.Port, h.Username, h.AuthType, nullInt(h.KeyID), h.PasswordEnc, nullStr(h.ProxyJumpHost), boolInt(h.MonitorEnabled), now)
 	if err != nil {
 		return Host{}, err
 	}
@@ -70,7 +70,7 @@ func (s *Store) CreateHost(ctx context.Context, h Host) (Host, error) {
 	return h, nil
 }
 func (s *Store) UpdateHost(ctx context.Context, h Host) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE hosts SET name=?,addr=?,port=?,username=?,auth_type=?,key_id=?,password_enc=?,monitor_enabled=? WHERE id=?`, h.Name, h.Addr, h.Port, h.Username, h.AuthType, nullInt(h.KeyID), h.PasswordEnc, boolInt(h.MonitorEnabled), h.ID)
+	_, err := s.DB.ExecContext(ctx, `UPDATE hosts SET name=?,addr=?,port=?,username=?,auth_type=?,key_id=?,password_enc=?,proxy_jump_host=?,monitor_enabled=? WHERE id=?`, h.Name, h.Addr, h.Port, h.Username, h.AuthType, nullInt(h.KeyID), h.PasswordEnc, nullStr(h.ProxyJumpHost), boolInt(h.MonitorEnabled), h.ID)
 	return err
 }
 func (s *Store) DeleteHost(ctx context.Context, id int64) error {
@@ -119,7 +119,7 @@ func (s *Store) DeleteHost(ctx context.Context, id int64) error {
 	return tx.Commit()
 }
 func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,monitor_enabled,created_at FROM hosts ORDER BY name`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,proxy_jump_host,monitor_enabled,created_at FROM hosts ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -135,10 +135,10 @@ func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 	return out, rows.Err()
 }
 func (s *Store) GetHostByName(ctx context.Context, name string) (Host, error) {
-	return scanHost(s.DB.QueryRowContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,monitor_enabled,created_at FROM hosts WHERE name=?`, name))
+	return scanHost(s.DB.QueryRowContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,proxy_jump_host,monitor_enabled,created_at FROM hosts WHERE name=?`, name))
 }
 func (s *Store) GetHost(ctx context.Context, id int64) (Host, error) {
-	return scanHost(s.DB.QueryRowContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,monitor_enabled,created_at FROM hosts WHERE id=?`, id))
+	return scanHost(s.DB.QueryRowContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,proxy_jump_host,monitor_enabled,created_at FROM hosts WHERE id=?`, id))
 }
 func (s *Store) UpdateHostFingerprint(ctx context.Context, id int64, fp *string) error {
 	var v any
@@ -149,7 +149,7 @@ func (s *Store) UpdateHostFingerprint(ctx context.Context, id int64, fp *string)
 	return err
 }
 func (s *Store) MonitoredHosts(ctx context.Context) ([]Host, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,monitor_enabled,created_at FROM hosts WHERE monitor_enabled=1 ORDER BY name`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,proxy_jump_host,monitor_enabled,created_at FROM hosts WHERE monitor_enabled=1 ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -173,6 +173,13 @@ func boolInt(v bool) int {
 func nullInt(v sql.NullInt64) any {
 	if v.Valid {
 		return v.Int64
+	}
+	return nil
+}
+
+func nullStr(v sql.NullString) any {
+	if v.Valid {
+		return v.String
 	}
 	return nil
 }
