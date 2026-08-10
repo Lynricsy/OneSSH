@@ -37,7 +37,7 @@ type Server struct {
 
 const serverInstructions = `OneSSH 是受主机权限控制的 SSH 运维网关：通过它连接远程主机、执行命令、读写文件、跑后台任务、看资源指标，并在跨会话的记忆库里积累运维知识。
 
-【主机与权限】所有工具的 host 参数只接受 hosts_list 返回的名称，任务开始前先调用一次 hosts_list 确认目标主机与在线状态；名称不在授权列表时会返回 host not authorized。hosts_manage_list、host_create、host_update、host_test、host_reset_fingerprint、host_delete 属于全局配置管理，需要独立的 manage_hosts 权限，且该权限不会扩大命令与文件工具的可访问主机范围。
+【主机与权限】所有工具的 host 参数只接受 hosts_list 返回的名称，任务开始前先调用一次 hosts_list 确认目标主机与在线状态；名称不在授权列表时会返回 host not authorized。hosts_manage_list、host_create、host_update、host_test、host_reset_fingerprint、host_delete 属于全局配置管理，需要独立的 manage_hosts 权限，且该权限不会扩大命令与文件工具的可访问主机范围。主机可配置 jump_host 跳板，连接自动经跳板隧道建立，对命令与文件工具透明。
 
 【优先用专用工具，不要拿 exec 兜底】搜内容用 grep，找路径用 find，看目录用 file_list，读文件用 file_read，整文件覆盖用 file_write，局部改写用 file_edit，跨主机复制用 file_transfer，看 CPU/内存/磁盘用 host_status，看图片用 image_view。这些工具返回结构化结果，并已处理引号转义、超时、大小上限与输出截断；用 exec 拼 cat/sed/scp/grep 更容易踩到引号与转义问题，只有在没有对应专用工具时才用 exec。
 

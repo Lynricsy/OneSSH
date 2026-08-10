@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +15,9 @@ import (
 	"onessh/internal/cryptox"
 	"onessh/internal/store"
 )
+
+// maxJumpChain 须与 hostmanager 中的同名常量保持一致。
+const maxJumpChain = 5
 
 type entry struct {
 	mu     sync.Mutex
@@ -41,6 +46,16 @@ func (p *Pool) getEntry(name string) *entry {
 	return e
 }
 func (p *Pool) Get(ctx context.Context, name string) (*ssh.Client, error) {
+	return p.get(ctx, name, nil)
+}
+
+func (p *Pool) get(ctx context.Context, name string, via []string) (*ssh.Client, error) {
+	if slices.Contains(via, name) {
+		return nil, fmt.Errorf("跳板链存在循环: %s", strings.Join(append(via, name), " -> "))
+	}
+	if len(via) > maxJumpChain {
+		return nil, fmt.Errorf("跳板链超过 %d 级", maxJumpChain)
+	}
 	e := p.getEntry(name)
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -51,7 +66,7 @@ func (p *Pool) Get(ctx context.Context, name string) (*ssh.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unknown host: %s", name)
 	}
-	client, err := p.dial(ctx, h)
+	client, err := p.dial(ctx, h, via)
 	if err != nil {
 		e.online = false
 		return nil, err
@@ -61,7 +76,7 @@ func (p *Pool) Get(ctx context.Context, name string) (*ssh.Client, error) {
 	go p.keepalive(name, e, client)
 	return client, nil
 }
-func (p *Pool) dial(ctx context.Context, h store.Host) (*ssh.Client, error) {
+func (p *Pool) dial(ctx context.Context, h store.Host, via []string) (*ssh.Client, error) {
 	var auth ssh.AuthMethod
 	switch h.AuthType {
 	case "password":
@@ -111,10 +126,29 @@ func (p *Pool) dial(ctx context.Context, h store.Host) (*ssh.Client, error) {
 	}
 	config := &ssh.ClientConfig{User: h.Username, Auth: []ssh.AuthMethod{auth}, HostKeyCallback: callback, Timeout: 15 * time.Second}
 	addr := net.JoinHostPort(h.Addr, strconv.Itoa(h.Port))
-	d := net.Dialer{Timeout: 15 * time.Second}
-	conn, err := d.DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("连接 %s: %w", nameAddr(h), err)
+	var conn net.Conn
+	var err error
+	if h.JumpHostID.Valid {
+		jump, err := p.store.GetHost(ctx, h.JumpHostID.Int64)
+		if err != nil {
+			return nil, fmt.Errorf("查找 %s 的跳板主机: %w", nameAddr(h), err)
+		}
+		jc, err := p.get(ctx, jump.Name, append(via, h.Name))
+		if err != nil {
+			return nil, fmt.Errorf("连接跳板 %s: %w", nameAddr(jump), err)
+		}
+		// 跳板也是连接池中的普通 entry，拥有独立 keepalive，并可被多个目标复用。
+		// 跳板断开后，目标连接会在下次使用或 30 秒内的 keepalive 中失效并重建。
+		conn, err = jc.DialContext(ctx, "tcp", addr)
+		if err != nil {
+			return nil, fmt.Errorf("经跳板 %s 连接 %s: %w", jump.Name, nameAddr(h), err)
+		}
+	} else {
+		d := net.Dialer{Timeout: 15 * time.Second}
+		conn, err = d.DialContext(ctx, "tcp", addr)
+		if err != nil {
+			return nil, fmt.Errorf("连接 %s: %w", nameAddr(h), err)
+		}
 	}
 	cc, chans, reqs, err := ssh.NewClientConn(conn, addr, config)
 	if err != nil {

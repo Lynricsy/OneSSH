@@ -8,7 +8,10 @@ import (
 	"time"
 )
 
-var ErrHostHasRunningJobs = errors.New("主机存在运行中的后台任务")
+var (
+	ErrHostHasRunningJobs = errors.New("主机存在运行中的后台任务")
+	ErrHostIsJumpHost     = errors.New("主机被其他主机用作跳板")
+)
 
 func (s *Store) CreateKey(ctx context.Context, name string, enc []byte, public string) (Key, error) {
 	now := time.Now().Unix()
@@ -55,13 +58,13 @@ func (s *Store) DeleteKey(ctx context.Context, id int64) error {
 func scanHost(row interface{ Scan(...any) error }) (Host, error) {
 	var h Host
 	var enabled int
-	err := row.Scan(&h.ID, &h.Name, &h.Addr, &h.Port, &h.Username, &h.AuthType, &h.KeyID, &h.PasswordEnc, &h.HostKeyFP, &enabled, &h.CreatedAt)
+	err := row.Scan(&h.ID, &h.Name, &h.Addr, &h.Port, &h.Username, &h.AuthType, &h.KeyID, &h.PasswordEnc, &h.HostKeyFP, &h.JumpHostID, &enabled, &h.CreatedAt)
 	h.MonitorEnabled = enabled != 0
 	return h, err
 }
 func (s *Store) CreateHost(ctx context.Context, h Host) (Host, error) {
 	now := time.Now().Unix()
-	res, err := s.DB.ExecContext(ctx, `INSERT INTO hosts(name,addr,port,username,auth_type,key_id,password_enc,monitor_enabled,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, h.Name, h.Addr, h.Port, h.Username, h.AuthType, nullInt(h.KeyID), h.PasswordEnc, boolInt(h.MonitorEnabled), now)
+	res, err := s.DB.ExecContext(ctx, `INSERT INTO hosts(name,addr,port,username,auth_type,key_id,password_enc,jump_host_id,monitor_enabled,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, h.Name, h.Addr, h.Port, h.Username, h.AuthType, nullInt(h.KeyID), h.PasswordEnc, nullInt(h.JumpHostID), boolInt(h.MonitorEnabled), now)
 	if err != nil {
 		return Host{}, err
 	}
@@ -70,7 +73,7 @@ func (s *Store) CreateHost(ctx context.Context, h Host) (Host, error) {
 	return h, nil
 }
 func (s *Store) UpdateHost(ctx context.Context, h Host) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE hosts SET name=?,addr=?,port=?,username=?,auth_type=?,key_id=?,password_enc=?,monitor_enabled=? WHERE id=?`, h.Name, h.Addr, h.Port, h.Username, h.AuthType, nullInt(h.KeyID), h.PasswordEnc, boolInt(h.MonitorEnabled), h.ID)
+	_, err := s.DB.ExecContext(ctx, `UPDATE hosts SET name=?,addr=?,port=?,username=?,auth_type=?,key_id=?,password_enc=?,jump_host_id=?,monitor_enabled=? WHERE id=?`, h.Name, h.Addr, h.Port, h.Username, h.AuthType, nullInt(h.KeyID), h.PasswordEnc, nullInt(h.JumpHostID), boolInt(h.MonitorEnabled), h.ID)
 	return err
 }
 func (s *Store) DeleteHost(ctx context.Context, id int64) error {
@@ -85,6 +88,13 @@ func (s *Store) DeleteHost(ctx context.Context, id int64) error {
 	}
 	if running != 0 {
 		return ErrHostHasRunningJobs
+	}
+	var dependents int
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM hosts WHERE jump_host_id=?`, id).Scan(&dependents); err != nil {
+		return err
+	}
+	if dependents != 0 {
+		return ErrHostIsJumpHost
 	}
 	now := time.Now().Unix()
 	restrictedGrant := `SELECT DISTINCT grant_id FROM oauth_refresh_tokens WHERE all_hosts=0 AND EXISTS (SELECT 1 FROM json_each(oauth_refresh_tokens.host_ids_json) WHERE json_each.value=?)`
@@ -119,7 +129,7 @@ func (s *Store) DeleteHost(ctx context.Context, id int64) error {
 	return tx.Commit()
 }
 func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,monitor_enabled,created_at FROM hosts ORDER BY name`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,jump_host_id,monitor_enabled,created_at FROM hosts ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -135,10 +145,26 @@ func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 	return out, rows.Err()
 }
 func (s *Store) GetHostByName(ctx context.Context, name string) (Host, error) {
-	return scanHost(s.DB.QueryRowContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,monitor_enabled,created_at FROM hosts WHERE name=?`, name))
+	return scanHost(s.DB.QueryRowContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,jump_host_id,monitor_enabled,created_at FROM hosts WHERE name=?`, name))
 }
 func (s *Store) GetHost(ctx context.Context, id int64) (Host, error) {
-	return scanHost(s.DB.QueryRowContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,monitor_enabled,created_at FROM hosts WHERE id=?`, id))
+	return scanHost(s.DB.QueryRowContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,jump_host_id,monitor_enabled,created_at FROM hosts WHERE id=?`, id))
+}
+func (s *Store) JumpDependentNames(ctx context.Context, id int64) ([]string, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT name FROM hosts WHERE jump_host_id=? ORDER BY name`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	names := make([]string, 0)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
 }
 func (s *Store) UpdateHostFingerprint(ctx context.Context, id int64, fp *string) error {
 	var v any
@@ -149,7 +175,7 @@ func (s *Store) UpdateHostFingerprint(ctx context.Context, id int64, fp *string)
 	return err
 }
 func (s *Store) MonitoredHosts(ctx context.Context) ([]Host, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,monitor_enabled,created_at FROM hosts WHERE monitor_enabled=1 ORDER BY name`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,jump_host_id,monitor_enabled,created_at FROM hosts WHERE monitor_enabled=1 ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}

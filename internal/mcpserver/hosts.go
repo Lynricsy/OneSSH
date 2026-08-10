@@ -38,6 +38,7 @@ type HostUpdateInput struct {
 	AuthType       string  `json:"auth_type" jsonschema:"认证方式：key 或 password"`
 	KeyID          *int64  `json:"key_id,omitempty" jsonschema:"key 认证使用的密钥 ID，auth_type=key 时必填"`
 	Password       *string `json:"password,omitempty" jsonschema:"新的登录密码；auth_type 保持 password 且沿用原密码时可省略"`
+	JumpHost       string  `json:"jump_host,omitempty" jsonschema:"跳板主机名，留空表示直连；整体替换语义下省略即清除原跳板配置"`
 	MonitorEnabled *bool   `json:"monitor_enabled,omitempty" jsonschema:"是否纳入后台资源监控轮询，省略表示保持原值"`
 }
 
@@ -50,6 +51,7 @@ type ManagedHostItem struct {
 	AuthType       string  `json:"auth_type"`
 	KeyID          *int64  `json:"key_id"`
 	HostKeyFP      *string `json:"hostkey_fp"`
+	JumpHost       *string `json:"jump_host"`
 	MonitorEnabled bool    `json:"monitor_enabled"`
 	CreatedAt      int64   `json:"created_at"`
 	Online         bool    `json:"online"`
@@ -75,13 +77,13 @@ func (s *Server) registerHosts() {
 	register[hostmanager.Input, ManagedHostItem](s, &mcp.Tool{
 		Name:        "host_create",
 		Title:       "新增主机配置",
-		Description: "新增一台 SSH 主机配置。auth_type=key 必须给 key_id，auth_type=password 必须给 password；port 省略按 22 处理，name 必须唯一。只写入配置、不建立连接，创建后用 host_test 验证凭据并固定主机公钥指纹。新主机不会自动加入当前令牌的授权列表。需要 manage_hosts 权限。",
+		Description: "新增一台 SSH 主机配置。auth_type=key 必须给 key_id，auth_type=password 必须给 password；port 省略按 22 处理，name 必须唯一。只写入配置、不建立连接，创建后用 host_test 验证凭据并固定主机公钥指纹。新主机不会自动加入当前令牌的授权列表。可选 jump_host 指定跳板主机名，连接经该主机中转，支持最多 5 级链但不允许成环。需要 manage_hosts 权限。",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: new(false), IdempotentHint: false, OpenWorldHint: new(false)},
 	}, s.hostCreate)
 	register[HostUpdateInput, ManagedHostItem](s, &mcp.Tool{
 		Name:        "host_update",
 		Title:       "替换主机配置",
-		Description: "整体替换一台 SSH 主机的配置：host 指定当前名称，其余字段是替换后的完整值，未提供的字段按空值处理，因此改一个字段也要把其他字段一并回填（可先用 hosts_manage_list 取当前值）。name 与 host 不同即完成改名，主机记忆与授权按 ID 保留。需要 manage_hosts 权限。",
+		Description: "整体替换一台 SSH 主机的配置：host 指定当前名称，其余字段是替换后的完整值，未提供的字段按空值处理，因此改一个字段也要把其他字段一并回填（可先用 hosts_manage_list 取当前值）。name 与 host 不同即完成改名，主机记忆与授权按 ID 保留。jump_host 同样按整体替换处理，省略即改回直连。需要 manage_hosts 权限。",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: new(true), IdempotentHint: true, OpenWorldHint: new(false)},
 	}, s.hostUpdate)
 	register[HostRefInput, execx.Result](s, &mcp.Tool{
@@ -99,7 +101,7 @@ func (s *Server) registerHosts() {
 	register[HostRefInput, OKOutput](s, &mcp.Tool{
 		Name:        "host_delete",
 		Title:       "删除主机",
-		Description: "删除主机配置及其令牌授权、持久会话、后台任务记录、监控指标和该主机 bank 的全部记忆，不可撤销。仅在主机确实下线时使用；只是临时不用请改为关闭 monitor_enabled。需要 manage_hosts 权限。",
+		Description: "删除主机配置及其令牌授权、持久会话、后台任务记录、监控指标和该主机 bank 的全部记忆，不可撤销。被其他主机用作跳板的主机不能删除，需先解除依赖。仅在主机确实下线时使用；只是临时不用请改为关闭 monitor_enabled。需要 manage_hosts 权限。",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: new(true), IdempotentHint: false, OpenWorldHint: new(false)},
 	}, s.hostDelete)
 }
@@ -126,7 +128,7 @@ func (s *Server) hostsManageList(ctx context.Context, _ *mcp.CallToolRequest, _ 
 	}
 	out := ManagedHostsOutput{Hosts: make([]ManagedHostItem, 0, len(hosts))}
 	for _, host := range hosts {
-		out.Hosts = append(out.Hosts, s.managedHostItem(host))
+		out.Hosts = append(out.Hosts, s.managedHostItem(ctx, host))
 	}
 	return nil, out, nil
 }
@@ -139,7 +141,7 @@ func (s *Server) hostCreate(ctx context.Context, _ *mcp.CallToolRequest, in host
 	if err != nil {
 		return errorResult(err.Error()), ManagedHostItem{}, nil
 	}
-	return nil, s.managedHostItem(host), nil
+	return nil, s.managedHostItem(ctx, host), nil
 }
 
 func (s *Server) hostUpdate(ctx context.Context, _ *mcp.CallToolRequest, in HostUpdateInput) (*mcp.CallToolResult, ManagedHostItem, error) {
@@ -152,12 +154,12 @@ func (s *Server) hostUpdate(ctx context.Context, _ *mcp.CallToolRequest, in Host
 	}
 	updated, err := s.HostManager.Update(ctx, host.ID, hostmanager.Input{
 		Name: in.Name, Addr: in.Addr, Port: in.Port, Username: in.Username, AuthType: in.AuthType,
-		KeyID: in.KeyID, Password: in.Password, MonitorEnabled: in.MonitorEnabled,
+		KeyID: in.KeyID, Password: in.Password, JumpHost: in.JumpHost, MonitorEnabled: in.MonitorEnabled,
 	})
 	if err != nil {
 		return errorResult(err.Error()), ManagedHostItem{}, nil
 	}
-	return nil, s.managedHostItem(updated), nil
+	return nil, s.managedHostItem(ctx, updated), nil
 }
 
 func (s *Server) hostTest(ctx context.Context, _ *mcp.CallToolRequest, in HostRefInput) (*mcp.CallToolResult, execx.Result, error) {
@@ -214,11 +216,17 @@ func (s *Server) hostByName(ctx context.Context, name string) (store.Host, error
 	return host, err
 }
 
-func (s *Server) managedHostItem(host store.Host) ManagedHostItem {
+func (s *Server) managedHostItem(ctx context.Context, host store.Host) ManagedHostItem {
 	view := host.View()
-	return ManagedHostItem{
+	item := ManagedHostItem{
 		ID: view.ID, Name: view.Name, Addr: view.Addr, Port: view.Port, Username: view.Username,
 		AuthType: view.AuthType, KeyID: view.KeyID, HostKeyFP: view.HostKeyFP,
 		MonitorEnabled: view.MonitorEnabled, CreatedAt: view.CreatedAt, Online: s.Pool.IsOnline(host.Name),
 	}
+	if host.JumpHostID.Valid {
+		if jump, err := s.Store.GetHost(ctx, host.JumpHostID.Int64); err == nil {
+			item.JumpHost = &jump.Name
+		}
+	}
+	return item
 }

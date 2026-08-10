@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -15,6 +16,9 @@ import (
 	"onessh/internal/store"
 )
 
+// maxJumpChain 须与 sshpool 中的同名常量保持一致。
+const maxJumpChain = 5
+
 type Input struct {
 	Name           string  `json:"name" jsonschema:"主机名，网关内唯一，后续所有工具用它引用这台主机"`
 	Addr           string  `json:"addr" jsonschema:"主机地址或 IP"`
@@ -23,6 +27,7 @@ type Input struct {
 	AuthType       string  `json:"auth_type" jsonschema:"认证方式：key 或 password"`
 	KeyID          *int64  `json:"key_id,omitempty" jsonschema:"key 认证使用的密钥 ID，auth_type=key 时必填"`
 	Password       *string `json:"password,omitempty" jsonschema:"登录密码；auth_type 为 password 时必填，只写不可读，审计中固定脱敏"`
+	JumpHost       string  `json:"jump_host,omitempty" jsonschema:"跳板主机名（可选）：连接时先经该主机建立隧道再连目标，留空表示直连。跳板主机必须已存在；链路最多 5 级且不能成环"`
 	MonitorEnabled *bool   `json:"monitor_enabled,omitempty" jsonschema:"是否纳入后台资源监控轮询，新建时默认开启"`
 }
 
@@ -101,6 +106,11 @@ func (m *Manager) Update(ctx context.Context, id int64, in Input) (store.Host, e
 	if host.Name != old.Name {
 		m.pool.Invalidate(host.Name)
 	}
+	if names, err := m.store.JumpDependentNames(ctx, old.ID); err == nil {
+		for _, name := range names {
+			m.pool.Invalidate(name)
+		}
+	}
 	return host, nil
 }
 
@@ -113,6 +123,8 @@ func (m *Manager) Delete(ctx context.Context, id int64) error {
 	if err = m.store.DeleteHost(ctx, id); err != nil {
 		switch {
 		case errors.Is(err, store.ErrHostHasRunningJobs):
+			return &Error{Kind: ErrorConflict, Err: err}
+		case errors.Is(err, store.ErrHostIsJumpHost):
 			return &Error{Kind: ErrorConflict, Err: err}
 		case errors.Is(err, sql.ErrNoRows):
 			return classifyLookup(err)
@@ -204,6 +216,37 @@ func (m *Manager) hostFromInput(ctx context.Context, old store.Host, in Input, u
 		}
 	default:
 		return store.Host{}, invalid("auth_type 必须是 key 或 password")
+	}
+	host.JumpHostID = sql.NullInt64{}
+	if name := strings.TrimSpace(in.JumpHost); name != "" {
+		jump, err := m.store.GetHostByName(ctx, name)
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.Host{}, invalid("jump_host 不存在: " + name)
+		}
+		if err != nil {
+			return store.Host{}, &Error{Kind: ErrorInternal, Err: err}
+		}
+		seen := make(map[int64]bool)
+		cur := jump
+		for depth := 1; ; depth++ {
+			if updating && cur.ID == old.ID {
+				return store.Host{}, invalid("跳板链存在循环")
+			}
+			if seen[cur.ID] {
+				return store.Host{}, invalid("跳板链存在循环")
+			}
+			seen[cur.ID] = true
+			if depth > maxJumpChain {
+				return store.Host{}, invalid(fmt.Sprintf("跳板链超过 %d 级", maxJumpChain))
+			}
+			if !cur.JumpHostID.Valid {
+				break
+			}
+			if cur, err = m.store.GetHost(ctx, cur.JumpHostID.Int64); err != nil {
+				return store.Host{}, &Error{Kind: ErrorInternal, Err: err}
+			}
+		}
+		host.JumpHostID = sql.NullInt64{Int64: jump.ID, Valid: true}
 	}
 	return host, nil
 }

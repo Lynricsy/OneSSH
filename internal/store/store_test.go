@@ -68,10 +68,10 @@ func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 		}
 	}
 	var versions int
-	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (1,2,3,4,5,6)`).Scan(&versions); err != nil {
+	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (1,2,3,4,5,6,7)`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 6 {
+	if versions != 7 {
 		t.Fatalf("迁移版本数 = %d", versions)
 	}
 	if err = st.Close(); err != nil {
@@ -85,7 +85,7 @@ func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 6 {
+	if versions != 7 {
 		t.Fatalf("二次迁移版本数 = %d", versions)
 	}
 }
@@ -114,7 +114,7 @@ func TestOpenRecordsPreexistingManageHostsColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 6 {
+	if versions != 7 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 }

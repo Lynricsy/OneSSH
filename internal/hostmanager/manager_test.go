@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -117,6 +118,70 @@ func TestValidationAndErrorKinds(t *testing.T) {
 	}
 	if _, err = manager.Update(ctx, created.ID, Input{Name: "host", Addr: "127.0.0.1", Port: 22, Username: "user", AuthType: "key"}); KindOf(err) != ErrorInvalid {
 		t.Fatalf("切换密钥认证缺少 key_id 分类 = %v: %v", KindOf(err), err)
+	}
+}
+func TestJumpHostValidation(t *testing.T) {
+	ctx := context.Background()
+	manager, st, _ := newTestManager(t)
+	passwordInput := func(name, jumpHost string) Input {
+		return Input{
+			Name: name, Addr: "127.0.0.1", Port: 22, Username: "user",
+			AuthType: "password", Password: new("secret"), JumpHost: jumpHost,
+		}
+	}
+
+	a, err := manager.Create(ctx, passwordInput("A", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := manager.Create(ctx, passwordInput("B", "A"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedB, err := st.GetHost(ctx, b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !storedB.JumpHostID.Valid || storedB.JumpHostID.Int64 != a.ID {
+		t.Fatalf("B 的跳板引用异常: %#v", storedB.JumpHostID)
+	}
+
+	if _, err = manager.Create(ctx, passwordInput("C", "不存在")); KindOf(err) != ErrorInvalid {
+		t.Fatalf("不存在的跳板分类 = %v: %v", KindOf(err), err)
+	}
+	cycle := passwordInput("A", "B")
+	cycle.Password = nil
+	if _, err = manager.Update(ctx, a.ID, cycle); KindOf(err) != ErrorInvalid {
+		t.Fatalf("成环更新分类 = %v: %v", KindOf(err), err)
+	}
+	self := passwordInput("A", "A")
+	self.Password = nil
+	if _, err = manager.Update(ctx, a.ID, self); KindOf(err) != ErrorInvalid {
+		t.Fatalf("自引用更新分类 = %v: %v", KindOf(err), err)
+	}
+	if err = manager.Delete(ctx, a.ID); KindOf(err) != ErrorConflict {
+		t.Fatalf("删除被依赖跳板分类 = %v: %v", KindOf(err), err)
+	}
+	directB := passwordInput("B", "")
+	directB.Password = nil
+	if _, err = manager.Update(ctx, b.ID, directB); err != nil {
+		t.Fatal(err)
+	}
+	if err = manager.Delete(ctx, a.ID); err != nil {
+		t.Fatalf("解除依赖后删除跳板失败: %v", err)
+	}
+
+	for i := 1; i <= 6; i++ {
+		jumpHost := ""
+		if i > 1 {
+			jumpHost = fmt.Sprintf("h%d", i-1)
+		}
+		if _, err = manager.Create(ctx, passwordInput(fmt.Sprintf("h%d", i), jumpHost)); err != nil {
+			t.Fatalf("创建第 %d 级链失败: %v", i, err)
+		}
+	}
+	if _, err = manager.Create(ctx, passwordInput("h7", "h6")); KindOf(err) != ErrorInvalid {
+		t.Fatalf("超长跳板链分类 = %v: %v", KindOf(err), err)
 	}
 }
 

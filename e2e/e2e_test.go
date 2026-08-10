@@ -29,9 +29,10 @@ func (t authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 type hostView struct {
-	ID        int64   `json:"id"`
-	Name      string  `json:"name"`
-	HostKeyFP *string `json:"hostkey_fp"`
+	ID         int64   `json:"id"`
+	Name       string  `json:"name"`
+	HostKeyFP  *string `json:"hostkey_fp"`
+	JumpHostID *int64  `json:"jump_host_id"`
 }
 type managedHosts struct {
 	Hosts []hostView `json:"hosts"`
@@ -574,6 +575,55 @@ func TestEndToEnd(t *testing.T) {
 		if err = conn.Write(ctx, websocket.MessageText, resize); err != nil {
 			t.Fatal(err)
 		}
+	})
+	t.Run("jump host tunnel", func(t *testing.T) {
+		jumped := request[hostView](t, admin, http.MethodPost, base+"/api/v1/hosts", map[string]any{
+			"name": "jumped", "addr": "localhost", "port": 2222, "username": "test",
+			"auth_type": "password", "password": "pass", "monitor_enabled": false, "jump_host": "ssh2",
+		})
+		hosts := request[[]hostView](t, admin, http.MethodGet, base+"/api/v1/hosts", nil)
+		var jumpReferenceOK bool
+		for _, host := range hosts {
+			if host.ID == jumped.ID && host.JumpHostID != nil && *host.JumpHostID == ssh2.ID {
+				jumpReferenceOK = true
+				break
+			}
+		}
+		if !jumpReferenceOK {
+			t.Fatalf("跳板 ID 未写入或未返回: jumped=%+v ssh2=%+v hosts=%+v", jumped, ssh2, hosts)
+		}
+
+		var tested execResult
+		var connected bool
+		for range 20 {
+			req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/api/v1/hosts/%d/test", base, jumped.ID), strings.NewReader("{}"))
+			req.Header.Set("Content-Type", "application/json")
+			res, err := admin.Do(req)
+			if err == nil {
+				data, _ := io.ReadAll(res.Body)
+				res.Body.Close()
+				if res.StatusCode == http.StatusOK && json.Unmarshal(data, &tested) == nil && tested.Output != "" {
+					connected = true
+					break
+				}
+			}
+			time.Sleep(time.Second)
+		}
+		if !connected {
+			t.Fatalf("经 ssh2 跳板连接 localhost:2222 失败: %+v", tested)
+		}
+
+		req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/v1/hosts/%d", base, ssh2.ID), nil)
+		res, err := admin.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusConflict {
+			t.Fatalf("删除被依赖跳板状态 = %d: %s", res.StatusCode, data)
+		}
+		request[struct{}](t, admin, http.MethodDelete, fmt.Sprintf("%s/api/v1/hosts/%d", base, jumped.ID), nil)
 	})
 	audit := request[[]map[string]any](t, admin, http.MethodGet, base+"/api/v1/audit?limit=500", nil)
 	if len(audit) == 0 {

@@ -20,6 +20,7 @@ type Host struct {
 	KeyID          sql.NullInt64  `json:"-"`
 	PasswordEnc    []byte         `json:"-"`
 	HostKeyFP      sql.NullString `json:"-"`
+	JumpHostID     sql.NullInt64  `json:"-"`
 	MonitorEnabled bool           `json:"monitor_enabled"`
 	CreatedAt      int64          `json:"created_at"`
 }
@@ -33,6 +34,7 @@ type HostView struct {
 	AuthType       string  `json:"auth_type"`
 	KeyID          *int64  `json:"key_id"`
 	HostKeyFP      *string `json:"hostkey_fp"`
+	JumpHostID     *int64  `json:"jump_host_id"`
 	MonitorEnabled bool    `json:"monitor_enabled"`
 	CreatedAt      int64   `json:"created_at"`
 }
@@ -42,6 +44,10 @@ func (h Host) View() HostView {
 	if h.KeyID.Valid {
 		x := h.KeyID.Int64
 		v.KeyID = &x
+	}
+	if h.JumpHostID.Valid {
+		x := h.JumpHostID.Int64
+		v.JumpHostID = &x
 	}
 	if h.HostKeyFP.Valid {
 		x := h.HostKeyFP.String
