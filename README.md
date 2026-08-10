@@ -394,8 +394,6 @@ docker pull ghcr.io/lynricsy/onessh:latest
   </picture>
 </a>
 
-<sub>由 <a href="./.github/workflows/star-history.yml">Star History workflow</a> 每日用仓库自身的 <code>GITHUB_TOKEN</code> 离线渲染——GitHub 已把 stargazers API 收窄到仓库协作者，外部图表服务需要托管带写权限的 token，这里不这么做。</sub>
-
 </div>
 
 ## 许可证
