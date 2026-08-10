@@ -9,6 +9,8 @@ export type Host = {
   auth_type: 'key' | 'password'
   key_id?: number
   hostkey_fp?: string
+  /** 跳板主机 id；缺省表示直连 */
+  jump_host_id?: number
   monitor_enabled: boolean
   created_at: number
 }
@@ -115,6 +117,8 @@ export type HostPayload = {
   auth_type: 'key' | 'password'
   key_id?: number
   password?: string
+  /** 跳板主机名；空/省略表示直连 */
+  jump_host?: string
   monitor_enabled: boolean
 }
 

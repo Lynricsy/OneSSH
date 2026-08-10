@@ -45,6 +45,7 @@ const emptyForm: HostPayload = {
   auth_type: 'password',
   password: undefined,
   key_id: undefined,
+  jump_host: undefined,
   monitor_enabled: true,
 }
 
@@ -104,15 +105,22 @@ export function HostsPage() {
   const openEdit = (host: Host) => {
     setEditing(host)
     // 私密凭据不能由列表响应恢复；显式清空可避免误把旧值再次提交。
-    reset({ ...host, password: undefined })
+    // 跳板在视图里是 id、在载荷里是 name，回显时换算一次。
+    reset({
+      ...host,
+      password: undefined,
+      jump_host: hosts.data?.find((item) => item.id === host.jump_host_id)?.name,
+    })
     setDialogOpen(true)
   }
 
   const submit = handleSubmit(async (values) => {
+    // 空字符串是「直连」选项的值，归一成 undefined 才符合后端「省略即清除」的整体替换语义。
+    const base = { ...values, jump_host: values.jump_host || undefined }
     const payload: HostPayload =
       values.auth_type === 'key'
-        ? { ...values, password: undefined }
-        : { ...values, key_id: undefined, password: values.password || undefined }
+        ? { ...base, password: undefined }
+        : { ...base, key_id: undefined, password: values.password || undefined }
     await save.mutateAsync(payload)
     setDialogOpen(false)
   })
@@ -266,10 +274,14 @@ export function HostsPage() {
                 </div>
                 {hostMenu(host)}
               </div>
-              {/* 窄屏没有表头，用定值标签列把三项属性对齐成一张迷你规格表 */}
+              {/* 窄屏没有表头，用定值标签列把属性对齐成一张迷你规格表 */}
               <dl className="mt-3 grid grid-cols-[52px_minmax(0,1fr)] items-center gap-y-2 text-[12px]">
                 <dt className="text-muted">认证</dt>
                 <dd className="text-text">{host.auth_type === 'key' ? 'SSH 密钥' : '密码'}</dd>
+                <dt className="text-muted">跳板</dt>
+                <dd className="text-text">
+                  {hosts.data?.find((item) => item.id === host.jump_host_id)?.name ?? '直连'}
+                </dd>
                 <dt className="text-muted">指纹</dt>
                 <dd className="min-w-0">
                   <FingerprintCell host={host} />
@@ -432,6 +444,34 @@ export function HostsPage() {
               )}
             </Field>
           )}
+
+          <Field label="跳板主机" hint="选中后先经该主机建立隧道再连目标" className="sm:col-span-6">
+            {(id) => (
+              <Controller
+                name="jump_host"
+                control={control}
+                render={({ field }) => (
+                  <Select
+                    id={id}
+                    // 选项取主机 id 而非主机名：后端只校验名称非空、不限字符集，任何字符串哨兵
+                    // 都可能与真实主机名撞车；id 恒为正整数，0 可以安全表示「直连」。
+                    // 载荷仍按名称提交，两侧在这里换算。
+                    value={hosts.data?.find((item) => item.name === field.value)?.id ?? 0}
+                    onChange={(value) =>
+                      field.onChange(hosts.data?.find((item) => item.id === value)?.name)
+                    }
+                    placeholder="直连（不使用跳板）"
+                    options={[
+                      { value: 0, label: '直连（不使用跳板）' },
+                      ...(hosts.data ?? [])
+                        .filter((item) => item.name !== editing?.name)
+                        .map((item) => ({ value: item.id, label: item.name })),
+                    ]}
+                  />
+                )}
+              />
+            )}
+          </Field>
 
           {/* 开关不是会报错的字段，改用一块 surface-2 行：说明与控件同一行，也给表单收了个尾 */}
           <Controller
