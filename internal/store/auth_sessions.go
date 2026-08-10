@@ -85,7 +85,7 @@ func (s *Store) findToken(ctx context.Context, hash, resource string, requireRes
 	t.AllHosts = all != 0
 	t.ManageHosts = manage != 0
 	_, _ = s.DB.ExecContext(ctx, `UPDATE tokens SET last_used_at=? WHERE id=?`, time.Now().Unix(), t.ID)
-	hostQuery := `SELECT h.id,h.name,h.addr,h.port,h.username,h.auth_type,h.key_id,h.password_enc,h.hostkey_fp,h.monitor_enabled,h.created_at FROM hosts h`
+	hostQuery := `SELECT h.id,h.name,h.addr,h.port,h.username,h.auth_type,h.key_id,h.password_enc,h.hostkey_fp,h.proxy_jump_host,h.monitor_enabled,h.created_at FROM hosts h`
 	hostArgs := []any{}
 	if !t.AllHosts {
 		hostQuery += ` JOIN token_hosts th ON th.host_id=h.id WHERE th.token_id=?`
