@@ -327,14 +327,15 @@ ONESSH_URL=http://localhost:8866/mcp \
 
 ## 持续集成与镜像
 
-`.github/workflows/ci.yml` 在 push、指向 `main` 的 PR 以及手动触发时运行四组检查：
+`.github/workflows/ci.yml` 在 push、指向 `main` 的 PR 以及手动触发时运行五组检查：
 
 - **backend** — `gofmt`、`go mod tidy` 差异、`go vet`、单元测试、CGO-free 构建
-- **compatibility** — 交叉编译 Linux、macOS、Windows、FreeBSD 的 amd64 与 arm64
+- **compatibility** — 在 Linux 上交叉编译 Linux、macOS、FreeBSD 的 amd64 与 arm64
+- **windows** — 分别使用 `windows-latest` x64 与 `windows-11-arm` ARM64 原生虚拟机执行单元测试、构建、启动进程并请求 `/healthz`
 - **frontend** — 锁定依赖安装、TypeScript 检查、生产构建
 - **e2e** — Docker Compose 三主机端到端（含无 `rg` / `fd` 的降级路径）
 
-只有 `main` 分支或 `v*` 标签的 push 在全部检查通过后才发布 `linux/amd64`、`linux/arm64` 多架构镜像。`v*` 标签还会创建 GitHub Release，附带八个平台二进制压缩包和 `checksums.txt`。工作流使用仓库自带的 `GITHUB_TOKEN` 写入 GHCR、发布 Release 并生成镜像来源证明，不需要额外配置 PAT。默认的 `docker-compose.yml` 使用 `latest` 标签；更新部署时先拉取新镜像再重建容器：
+只有 `main` 分支或 `v*` 标签的 push 在全部检查通过后才发布 `linux/amd64`、`linux/arm64` 多架构镜像。`v*` 标签还会创建 GitHub Release；两个 Windows 压缩包由对应架构的 Windows runner 原生构建，其余六个平台压缩包由 Linux runner 交叉构建，最后统一生成 `checksums.txt`。工作流使用仓库自带的 `GITHUB_TOKEN` 写入 GHCR、发布 Release 并生成镜像来源证明，不需要额外配置 PAT。默认的 `docker-compose.yml` 使用 `latest` 标签；更新部署时先拉取新镜像再重建容器：
 
 ```sh
 docker compose pull

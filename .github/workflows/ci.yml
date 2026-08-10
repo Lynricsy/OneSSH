@@ -68,7 +68,6 @@ jobs:
         goos:
           - linux
           - darwin
-          - windows
           - freebsd
         goarch:
           - amd64
@@ -89,6 +88,109 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: go build -trimpath -o /tmp/onessh ./cmd/onessh
+
+  windows:
+    name: Windows ${{ matrix.goarch }} native
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+            runner: windows-latest
+          - goarch: arm64
+            runner: windows-11-arm
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Verify native architecture
+        shell: pwsh
+        run: |
+          $actual = go env GOARCH
+          if ($actual -ne "${{ matrix.goarch }}") {
+            throw "期望在 ${{ matrix.goarch }} 上原生运行，实际为 $actual"
+          }
+
+      - name: Test natively
+        env:
+          CGO_ENABLED: "0"
+        run: go test -count=1 ./...
+
+      - name: Build native binary
+        shell: pwsh
+        env:
+          CGO_ENABLED: "0"
+          VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'ci' }}
+        run: |
+          $ldflags = "-s -w -X main.version=$env:VERSION"
+          go build -trimpath -ldflags="$ldflags" `
+            -o "$env:RUNNER_TEMP\onessh.exe" ./cmd/onessh
+
+      - name: Smoke test native binary
+        shell: pwsh
+        env:
+          EXPECTED_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'ci' }}
+          ONESSH_MASTER_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          ONESSH_ADMIN_PASSWORD: test-password
+          ONESSH_DATA_DIR: ${{ runner.temp }}\onessh-data
+          ONESSH_LISTEN: 127.0.0.1:18866
+          ONESSH_POLL_INTERVAL: "0"
+        run: |
+          $process = Start-Process `
+            -FilePath "$env:RUNNER_TEMP\onessh.exe" `
+            -PassThru
+          $health = $null
+          try {
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+              try {
+                $health = Invoke-RestMethod `
+                  -Uri "http://127.0.0.1:18866/healthz" `
+                  -TimeoutSec 2
+                break
+              } catch {
+                Start-Sleep -Seconds 1
+              }
+            }
+            if ($null -eq $health) {
+              throw "OneSSH 未在 30 秒内通过健康检查"
+            }
+            if (!$health.ok -or $health.version -ne $env:EXPECTED_VERSION) {
+              throw "健康检查响应异常: $($health | ConvertTo-Json -Compress)"
+            }
+          } finally {
+            if (!$process.HasExited) {
+              Stop-Process -Id $process.Id -Force
+            }
+          }
+
+      - name: Package Windows archive
+        shell: pwsh
+        env:
+          VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'ci' }}
+        run: |
+          $releaseVersion = $env:VERSION.TrimStart("v")
+          $archive = Join-Path `
+            $env:RUNNER_TEMP `
+            "onessh_${releaseVersion}_windows_${{ matrix.goarch }}.zip"
+          Compress-Archive `
+            -LiteralPath "$env:RUNNER_TEMP\onessh.exe" `
+            -DestinationPath $archive `
+            -Force
+
+      - name: Upload Windows release archive
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-release-${{ matrix.goarch }}
+          path: ${{ runner.temp }}\onessh_*.zip
+          if-no-files-found: error
 
   frontend:
     name: Web checks
@@ -163,6 +265,7 @@ jobs:
       - frontend
       - e2e
       - compatibility
+      - windows
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -231,6 +334,7 @@ jobs:
       - frontend
       - e2e
       - compatibility
+      - windows
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -244,6 +348,13 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
+      - name: Download native Windows archives
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: windows-release-*
+          path: dist
+          merge-multiple: true
+
       - name: Build release archives
         shell: bash
         env:
@@ -255,7 +366,6 @@ jobs:
           for target in \
             linux/amd64 linux/arm64 \
             darwin/amd64 darwin/arm64 \
-            windows/amd64 windows/arm64 \
             freebsd/amd64 freebsd/arm64
           do
             goos="${target%/*}"
@@ -263,18 +373,11 @@ jobs:
             base="onessh_${release_version}_${goos}_${goarch}"
             package_dir="dist/${base}"
             binary="${package_dir}/onessh"
-            if [[ "$goos" == "windows" ]]; then
-              binary="${binary}.exe"
-            fi
             mkdir -p "$package_dir"
             CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
               go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
               -o "$binary" ./cmd/onessh
-            if [[ "$goos" == "windows" ]]; then
-              (cd "$package_dir" && zip -q "../${base}.zip" onessh.exe)
-            else
-              tar -C "$package_dir" -czf "dist/${base}.tar.gz" onessh
-            fi
+            tar -C "$package_dir" -czf "dist/${base}.tar.gz" onessh
             rm -rf "$package_dir"
           done
           (cd dist && sha256sum ./*.tar.gz ./*.zip > checksums.txt)
