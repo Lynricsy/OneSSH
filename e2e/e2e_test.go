@@ -97,6 +97,21 @@ type findResult struct {
 	Engine    string   `json:"engine"`
 	Warning   string   `json:"warning"`
 }
+type memoryRemember struct {
+	ID       int64  `json:"id"`
+	Bank     string `json:"bank"`
+	Deduped  bool   `json:"deduped"`
+	Embedded bool   `json:"embedded"`
+}
+type memoryRecall struct {
+	Results []struct {
+		ID      int64   `json:"id"`
+		Bank    string  `json:"bank"`
+		Content string  `json:"content"`
+		Score   float64 `json:"score"`
+	} `json:"results"`
+	Engine string `json:"engine"`
+}
 
 func request[T any](t *testing.T, c *http.Client, method, url string, body any) T {
 	t.Helper()
@@ -481,6 +496,49 @@ func TestEndToEnd(t *testing.T) {
 			t.Fatal("未返回 ImageContent")
 		}
 	})
+	t.Run("memory lifecycle and bank authorization", func(t *testing.T) {
+		content := "部署目录在 /opt/app，服务配置使用 systemd"
+		remembered := decoded[memoryRemember](t, call(t, b, "memory_remember", map[string]any{
+			"host": "ssh1", "content": content, "importance": 0.85,
+		}))
+		if remembered.ID == 0 || remembered.Bank != "ssh1" {
+			t.Fatalf("记忆写入结果异常: %+v", remembered)
+		}
+
+		recalled := decoded[memoryRecall](t, call(t, b, "memory_recall", map[string]any{
+			"host": "ssh1", "query": "部署目录",
+		}))
+		if recalled.Engine != "fts" || len(recalled.Results) == 0 {
+			t.Fatalf("记忆召回引擎或结果异常: %+v", recalled)
+		}
+		if recalled.Results[0].ID != remembered.ID || recalled.Results[0].Bank != "ssh1" ||
+			recalled.Results[0].Content != content || recalled.Results[0].Score <= 0 {
+			t.Fatalf("记忆召回内容或打分异常: %+v", recalled.Results[0])
+		}
+
+		global := decoded[memoryRecall](t, call(t, b, "memory_recall", map[string]any{"query": "部署目录"}))
+		if len(global.Results) != 0 {
+			t.Fatalf("主机记忆泄漏到全局 bank: %+v", global.Results)
+		}
+		deniedRemember := call(t, b, "memory_remember", map[string]any{"host": "ssh2", "content": "不应写入"})
+		if !deniedRemember.IsError || !strings.Contains(toolText(deniedRemember), "host not authorized") {
+			t.Fatalf("memory_remember 未拒绝跨 bank 写入: %s", toolText(deniedRemember))
+		}
+		deniedRecall := call(t, b, "memory_recall", map[string]any{"host": "ssh2", "query": "部署目录"})
+		if !deniedRecall.IsError || !strings.Contains(toolText(deniedRecall), "host not authorized") {
+			t.Fatalf("memory_recall 未拒绝跨 bank 召回: %s", toolText(deniedRecall))
+		}
+		if forgotten := call(t, b, "memory_forget", map[string]any{"id": remembered.ID}); forgotten.IsError {
+			t.Fatalf("删除记忆失败: %s", toolText(forgotten))
+		}
+		afterForget := decoded[memoryRecall](t, call(t, b, "memory_recall", map[string]any{
+			"host": "ssh1", "query": "部署目录",
+		}))
+		if len(afterForget.Results) != 0 {
+			t.Fatalf("删除后仍能召回记忆: %+v", afterForget.Results)
+		}
+	})
+
 	t.Run("authorization and monitor", func(t *testing.T) {
 		denied := call(t, b, "exec", map[string]any{"host": "ssh2", "command": "true"})
 		if !denied.IsError || !strings.Contains(toolText(denied), "host not authorized") {
@@ -532,6 +590,7 @@ func TestEndToEnd(t *testing.T) {
 	deniedManagement := map[string]bool{"hosts_manage_list": false, "host_create": false}
 	fileEditSeen := false
 	hostCreateRedacted := false
+	memoryRememberSeen := false
 	for _, row := range audit {
 		tool, _ := row["Tool"].(string)
 		ok, _ := row["OK"].(bool)
@@ -555,9 +614,18 @@ func TestEndToEnd(t *testing.T) {
 				hostCreateRedacted = true
 			}
 		}
+		if tool == "memory_remember" {
+			memoryRememberSeen = true
+			if strings.Contains(params, "部署目录") || !strings.Contains(params, `"<len=`) {
+				t.Fatalf("记忆正文未从审计参数脱敏: %s", params)
+			}
+		}
 	}
 	if !fileEditSeen {
 		t.Fatal("审计缺少 file_edit")
+	}
+	if !memoryRememberSeen {
+		t.Fatal("审计缺少 memory_remember")
 	}
 	for tool, seen := range expectedManagement {
 		if !seen {
