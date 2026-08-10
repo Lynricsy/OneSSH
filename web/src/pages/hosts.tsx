@@ -45,6 +45,7 @@ const emptyForm: HostPayload = {
   auth_type: 'password',
   password: undefined,
   key_id: undefined,
+  proxy_jump_host: undefined,
   monitor_enabled: true,
 }
 
@@ -433,6 +434,34 @@ export function HostsPage() {
             </Field>
           )}
 
+          {/* 跳板机选择：可选字段，从已有主机列表中选择，排除自身 */}
+          <Field
+            label="跳板机"
+            hint="留空表示直连；支持链式跳板"
+            className="sm:col-span-3"
+          >
+            {(id) => (
+              <Controller
+                name="proxy_jump_host"
+                control={control}
+                render={({ field }) => (
+                  <Select
+                    id={id}
+                    value={field.value ?? ''}
+                    onChange={(v: string) => field.onChange(v || undefined)}
+                    options={[
+                      { value: '', label: '直连（无跳板）' },
+                      ...((hosts.data ?? [])
+                        .filter((h: Host) => h.id !== editing?.id)
+                        .map((h: Host) => ({ value: h.name, label: h.name }))),
+                    ]}
+                  />
+                )}
+              />
+            )}
+          </Field>
+          <div className="sm:col-span-3" />
+
           {/* 开关不是会报错的字段，改用一块 surface-2 行：说明与控件同一行，也给表单收了个尾 */}
           <Controller
             name="monitor_enabled"
@@ -472,4 +501,3 @@ export function HostsPage() {
       />
     </PageTransition>
   )
-}

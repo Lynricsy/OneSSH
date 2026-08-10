@@ -38,6 +38,7 @@ type HostUpdateInput struct {
 	AuthType       string  `json:"auth_type" jsonschema:"认证方式：key 或 password"`
 	KeyID          *int64  `json:"key_id,omitempty" jsonschema:"key 认证使用的密钥 ID，auth_type=key 时必填"`
 	Password       *string `json:"password,omitempty" jsonschema:"新的登录密码；auth_type 保持 password 且沿用原密码时可省略"`
+	ProxyJumpHost  *string `json:"proxy_jump_host,omitempty" jsonschema:"跳板机主机名，留空表示直连；引用已有主机名，支持链式跳板"`
 	MonitorEnabled *bool   `json:"monitor_enabled,omitempty" jsonschema:"是否纳入后台资源监控轮询，省略表示保持原值"`
 }
 
@@ -50,6 +51,7 @@ type ManagedHostItem struct {
 	AuthType       string  `json:"auth_type"`
 	KeyID          *int64  `json:"key_id"`
 	HostKeyFP      *string `json:"hostkey_fp"`
+	ProxyJumpHost  *string `json:"proxy_jump_host"`
 	MonitorEnabled bool    `json:"monitor_enabled"`
 	CreatedAt      int64   `json:"created_at"`
 	Online         bool    `json:"online"`
@@ -152,7 +154,7 @@ func (s *Server) hostUpdate(ctx context.Context, _ *mcp.CallToolRequest, in Host
 	}
 	updated, err := s.HostManager.Update(ctx, host.ID, hostmanager.Input{
 		Name: in.Name, Addr: in.Addr, Port: in.Port, Username: in.Username, AuthType: in.AuthType,
-		KeyID: in.KeyID, Password: in.Password, MonitorEnabled: in.MonitorEnabled,
+		KeyID: in.KeyID, Password: in.Password, ProxyJumpHost: in.ProxyJumpHost, MonitorEnabled: in.MonitorEnabled,
 	})
 	if err != nil {
 		return errorResult(err.Error()), ManagedHostItem{}, nil
@@ -218,7 +220,7 @@ func (s *Server) managedHostItem(host store.Host) ManagedHostItem {
 	view := host.View()
 	return ManagedHostItem{
 		ID: view.ID, Name: view.Name, Addr: view.Addr, Port: view.Port, Username: view.Username,
-		AuthType: view.AuthType, KeyID: view.KeyID, HostKeyFP: view.HostKeyFP,
+		AuthType: view.AuthType, KeyID: view.KeyID, HostKeyFP: view.HostKeyFP, ProxyJumpHost: view.ProxyJumpHost,
 		MonitorEnabled: view.MonitorEnabled, CreatedAt: view.CreatedAt, Online: s.Pool.IsOnline(host.Name),
 	}
 }

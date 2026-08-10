@@ -46,7 +46,7 @@ func TestRememberDeduplicatesAndKeepsMaximumImportance(t *testing.T) {
 	st := newTestStore(t)
 	engine := New(st, EmbeddingConfig{})
 	bank := sql.NullInt64{Int64: 7, Valid: true}
-	if _, err := st.DB.ExecContext(ctx, `INSERT INTO hosts(id,name,addr,port,username,auth_type,monitor_enabled,created_at) VALUES(7,'host','127.0.0.1',22,'user','password',0,1)`); err != nil {
+	if _, err := st.DB.ExecContext(ctx, `INSERT INTO hosts(id,name,addr,port,username,auth_type,proxy_jump_host,monitor_enabled,created_at) VALUES(7,'host','127.0.0.1',22,'user','password',NULL,0,1)`); err != nil {
 		t.Fatal(err)
 	}
 	firstID, deduped, _, err := engine.Remember(ctx, RememberInput{HostID: bank, Content: "  部署目录在 /opt/app  ", Importance: 0.4})
@@ -69,7 +69,7 @@ func TestRememberDeduplicatesAndKeepsMaximumImportance(t *testing.T) {
 func TestRecallScoresImportanceAndRecency(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
-	engine := New(st, EmbeddingConfig{})
+	engine := New(st, EmbeddingConfig{})}
 	now := time.Now()
 	oldID := addTestMemory(t, st, store.Memory{Content: "nginx 配置说明 old", Importance: 1, CreatedAt: now.Add(-30 * 24 * time.Hour).Unix()})
 	newID := addTestMemory(t, st, store.Memory{Content: "nginx 配置说明 new", Importance: 0.05, CreatedAt: now.Unix()})
@@ -90,7 +90,7 @@ func TestRecallMergesHostAndGlobalWithoutCrossingBanks(t *testing.T) {
 	st := newTestStore(t)
 	engine := New(st, EmbeddingConfig{})
 	for id, name := range map[int64]string{1: "allowed", 2: "denied"} {
-		if _, err := st.DB.ExecContext(ctx, `INSERT INTO hosts(id,name,addr,port,username,auth_type,monitor_enabled,created_at) VALUES(?,?,?,22,'user','password',0,1)`, id, name, "127.0.0.1"); err != nil {
+		if _, err := st.DB.ExecContext(ctx, `INSERT INTO hosts(id,name,addr,port,username,auth_type,proxy_jump_host,monitor_enabled,created_at) VALUES(?,?,?,22,'user','password',NULL,0,1)`, id, name, "127.0.0.1"); err != nil {
 			t.Fatal(err)
 		}
 	}
