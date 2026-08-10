@@ -41,7 +41,7 @@ curl --fail http://localhost:8866/healthz
 
 1. 用 `ONESSH_ADMIN_PASSWORD` 登录控制台。
 2. 在**密钥**页生成 ed25519 密钥或导入 OpenSSH 私钥；也可以直接用主机密码。
-3. 在**主机**页添加目标并点击「测试」，首次连接会记录 TOFU 指纹。
+3. 在**主机**页添加目标并点击「测试」，首次连接会记录 TOFU 指纹；目标无法直达时，可选择已配置主机作为跳板。
 4. 在**令牌**页创建 Agent 令牌并选择执行范围；或者让支持 MCP OAuth 的客户端直接连 `/mcp`，在授权页勾选同样的主机与权限。
 5. 手工令牌的明文只显示一次，立刻复制进 Agent 的安全配置。
 
@@ -206,6 +206,8 @@ Authorization: Bearer osh_...
 常用编码工具是完整对齐的：`file_read`、`file_write`、`file_edit`、`exec`、`grep`、`find`、`file_list` 分别对应 read、write、edit、bash、grep、find、ls。
 
 `file_edit` 支持 `expected_sha256` 乐观锁，冲突时应重新读取。大输出会返回 `artifact_id`，再用 `output_read` 分段读取或正则过滤。
+主机配置支持可选的 `jump_host`（REST/MCP 输入使用跳板主机名，列表输出仍以稳定 ID 关联）。连接会复用连接池中的跳板并通过 SSH TCP 隧道到达目标，对命令、文件、任务、终端和监控工具透明；最多串联 5 级且禁止成环。被其他主机依赖的跳板不能直接删除，需先把依赖者改回直连或切换到其他跳板。
+
 
 记忆按 `host_id` 绑定到主机 bank；主机改名不会丢失，删除主机时对应记忆一并清理。不带 `host` 写入或召回全局 bank；指定主机召回时会同时合并该主机与全局记忆。`memory_sleep` 不调用 LLM，只执行确定性去重、长期未使用记忆衰减和低分旧记忆清理。正文参数在审计中只记录长度。
 
