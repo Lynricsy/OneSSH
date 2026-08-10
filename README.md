@@ -8,7 +8,23 @@
 
 一个 Go 二进制，同时提供无状态 Streamable HTTP MCP、OAuth 2.1 授权、管理 API、实时活动流和浏览器终端。
 
-[![CI](https://github.com/Lynricsy/OneSSH/actions/workflows/ci.yml/badge.svg)](https://github.com/Lynricsy/OneSSH/actions/workflows/ci.yml) [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod) [![MCP](https://img.shields.io/badge/MCP-Streamable%20HTTP-0d9488)](#mcp-接入) [![GHCR](https://img.shields.io/badge/ghcr.io-lynricsy%2Fonessh-2dd4bf?logo=docker&logoColor=white)](https://github.com/Lynricsy/OneSSH/pkgs/container/onessh)
+[![CI](https://github.com/Lynricsy/OneSSH/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Lynricsy/OneSSH/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Lynricsy/OneSSH?display_name=tag&sort=semver&label=release&color=0d9488)](https://github.com/Lynricsy/OneSSH/releases/latest)
+[![License](https://img.shields.io/github/license/Lynricsy/OneSSH?color=0d9488)](LICENSE)
+[![Go](https://img.shields.io/github/go-mod/go-version/Lynricsy/OneSSH?logo=go&logoColor=white&color=00ADD8)](go.mod)
+[![Code size](https://img.shields.io/github/languages/code-size/Lynricsy/OneSSH?color=64748b)](https://github.com/Lynricsy/OneSSH)
+
+[![Last commit](https://img.shields.io/github/last-commit/Lynricsy/OneSSH?color=64748b)](https://github.com/Lynricsy/OneSSH/commits/main)
+[![Commit activity](https://img.shields.io/github/commit-activity/m/Lynricsy/OneSSH?color=64748b)](https://github.com/Lynricsy/OneSSH/pulse)
+[![Issues](https://img.shields.io/github/issues/Lynricsy/OneSSH?color=64748b)](https://github.com/Lynricsy/OneSSH/issues)
+[![Stars](https://img.shields.io/github/stars/Lynricsy/OneSSH?color=f59e0b)](https://github.com/Lynricsy/OneSSH/stargazers)
+
+[![GHCR](https://img.shields.io/badge/ghcr.io-lynricsy%2Fonessh-2dd4bf?logo=docker&logoColor=white)](https://github.com/Lynricsy/OneSSH/pkgs/container/onessh)
+[![MCP](https://img.shields.io/badge/MCP-Streamable%20HTTP-0d9488)](#mcp-接入)
+[![OAuth](https://img.shields.io/badge/OAuth-2.1%20%2B%20S256%20PKCE-0d9488)](#两种凭据)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows%20%C2%B7%20FreeBSD-334155)](#本地开发)
+[![Arch](https://img.shields.io/badge/arch-amd64%20%C2%B7%20arm64-334155)](#持续集成与镜像)
+[![CGO](https://img.shields.io/badge/CGO-free-334155)](#本地开发)
 
 </div>
 
@@ -365,3 +381,21 @@ docker pull ghcr.io/lynricsy/onessh:latest
 ## 友情链接
 
 - [LINUX DO](https://linux.do/)
+
+## Star History
+
+<div align="center">
+
+<a href="https://star-history.com/#Lynricsy/OneSSH&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Lynricsy/OneSSH&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Lynricsy/OneSSH&type=Date" />
+    <img alt="OneSSH Star History" src="https://api.star-history.com/svg?repos=Lynricsy/OneSSH&type=Date" width="640" />
+  </picture>
+</a>
+
+</div>
+
+## 许可证
+
+[GNU General Public License v3.0](LICENSE)。你可以自由使用、修改和分发本项目；分发修改版或基于它的衍生作品时，必须同样以 GPL-3.0 提供完整对应源码。
