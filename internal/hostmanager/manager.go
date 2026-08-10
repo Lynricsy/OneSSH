@@ -23,6 +23,7 @@ type Input struct {
 	AuthType       string  `json:"auth_type" jsonschema:"认证方式：key 或 password"`
 	KeyID          *int64  `json:"key_id,omitempty" jsonschema:"key 认证使用的密钥 ID，auth_type=key 时必填"`
 	Password       *string `json:"password,omitempty" jsonschema:"登录密码；auth_type 为 password 时必填，只写不可读，审计中固定脱敏"`
+	ProxyJumpHost  *string `json:"proxy_jump_host,omitempty" jsonschema:"跳板机主机名，留空表示直连；引用 hosts_list 中已有的主机名，支持链式跳板"`
 	MonitorEnabled *bool   `json:"monitor_enabled,omitempty" jsonschema:"是否纳入后台资源监控轮询，新建时默认开启"`
 }
 
@@ -204,6 +205,22 @@ func (m *Manager) hostFromInput(ctx context.Context, old store.Host, in Input, u
 		}
 	default:
 		return store.Host{}, invalid("auth_type 必须是 key 或 password")
+	}
+	// ProxyJumpHost: 留空表示直连，非空时引用另一台主机作为跳板
+	if in.ProxyJumpHost != nil && strings.TrimSpace(*in.ProxyJumpHost) != "" {
+		jumpName := strings.TrimSpace(*in.ProxyJumpHost)
+		if jumpName == host.Name {
+			return store.Host{}, invalid("proxy_jump_host 不能引用自身")
+		}
+		if _, err := m.store.GetHostByName(ctx, jumpName); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return store.Host{}, invalid("跳板机主机 " + jumpName + " 不存在")
+			}
+			return store.Host{}, &Error{Kind: ErrorInternal, Err: err}
+		}
+		host.ProxyJumpHost = sql.NullString{String: jumpName, Valid: true}
+	} else {
+		host.ProxyJumpHost = sql.NullString{}
 	}
 	return host, nil
 }
