@@ -9,6 +9,7 @@ export type Host = {
   auth_type: 'key' | 'password'
   key_id?: number
   hostkey_fp?: string
+  proxy_jump_host?: string
   monitor_enabled: boolean
   created_at: number
 }
@@ -115,6 +116,7 @@ export type HostPayload = {
   auth_type: 'key' | 'password'
   key_id?: number
   password?: string
+  proxy_jump_host?: string
   monitor_enabled: boolean
 }
 
