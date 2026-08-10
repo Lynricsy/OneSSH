@@ -59,6 +59,37 @@ jobs:
           CGO_ENABLED: "0"
         run: go build -trimpath -o /tmp/onessh ./cmd/onessh
 
+  compatibility:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos:
+          - linux
+          - darwin
+          - windows
+          - freebsd
+        goarch:
+          - amd64
+          - arm64
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Cross-compile
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -o /tmp/onessh ./cmd/onessh
+
   frontend:
     name: Web checks
     runs-on: ubuntu-latest
@@ -131,6 +162,7 @@ jobs:
       - backend
       - frontend
       - e2e
+      - compatibility
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -145,6 +177,14 @@ jobs:
         id: image
         shell: bash
         run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -173,6 +213,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=${{ github.ref_name }}
 
       - name: Attest image provenance
         uses: actions/attest@v4
@@ -180,3 +222,72 @@ jobs:
           subject-name: ghcr.io/${{ steps.image.outputs.name }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+
+  release:
+    name: Publish release binaries
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - backend
+      - frontend
+      - e2e
+      - compatibility
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Build release archives
+        shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          release_version="${VERSION#v}"
+          mkdir -p dist
+          for target in \
+            linux/amd64 linux/arm64 \
+            darwin/amd64 darwin/arm64 \
+            windows/amd64 windows/arm64 \
+            freebsd/amd64 freebsd/arm64
+          do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+            base="onessh_${release_version}_${goos}_${goarch}"
+            package_dir="dist/${base}"
+            binary="${package_dir}/onessh"
+            if [[ "$goos" == "windows" ]]; then
+              binary="${binary}.exe"
+            fi
+            mkdir -p "$package_dir"
+            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+              go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+              -o "$binary" ./cmd/onessh
+            if [[ "$goos" == "windows" ]]; then
+              (cd "$package_dir" && zip -q "../${base}.zip" onessh.exe)
+            else
+              tar -C "$package_dir" -czf "dist/${base}.tar.gz" onessh
+            fi
+            rm -rf "$package_dir"
+          done
+          (cd dist && sha256sum ./*.tar.gz ./*.zip > checksums.txt)
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release create "${GITHUB_REF_NAME}" \
+              --verify-tag \
+              --generate-notes \
+              --title "${GITHUB_REF_NAME}"
+          fi
+          gh release upload "${GITHUB_REF_NAME}" dist/* --clobber

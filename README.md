@@ -264,7 +264,7 @@ openssl rand -hex 32
 
 ## 本地开发
 
-需要 Go 1.26+ 与 Node.js 22+。
+需要 Go 1.26+ 与 Node.js 22+。项目以 CGO-free 方式构建；官方发布覆盖 Linux、macOS、Windows、FreeBSD 的 amd64 与 arm64，容器镜像覆盖 `linux/amd64` 与 `linux/arm64`。
 
 ```sh
 cd web && npm install && npm run build && cd ..
@@ -277,6 +277,8 @@ export ONESSH_ADMIN_PASSWORD='replace-with-a-strong-password'
 export ONESSH_DATA_DIR="$PWD/data"
 ./onessh
 ```
+
+原生二进制必须把 `ONESSH_DATA_DIR` 指向当前用户可写目录；容器内继续使用 `/data`。网关部署平台与 SSH 目标平台彼此独立，但内置 CPU、内存和负载监控目前只采集 Linux 目标机的 `/proc`。
 
 前端热更新用 `cd web && npm run dev`，Vite 会把 `/api` 与 `/mcp` 代理到 `:8866`。
 
@@ -309,13 +311,14 @@ ONESSH_URL=http://localhost:8866/mcp \
 
 ## 持续集成与镜像
 
-`.github/workflows/ci.yml` 在 push、指向 `main` 的 PR 以及手动触发时运行三组检查：
+`.github/workflows/ci.yml` 在 push、指向 `main` 的 PR 以及手动触发时运行四组检查：
 
 - **backend** — `gofmt`、`go mod tidy` 差异、`go vet`、单元测试、CGO-free 构建
+- **compatibility** — 交叉编译 Linux、macOS、Windows、FreeBSD 的 amd64 与 arm64
 - **frontend** — 锁定依赖安装、TypeScript 检查、生产构建
 - **e2e** — Docker Compose 三主机端到端（含无 `rg` / `fd` 的降级路径）
 
-只有 `main` 分支或 `v*` 标签的 push 在全部检查通过后才发布镜像。工作流使用仓库自带的 `GITHUB_TOKEN` 写入 GHCR 并生成来源证明，不需要额外配置 PAT。默认的 `docker-compose.yml` 使用 `latest` 标签；更新部署时先拉取新镜像再重建容器：
+只有 `main` 分支或 `v*` 标签的 push 在全部检查通过后才发布 `linux/amd64`、`linux/arm64` 多架构镜像。`v*` 标签还会创建 GitHub Release，附带八个平台二进制压缩包和 `checksums.txt`。工作流使用仓库自带的 `GITHUB_TOKEN` 写入 GHCR、发布 Release 并生成镜像来源证明，不需要额外配置 PAT。默认的 `docker-compose.yml` 使用 `latest` 标签；更新部署时先拉取新镜像再重建容器：
 
 ```sh
 docker compose pull
@@ -328,7 +331,7 @@ docker compose up -d
 docker pull ghcr.io/lynricsy/onessh:latest
 ```
 
-同时会打出分支、Git 标签和 `sha-<commit>` 三类标签。
+镜像同时会打出分支、Git 标签和 `sha-<commit>` 三类标签。
 
 > [!NOTE]
 > GHCR 首次发布的包默认私有。需要匿名拉取的话，要在 GitHub Packages 设置里显式改为公开。
@@ -337,8 +340,8 @@ docker pull ghcr.io/lynricsy/onessh:latest
 
 **存储布局**
 
-- `/data/onessh.db` — 主机、加密凭据、令牌哈希、记忆、任务、审计与指标。记忆正文和可选 embedding 向量同库存储。
-- `/data/artifacts/` — 被截断的命令输出；启动时以及每小时清理超过 7 天的文件，指标数据同样保留 7 天。该清理独立于监控轮询，`ONESSH_POLL_INTERVAL=0` 也照常执行。
+- `/data/onessh.db` — 容器内的主机、加密凭据、令牌哈希、记忆、任务、审计与指标数据库；原生部署使用 `ONESSH_DATA_DIR/onessh.db`。记忆正文和可选 embedding 向量同库存储。
+- `/data/artifacts/` — 容器内被截断的命令输出；原生部署使用 `ONESSH_DATA_DIR/artifacts/`。启动时以及每小时清理超过 7 天的文件，指标数据同样保留 7 天。该清理独立于监控轮询，`ONESSH_POLL_INTERVAL=0` 也照常执行。
 - 升级既有数据目录会自动执行数据库迁移；迁移失败时不会跳过，也不会部分登记版本号。
 
 **凭据与令牌**

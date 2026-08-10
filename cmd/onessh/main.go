@@ -20,7 +20,7 @@ import (
 	"onessh/web"
 )
 
-const version = "dev"
+var version = "dev"
 
 func main() {
 	cfg, err := config.Load()
