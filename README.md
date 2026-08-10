@@ -17,7 +17,7 @@
 [![Last commit](https://img.shields.io/github/last-commit/Lynricsy/OneSSH?color=64748b)](https://github.com/Lynricsy/OneSSH/commits/main)
 [![Commit activity](https://img.shields.io/github/commit-activity/m/Lynricsy/OneSSH?color=64748b)](https://github.com/Lynricsy/OneSSH/pulse)
 [![Issues](https://img.shields.io/github/issues/Lynricsy/OneSSH?color=64748b)](https://github.com/Lynricsy/OneSSH/issues)
-[![Stars](https://img.shields.io/github/stars/Lynricsy/OneSSH?color=f59e0b)](https://github.com/Lynricsy/OneSSH/stargazers)
+[![Stars](https://img.shields.io/github/stars/Lynricsy/OneSSH?style=flat&label=stars&color=f59e0b)](https://github.com/Lynricsy/OneSSH/stargazers)
 
 [![GHCR](https://img.shields.io/badge/ghcr.io-lynricsy%2Fonessh-2dd4bf?logo=docker&logoColor=white)](https://github.com/Lynricsy/OneSSH/pkgs/container/onessh)
 [![MCP](https://img.shields.io/badge/MCP-Streamable%20HTTP-0d9488)](#mcp-接入)
