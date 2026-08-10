@@ -20,6 +20,7 @@ type Config struct {
 	EmbeddingAPIURL string
 	EmbeddingAPIKey string
 	EmbeddingModel  string
+	SearchHelper    bool
 }
 
 func Load() (Config, error) {
@@ -40,6 +41,13 @@ func Load() (Config, error) {
 	cfg.EmbeddingAPIURL = strings.TrimRight(os.Getenv("ONESSH_EMBEDDING_API_URL"), "/")
 	cfg.EmbeddingAPIKey = os.Getenv("ONESSH_EMBEDDING_API_KEY")
 	cfg.EmbeddingModel = os.Getenv("ONESSH_EMBEDDING_MODEL")
+	switch envDefault("ONESSH_SEARCH_HELPER", "auto") {
+	case "auto":
+		cfg.SearchHelper = true
+	case "off":
+	default:
+		return cfg, errors.New("ONESSH_SEARCH_HELPER 只接受 auto 或 off")
+	}
 	seconds, err := strconv.Atoi(envDefault("ONESSH_POLL_INTERVAL", "60"))
 	if err != nil || seconds < 0 {
 		return cfg, fmt.Errorf("ONESSH_POLL_INTERVAL 必须是非负整数")

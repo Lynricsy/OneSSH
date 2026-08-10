@@ -10,10 +10,13 @@ import (
 	"io"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 	"onessh/internal/execx"
+	"onessh/internal/files"
+	"onessh/internal/searchcore"
 	"onessh/internal/sshpool"
 )
 
@@ -23,53 +26,31 @@ const (
 	defaultFindLimit = 1000
 	maxFindLimit     = 5000
 	searchTimeout    = 30 * time.Second
-	maxJSONLine      = 1 << 20
 	maxStderr        = 64 << 10
-	maxOutputBytes   = 256 << 10
 )
 
 type Manager struct {
-	Pool *sshpool.Pool
+	Pool          *sshpool.Pool
+	SFTP          *files.ClientPool
+	HelperEnabled bool
+
+	mu     sync.Mutex
+	helper map[string]helperState
 }
 
-type GrepOptions struct {
-	Pattern    string
-	Path       string
-	Glob       string
-	IgnoreCase bool
-	Literal    bool
-	Context    int
-	Limit      int
+type helperState struct {
+	client       *ssh.Client
+	goos, goarch string
+	usable       bool
 }
 
-type GrepLine struct {
-	Path   string `json:"path"`
-	Line   int    `json:"line"`
-	Column int    `json:"column,omitempty"`
-	Text   string `json:"text"`
-	Match  bool   `json:"match"`
-}
-
-type GrepResult struct {
-	Lines      []GrepLine `json:"lines"`
-	MatchCount int        `json:"match_count"`
-	Truncated  bool       `json:"truncated"`
-	Engine     string     `json:"engine"`
-	Warning    string     `json:"warning,omitempty"`
-}
-
-type FindOptions struct {
-	Pattern string
-	Path    string
-	Limit   int
-}
-
-type FindResult struct {
-	Paths     []string `json:"paths"`
-	Truncated bool     `json:"truncated"`
-	Engine    string   `json:"engine"`
-	Warning   string   `json:"warning,omitempty"`
-}
+type (
+	GrepOptions = searchcore.GrepOptions
+	GrepLine    = searchcore.GrepLine
+	GrepResult  = searchcore.GrepResult
+	FindOptions = searchcore.FindOptions
+	FindResult  = searchcore.FindResult
+)
 
 type rgText struct {
 	Text  *string `json:"text"`
@@ -88,8 +69,13 @@ type rgEvent struct {
 	} `json:"data"`
 }
 
-func New(pool *sshpool.Pool) *Manager {
-	return &Manager{Pool: pool}
+func New(pool *sshpool.Pool, sftpClients *files.ClientPool, helperEnabled bool) *Manager {
+	return &Manager{
+		Pool:          pool,
+		SFTP:          sftpClients,
+		HelperEnabled: helperEnabled,
+		helper:        make(map[string]helperState),
+	}
 }
 
 func (m *Manager) Grep(ctx context.Context, host string, opt GrepOptions) (GrepResult, error) {
@@ -131,11 +117,10 @@ func (m *Manager) Grep(ctx context.Context, host string, opt GrepOptions) (GrepR
 	args = append(args, "--", opt.Pattern, opt.Path)
 	command := "command -v rg >/dev/null 2>&1 || { printf '%s\\n' 'ripgrep (rg) 未安装' >&2; exit 127; }; exec rg " + shellArgs(args)
 
-	ctx, cancel := context.WithTimeout(ctx, searchTimeout)
-	defer cancel()
+	nativeCtx, cancel := context.WithTimeout(ctx, searchTimeout)
 	out := GrepResult{Lines: make([]GrepLine, 0, min(opt.Limit, 128)), Engine: "rg"}
 	outputBytes := len(out.Engine) + 64
-	stderr, exitCode, stopped, err := m.stream(ctx, host, command, func(line string) bool {
+	stderr, exitCode, stopped, err := m.stream(nativeCtx, host, command, func(line string) bool {
 		event, ok := decodeRGLine(line)
 		if !ok || (event.Type != "match" && event.Type != "context") {
 			return true
@@ -147,7 +132,7 @@ func (m *Manager) Grep(ctx context.Context, host string, opt GrepOptions) (GrepR
 		item.Path = relativeResultPath(item.Path, opt.Path)
 		encoded, _ := json.Marshal(item)
 		lineBytes := len(encoded) + 1
-		if outputBytes+lineBytes > maxOutputBytes {
+		if outputBytes+lineBytes > searchcore.MaxOutputBytes {
 			return false
 		}
 		outputBytes += lineBytes
@@ -161,12 +146,13 @@ func (m *Manager) Grep(ctx context.Context, host string, opt GrepOptions) (GrepR
 		out.Lines = append(out.Lines, item)
 		return out.MatchCount < opt.Limit
 	})
+	cancel()
 	if err != nil {
 		return GrepResult{}, err
 	}
 	out.Truncated = stopped || out.MatchCount >= opt.Limit
 	if exitCode == 127 && !stopped {
-		return m.grepSFTP(ctx, host, opt)
+		return m.grepWithoutNative(ctx, host, opt)
 	}
 	if exitCode != 0 && exitCode != 1 && !stopped {
 		return GrepResult{}, commandError("rg", exitCode, stderr)
@@ -201,11 +187,10 @@ func (m *Manager) Find(ctx context.Context, host string, opt FindOptions) (FindR
 	args = append(args, "--", pattern, opt.Path)
 	command := "if command -v fd >/dev/null 2>&1; then _onessh_fd=fd; elif command -v fdfind >/dev/null 2>&1; then _onessh_fd=fdfind; else printf '%s\\n' 'fd 未安装' >&2; exit 127; fi; exec \"$_onessh_fd\" " + shellArgs(args)
 
-	ctx, cancel := context.WithTimeout(ctx, searchTimeout)
-	defer cancel()
+	nativeCtx, cancel := context.WithTimeout(ctx, searchTimeout)
 	out := FindResult{Paths: make([]string, 0, min(opt.Limit, 256)), Engine: "fd"}
 	outputBytes := len(out.Engine) + 64
-	stderr, exitCode, stopped, err := m.stream(ctx, host, command, func(line string) bool {
+	stderr, exitCode, stopped, err := m.stream(nativeCtx, host, command, func(line string) bool {
 		line = strings.TrimSuffix(line, "\r")
 		if line == "" {
 			return true
@@ -213,19 +198,20 @@ func (m *Manager) Find(ctx context.Context, host string, opt FindOptions) (FindR
 		resultPath := relativeResultPath(line, opt.Path)
 		encoded, _ := json.Marshal(resultPath)
 		pathBytes := len(encoded) + 1
-		if outputBytes+pathBytes > maxOutputBytes {
+		if outputBytes+pathBytes > searchcore.MaxOutputBytes {
 			return false
 		}
 		outputBytes += pathBytes
 		out.Paths = append(out.Paths, resultPath)
 		return len(out.Paths) < opt.Limit
 	})
+	cancel()
 	if err != nil {
 		return FindResult{}, err
 	}
 	out.Truncated = stopped || len(out.Paths) >= opt.Limit
 	if exitCode == 127 && !stopped {
-		return m.findSFTP(ctx, host, opt)
+		return m.findWithoutNative(ctx, host, opt)
 	}
 	if exitCode != 0 && !stopped {
 		return FindResult{}, commandError("fd", exitCode, stderr)
@@ -344,7 +330,7 @@ func (m *Manager) stream(ctx context.Context, host, command string, consume func
 	}()
 
 	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 64<<10), maxJSONLine)
+	scanner.Buffer(make([]byte, 64<<10), searchcore.MaxLineBytes)
 	for scanner.Scan() {
 		if !consume(scanner.Text()) {
 			stopped = true

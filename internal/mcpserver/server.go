@@ -53,7 +53,7 @@ const serverInstructions = `OneSSH 是受主机权限控制的 SSH 运维网关�
 
 // New 的 publicURL 必须是已规范化的来源地址（无尾斜杠、无路径），由 oauthserver.New 校验后传入；
 // 这里不再做第二次归一，避免同一份规则出现两套实现。
-func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanager.Manager, memory *memoryx.Engine, dataDir, publicURL string, pollInterval time.Duration) *Server {
+func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanager.Manager, memory *memoryx.Engine, dataDir, publicURL string, pollInterval time.Duration, searchHelper bool) *Server {
 	s := &Server{Store: st, Pool: pool, Events: bus, HostManager: hosts, Memory: memory, Exec: execx.New(dataDir)}
 	s.Jobs = jobs.New(st, pool, s.Exec, bus)
 	s.Files = files.New(pool, s.Exec)
@@ -63,7 +63,7 @@ func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanage
 	s.registerExec(s.Exec)
 	s.registerJobs(s.Jobs)
 	s.registerFiles(s.Files)
-	s.registerSearch(searchx.New(pool))
+	s.registerSearch(searchx.New(pool, s.Files.Clients, searchHelper))
 	s.registerMemory()
 	s.registerImage(s.Files)
 	s.registerMonitor(s.Monitor)

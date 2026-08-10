@@ -31,9 +31,10 @@ func (s *Server) registerSearch(search *searchx.Manager) {
 		Title: "搜索远程文件内容",
 		Description: "在远程主机上按内容搜索文件，返回结构化的路径、行号、列号、匹配行与上下文行，以及是否被 limit 截断。" +
 			"这是排查日志和定位配置的首选，比在 exec 里拼 grep 更省心：引号转义、超时、输出上限都已处理。" +
-			"远端有 ripgrep 时走原生路径，否则自动降级为网关侧 SFTP 遍历（engine 字段标明实际路径，降级时带 warning，大目录会更慢）。" +
-			"两条路径都会跳过二进制、符号链接和超大文件，并遵守目录内的 .gitignore/.ignore/.rgignore。",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(true)},
+			"远端有 ripgrep 时走原生路径，否则自动降级（engine 字段标明实际路径，降级时带 warning，大目录会更慢）。" +
+			"远端缺少 rg 且平台受支持（Linux amd64/arm64）时，会先经 SFTP 上传一个临时静态搜索 helper 在远端本地遍历（engine=helper），运行结束立即删除、不安装任何东西；上传或执行受阻时自动退回纯 SFTP。" +
+			"两条降级路径都会跳过二进制、符号链接和超大文件，并遵守目录内的 .gitignore/.ignore/.rgignore。",
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(true)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in GrepInput) (*mcp.CallToolResult, searchx.GrepResult, error) {
 		if _, err := AuthorizedHost(ctx, in.Host); err != nil {
 			return errorResult(err.Error()), searchx.GrepResult{}, nil
@@ -51,8 +52,9 @@ func (s *Server) registerSearch(search *searchx.Manager) {
 		Name:  "find",
 		Title: "查找远程路径",
 		Description: "在远程主机上按 glob 查找文件和目录路径，只返回路径不读内容，适合先定位再用 file_read 或 grep 精查。" +
-			"远端有 fd/fdfind 时走原生路径，否则自动降级为网关侧 SFTP 遍历（engine 字段标明实际路径）。要列单层目录用 file_list 更直接。",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(true)},
+			"远端有 fd/fdfind 时走原生路径，否则自动降级（engine 字段标明实际路径）。" +
+			"远端缺少 fd/fdfind 且平台受支持（Linux amd64/arm64）时，会先经 SFTP 上传一个临时静态搜索 helper 在远端本地遍历（engine=helper），运行结束立即删除、不安装任何东西；上传或执行受阻时自动退回纯 SFTP。要列单层目录用 file_list 更直接。",
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(true)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in FindInput) (*mcp.CallToolResult, searchx.FindResult, error) {
 		if _, err := AuthorizedHost(ctx, in.Host); err != nil {
 			return errorResult(err.Error()), searchx.FindResult{}, nil

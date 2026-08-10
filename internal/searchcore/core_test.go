@@ -1,4 +1,4 @@
-package searchx
+package searchcore
 
 import (
 	"context"
@@ -42,7 +42,7 @@ func writeSearchFixture(t *testing.T, root, name string, data []byte) {
 	}
 }
 
-func TestGrepFallbackMatchesContextAndProtectsTraversal(t *testing.T) {
+func TestGrepMatchesContextAndProtectsTraversal(t *testing.T) {
 	root := t.TempDir()
 	writeSearchFixture(t, root, ".gitignore", []byte("ignored.go\nignored-dir/\n"))
 	writeSearchFixture(t, root, "main.go", []byte("before\nNeedleAlpha\nafter\n"))
@@ -59,13 +59,13 @@ func TestGrepFallbackMatchesContextAndProtectsTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := grepFallback(context.Background(), localSearchFS{cwd: root}, GrepOptions{
+	result, err := Grep(context.Background(), localSearchFS{cwd: root}, GrepOptions{
 		Pattern: "needlealpha", Path: ".", Glob: "*.go", IgnoreCase: true, Context: 1, Limit: 10,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Engine != "sftp" || result.Warning != grepFallbackWarning || result.MatchCount != 3 || result.Truncated {
+	if result.Engine != "" || result.Warning != "" || result.MatchCount != 3 || result.Truncated {
 		t.Fatalf("unexpected result metadata or matches: %+v", result)
 	}
 	matched := make(map[string]GrepLine)
@@ -87,7 +87,7 @@ func TestGrepFallbackMatchesContextAndProtectsTraversal(t *testing.T) {
 	}
 }
 
-func TestFindFallbackUsesDoubleStarIgnoresSymlinksAndLimits(t *testing.T) {
+func TestFindUsesDoubleStarIgnoresSymlinksAndLimits(t *testing.T) {
 	root := t.TempDir()
 	writeSearchFixture(t, root, ".gitignore", []byte("vendor/\n"))
 	writeSearchFixture(t, root, "pkg/main_test.go", []byte("package pkg\n"))
@@ -97,17 +97,17 @@ func TestFindFallbackUsesDoubleStarIgnoresSymlinksAndLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := findFallback(context.Background(), localSearchFS{cwd: root}, FindOptions{
+	result, err := Find(context.Background(), localSearchFS{cwd: root}, FindOptions{
 		Pattern: "pkg/*_test.go", Path: ".", Limit: 10,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Engine != "sftp" || result.Warning != findFallbackWarning || result.Truncated || len(result.Paths) != 2 || result.Paths[0] != "nested/pkg/other_test.go" || result.Paths[1] != "pkg/main_test.go" {
+	if result.Engine != "" || result.Warning != "" || result.Truncated || len(result.Paths) != 2 || result.Paths[0] != "nested/pkg/other_test.go" || result.Paths[1] != "pkg/main_test.go" {
 		t.Fatalf("unexpected find result: %+v", result)
 	}
 
-	limited, err := findFallback(context.Background(), localSearchFS{cwd: root}, FindOptions{
+	limited, err := Find(context.Background(), localSearchFS{cwd: root}, FindOptions{
 		Pattern: "*.go", Path: ".", Limit: 1,
 	})
 	if err != nil {
@@ -118,10 +118,10 @@ func TestFindFallbackUsesDoubleStarIgnoresSymlinksAndLimits(t *testing.T) {
 	}
 }
 
-func TestFallbackOutputAndTraversalAreBounded(t *testing.T) {
+func TestOutputAndTraversalAreBounded(t *testing.T) {
 	root := t.TempDir()
-	writeSearchFixture(t, root, "long.txt", []byte("Needle"+strings.Repeat("x", maxOutputBytes)+"\n"))
-	result, err := grepFallback(context.Background(), localSearchFS{cwd: root}, GrepOptions{
+	writeSearchFixture(t, root, "long.txt", []byte("Needle"+strings.Repeat("x", MaxOutputBytes)+"\n"))
+	result, err := Grep(context.Background(), localSearchFS{cwd: root}, GrepOptions{
 		Pattern: "Needle", Path: ".", Limit: 10,
 	})
 	if err != nil {
@@ -147,16 +147,16 @@ func TestFallbackOutputAndTraversalAreBounded(t *testing.T) {
 	}
 }
 
-func TestFallbackSkipsOversizedFilesAndHonorsCancellation(t *testing.T) {
+func TestSkipsOversizedFilesAndHonorsCancellation(t *testing.T) {
 	root := t.TempDir()
 	large := filepath.Join(root, "large.txt")
 	if err := os.WriteFile(large, []byte("Needle\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Truncate(large, maxFallbackFileSize+1); err != nil {
+	if err := os.Truncate(large, MaxFallbackFileSize+1); err != nil {
 		t.Fatal(err)
 	}
-	result, err := grepFallback(context.Background(), localSearchFS{cwd: root}, GrepOptions{
+	result, err := Grep(context.Background(), localSearchFS{cwd: root}, GrepOptions{
 		Pattern: "Needle", Path: ".", Limit: 10,
 	})
 	if err != nil {
@@ -168,7 +168,7 @@ func TestFallbackSkipsOversizedFilesAndHonorsCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = findFallback(ctx, localSearchFS{cwd: root}, FindOptions{Pattern: "*", Path: ".", Limit: 10})
+	_, err = Find(ctx, localSearchFS{cwd: root}, FindOptions{Pattern: "*", Path: ".", Limit: 10})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation not preserved: %v", err)
 	}
@@ -181,5 +181,37 @@ func TestIgnoreRulesApplyNestedNegation(t *testing.T) {
 	}
 	if !ignoredPath(rules, "pkg/drop.go", false) || ignoredPath(rules, "pkg/keep.go", false) || !ignoredPath(rules, "pkg/generated", true) || ignoredPath(rules, "other/drop.go", false) {
 		t.Fatal("nested ignore rule semantics are incorrect")
+	}
+}
+
+func TestLocalFSUsesRealFilesystemSemantics(t *testing.T) {
+	root := t.TempDir()
+	writeSearchFixture(t, root, ".gitignore", []byte("ignored/\n"))
+	writeSearchFixture(t, root, "main.go", []byte("before\nLocalNeedle\nafter\n"))
+	writeSearchFixture(t, root, "pkg/other.go", []byte("LocalNeedle\n"))
+	writeSearchFixture(t, root, "ignored/drop.go", []byte("LocalNeedle\n"))
+	t.Chdir(root)
+
+	grep, err := Grep(context.Background(), LocalFS{}, GrepOptions{
+		Pattern: "localneedle", Path: ".", Glob: "*.go", IgnoreCase: true, Context: 1, Limit: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grep.MatchCount != 2 || grep.Truncated || len(grep.Lines) != 4 {
+		t.Fatalf("LocalFS grep 结果错误: %+v", grep)
+	}
+	for _, line := range grep.Lines {
+		if strings.HasPrefix(line.Path, "ignored/") {
+			t.Fatalf("LocalFS 未遵守忽略规则: %+v", grep.Lines)
+		}
+	}
+
+	found, err := Find(context.Background(), LocalFS{}, FindOptions{Pattern: "*.go", Path: ".", Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Paths) != 1 || !found.Truncated || found.Paths[0] != "main.go" {
+		t.Fatalf("LocalFS find 上限错误: %+v", found)
 	}
 }

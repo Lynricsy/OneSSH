@@ -119,7 +119,7 @@ flowchart LR
 | **执行** | 持久 cwd/env 的命令会话、超时控制、并发批量执行、大输出转 artifact |
 | **任务** | 后台任务的启动、状态、日志与终止，远端不留常驻组件 |
 | **文件** | SFTP 读取、原子写入、`expected_sha256` 乐观锁编辑、目录浏览、跨主机传输 |
-| **搜索** | `grep` / `find` 优先调用远端 ripgrep / fd，遵循项目忽略规则，缺失时自动降级 |
+| **搜索** | `grep` / `find` 优先调用远端 ripgrep / fd，缺失时使用临时静态 helper 或纯 SFTP 自动降级 |
 | **多媒体** | PNG、JPEG、GIF 首帧、WebP 的查看与缩放 |
 | **监控** | Linux CPU、内存、负载、磁盘指标采集，保留 7 天 |
 | **记忆** | 每台主机独立 bank + 全局 bank；FTS5、重要度与时近度混合召回，可选 OpenAI 兼容语义向量 |
@@ -230,13 +230,13 @@ Authorization: Bearer osh_...
 默认召回使用 trigram FTS5、重要度和 72 小时时近度衰减。配置 OpenAI 兼容 embedding 后自动加入余弦相似度；embedding 写入或查询失败会记录服务端日志并退化到纯 FTS，不中断 Agent 调用。
 
 <details>
-<summary><b>搜索的原生路径与 SFTP 降级</b></summary>
+<summary><b>搜索的原生路径、临时 helper 与 SFTP 降级</b></summary>
 
-`grep` 和 `find` 优先在目标主机上运行 `rg` 与 `fd`（Debian 的 `fdfind` 也识别），保留原生性能。命令不可用时自动切换到 SFTP + Go 实现——**OneSSH 不会为此修改远端主机**，不要求预装任何二进制。
+`grep` 和 `find` 优先在目标主机上运行 `rg` 与 `fd`（Debian 的 `fdfind` 也识别），保留原生性能。命令不可用且目标为 Linux amd64/arm64 时，OneSSH 会经 SFTP 上传一个随机命名的临时静态 helper，在远端本地完成遍历；helper 启动即自删除，网关在运行结束后也会再次清理，不安装任何常驻组件。
 
-降级路径同样遵循项目内的忽略文件，跳过二进制、大文件和符号链接，并保留 30 秒超时、256 KiB 输出上限和 100,000 项遍历上限。
+`/tmp` 不可写、禁止执行、平台不受支持或 helper 基础设施失败时，会自动切换到纯 SFTP + Go 实现。两条降级路径共享同一搜索内核：遵循项目内的忽略文件，跳过二进制、大文件和符号链接，并保留 30 秒搜索超时、256 KiB 输出上限和 100,000 项遍历上限。可设置 `ONESSH_SEARCH_HELPER=off` 禁用临时 helper。
 
-结构化结果里的 `engine` 字段标明实际路径：原生为 `rg` / `fd`，降级为 `sftp`。只有降级时才返回 `warning`，提示大目录上的性能可能低于原生工具。
+结构化结果里的 `engine` 字段标明实际路径：原生为 `rg` / `fd`，远端临时遍历为 `helper`，最终降级为 `sftp`。降级时返回 `warning`，说明临时文件行为或纯 SFTP 的性能影响。
 
 </details>
 
@@ -268,6 +268,7 @@ Authorization: Bearer osh_...
 | `ONESSH_PUBLIC_URL` | | 按请求推导 | 对外访问来源，如 `https://ssh.example.com`；生产 OAuth 部署应显式设置，同时决定是否发布 MCP 服务器图标 |
 | `ONESSH_DATA_DIR` | | `/data` | SQLite 与 artifact 数据目录 |
 | `ONESSH_POLL_INTERVAL` | | `60` | 监控轮询秒数，设为 `0` 关闭 |
+| `ONESSH_SEARCH_HELPER` | | `auto` | `auto` 在 Linux amd64/arm64 上启用临时搜索 helper；`off` 强制使用原生工具或纯 SFTP |
 | `ONESSH_EMBEDDING_API_URL` | | — | OpenAI 兼容 API 根地址，如 `https://api.example.com/v1`；需同时设置模型才启用 |
 | `ONESSH_EMBEDDING_API_KEY` | | — | embedding 服务 Bearer 密钥；服务不需要鉴权时可留空 |
 | `ONESSH_EMBEDDING_MODEL` | | — | embedding 模型名；换模型后旧向量自然不参与召回 |
@@ -308,9 +309,9 @@ go test -count=1 ./...
 ```
 
 <details>
-<summary><b>三主机端到端测试</b></summary>
+<summary><b>四主机端到端测试</b></summary>
 
-完整 E2E 会拉起 OneSSH、两个带 `rg` / `fd` 的 OpenSSH 容器，以及一个刻意不装搜索二进制的容器来覆盖降级路径。测试固定使用管理员密码 `test123`，并通过管理 API 创建 `ssh1`、`ssh2`、`ssh-no-tools` 和测试令牌：
+完整 E2E 会拉起 OneSSH、两个带 `rg` / `fd` 的 OpenSSH 容器、一个刻意不装搜索二进制的容器，以及一个将 `/tmp` 挂载为 `noexec` 的容器。测试固定使用管理员密码 `test123`，并通过管理 API 创建 `ssh1`、`ssh2`、`ssh-no-tools`、`ssh-noexec` 和测试令牌：
 
 ```sh
 export ONESSH_MASTER_KEY="$(openssl rand -hex 32)"
@@ -321,7 +322,7 @@ ONESSH_URL=http://localhost:8866/mcp \
   go test -count=1 -tags e2e -run TestEndToEnd -v ./e2e
 ```
 
-覆盖范围：持久 cwd、大输出 artifact、后台任务、结构化文件编辑、跨主机传输、原生与 SFTP 降级搜索、图片、记忆写入/召回/删除与 bank 鉴权、主机授权、现场监控、审计脱敏和 WebSocket 终端。
+覆盖范围：持久 cwd、大输出 artifact、后台任务、结构化文件编辑、跨主机传输、原生搜索、临时 helper 搜索、noexec 时的纯 SFTP 回退与清理、图片、记忆写入/召回/删除与 bank 鉴权、主机授权、现场监控、审计脱敏和 WebSocket 终端。
 
 </details>
 
@@ -333,7 +334,7 @@ ONESSH_URL=http://localhost:8866/mcp \
 - **compatibility** — 在 Linux 上交叉编译 Linux、macOS、FreeBSD 的 amd64 与 arm64
 - **windows** — 分别使用 `windows-latest` x64 与 `windows-11-arm` ARM64 原生虚拟机执行单元测试、构建、启动进程并请求 `/healthz`
 - **frontend** — 锁定依赖安装、TypeScript 检查、生产构建
-- **e2e** — Docker Compose 三主机端到端（含无 `rg` / `fd` 的降级路径）
+- **e2e** — Docker Compose 四主机端到端（覆盖原生、临时 helper 与 noexec 纯 SFTP 回退）
 
 只有 `v*` 标签的 push 会进入正式发布链路，普通分支 push 只运行检查，不写入 GHCR。发布先独立构建并校验八个平台压缩包与 `checksums.txt`，随后把完整资产上传到隐藏的 GitHub Draft Release；草稿准备成功后才发布 `linux/amd64`、`linux/arm64` 镜像及 provenance，最后再公开对应的 GitHub Release。两个 Windows 压缩包由对应架构的 Windows runner 原生构建，其余六个平台压缩包由 Linux runner 交叉构建。跨 GHCR 与 GitHub Release 无法原子提交：若镜像发布失败，只留下可重试的隐藏草稿；若最后公开 Release 失败，镜像已经可见，但完整草稿资产仍在，重跑工作流即可完成公开。工作流使用仓库自带的 `GITHUB_TOKEN`，不需要额外配置 PAT。默认的 `docker-compose.yml` 使用 `latest` 标签；更新部署时先拉取新镜像再重建容器：
 
