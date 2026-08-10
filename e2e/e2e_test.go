@@ -204,7 +204,8 @@ func TestEndToEnd(t *testing.T) {
 	ssh1 := createHost("ssh1")
 	ssh2 := createHost("ssh2")
 	sshNoTools := createHost("ssh-no-tools")
-	for _, h := range []hostView{ssh1, ssh2, sshNoTools} {
+	sshNoexec := createHost("ssh-noexec")
+	for _, h := range []hostView{ssh1, ssh2, sshNoTools, sshNoexec} {
 		var ok bool
 		for range 20 {
 			req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/api/v1/hosts/%d/test", base, h.ID), strings.NewReader("{}"))
@@ -462,20 +463,49 @@ func TestEndToEnd(t *testing.T) {
 		found := decoded[grepResult](t, call(t, a, "grep", map[string]any{
 			"host": "ssh-no-tools", "pattern": "FallbackNeedle", "path": "/tmp/onessh-fallback", "limit": 10,
 		}))
-		if found.Engine != "sftp" || !strings.Contains(found.Warning, "性能") || found.MatchCount != 1 || found.Truncated || len(found.Lines) != 1 || found.Lines[0].Path != "main.go" {
-			t.Fatalf("SFTP grep 降级元数据或结果错误: %+v", found)
+		if found.Engine != "helper" || !strings.Contains(found.Warning, "helper") || found.MatchCount != 1 || found.Truncated || len(found.Lines) != 1 || found.Lines[0].Path != "main.go" {
+			t.Fatalf("helper grep 降级元数据或结果错误: %+v", found)
 		}
 		files := decoded[findResult](t, call(t, a, "find", map[string]any{
 			"host": "ssh-no-tools", "pattern": "*.go", "path": "/tmp/onessh-fallback", "limit": 10,
 		}))
-		if files.Engine != "sftp" || !strings.Contains(files.Warning, "性能") || files.Truncated || len(files.Paths) != 2 || files.Paths[0] != "binary.go" || files.Paths[1] != "main.go" {
-			t.Fatalf("SFTP find 降级元数据或结果错误: %+v", files)
+		if files.Engine != "helper" || !strings.Contains(files.Warning, "helper") || files.Truncated || len(files.Paths) != 2 || files.Paths[0] != "binary.go" || files.Paths[1] != "main.go" {
+			t.Fatalf("helper find 降级元数据或结果错误: %+v", files)
 		}
 		invalid := call(t, a, "grep", map[string]any{
 			"host": "ssh-no-tools", "pattern": "[", "path": "/tmp/onessh-fallback",
 		})
 		if !invalid.IsError || !strings.Contains(toolText(invalid), "Go 正则无效") {
-			t.Fatalf("SFTP grep 无效正则未返回错误: %s", toolText(invalid))
+			t.Fatalf("helper grep 无效正则未返回错误: %s", toolText(invalid))
+		}
+		residue := decoded[execResult](t, call(t, a, "exec", map[string]any{
+			"host": "ssh-no-tools", "command": "ls -a /tmp | grep -c onessh-search-helper || true",
+		}))
+		if strings.TrimSpace(residue.Output) != "0" {
+			t.Fatalf("helper 运行后存在残留: %q", residue.Output)
+		}
+	})
+	t.Run("search falls back to sftp when helper cannot execute", func(t *testing.T) {
+		decoded[fileWrite](t, call(t, a, "file_write", map[string]any{
+			"host": "ssh-noexec", "path": "/tmp/onessh-noexec/main.go", "content": "package main\n// NoexecNeedle\n",
+		}))
+		found := decoded[grepResult](t, call(t, a, "grep", map[string]any{
+			"host": "ssh-noexec", "pattern": "NoexecNeedle", "path": "/tmp/onessh-noexec", "limit": 10,
+		}))
+		if found.Engine != "sftp" || !strings.Contains(found.Warning, "性能") || found.MatchCount != 1 || len(found.Lines) != 1 || found.Lines[0].Path != "main.go" {
+			t.Fatalf("noexec grep 未回退 SFTP: %+v", found)
+		}
+		files := decoded[findResult](t, call(t, a, "find", map[string]any{
+			"host": "ssh-noexec", "pattern": "*.go", "path": "/tmp/onessh-noexec", "limit": 10,
+		}))
+		if files.Engine != "sftp" || len(files.Paths) != 1 || files.Paths[0] != "main.go" {
+			t.Fatalf("noexec find 未回退 SFTP: %+v", files)
+		}
+		residue := decoded[execResult](t, call(t, a, "exec", map[string]any{
+			"host": "ssh-noexec", "command": "ls -a /tmp | grep -c onessh-search-helper || true",
+		}))
+		if strings.TrimSpace(residue.Output) != "0" {
+			t.Fatalf("noexec 回退后存在 helper 残留: %q", residue.Output)
 		}
 	})
 	t.Run("image", func(t *testing.T) {

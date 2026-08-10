@@ -9,6 +9,8 @@ services:
         condition: service_started
       ssh-no-tools:
         condition: service_started
+      ssh-noexec:
+        condition: service_started
   ssh1:
     build:
       context: .
@@ -40,5 +42,16 @@ services:
       USER_PASSWORD: pass
       USER_NAME: test
       LOG_STDOUT: "true"
+    expose:
+      - "2222"
+  ssh-noexec:
+    image: lscr.io/linuxserver/openssh-server:latest
+    environment:
+      PASSWORD_ACCESS: "true"
+      USER_PASSWORD: pass
+      USER_NAME: test
+      LOG_STDOUT: "true"
+    tmpfs:
+      - /tmp:mode=1777,noexec
     expose:
       - "2222"
