@@ -12,6 +12,7 @@ import (
 	"onessh/internal/events"
 	"onessh/internal/hostmanager"
 	"onessh/internal/mcpserver"
+	"onessh/internal/memoryx"
 	"onessh/internal/oauthserver"
 	"onessh/internal/sshpool"
 	"onessh/internal/store"
@@ -31,6 +32,11 @@ func main() {
 		log.Fatal(err)
 	}
 	defer st.Close()
+	memEngine := memoryx.New(st, memoryx.EmbeddingConfig{
+		APIURL: cfg.EmbeddingAPIURL,
+		APIKey: cfg.EmbeddingAPIKey,
+		Model:  cfg.EmbeddingModel,
+	})
 	box, err := cryptox.New(cfg.MasterKey)
 	if err != nil {
 		log.Fatal(err)
@@ -44,10 +50,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	mcpService := mcpserver.New(st, pool, bus, hosts, cfg.DataDir, oauthService.PublicURL, cfg.PollInterval)
+	mcpService := mcpserver.New(st, pool, bus, hosts, memEngine, cfg.DataDir, oauthService.PublicURL, cfg.PollInterval)
 	defer mcpService.Close()
 	adminAuth := webapi.NewAdminAuth(cfg.AdminPassword, cfg.MasterKey)
-	adminAPI := webapi.NewAPI(st, box, pool, hosts, mcpService.Exec, mcpService.Files, mcpService.Jobs, mcpService.Monitor, bus)
+	adminAPI := webapi.NewAPI(st, box, pool, hosts, mcpService.Exec, mcpService.Files, mcpService.Jobs, mcpService.Monitor, memEngine, bus)
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /api/v1/login", http.HandlerFunc(adminAuth.Login))

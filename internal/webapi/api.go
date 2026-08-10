@@ -23,6 +23,7 @@ import (
 	"onessh/internal/files"
 	"onessh/internal/hostmanager"
 	"onessh/internal/jobs"
+	"onessh/internal/memoryx"
 	"onessh/internal/monitor"
 	"onessh/internal/sshpool"
 	"onessh/internal/store"
@@ -37,11 +38,12 @@ type API struct {
 	Files   *files.Manager
 	Jobs    *jobs.Manager
 	Monitor *monitor.Manager
+	Memory  *memoryx.Engine
 	Events  *events.Bus
 }
 
-func NewAPI(st *store.Store, box *cryptox.Box, pool *sshpool.Pool, hosts *hostmanager.Manager, exec *execx.Runner, files *files.Manager, jobs *jobs.Manager, mon *monitor.Manager, bus *events.Bus) *API {
-	return &API{Store: st, Box: box, Pool: pool, Hosts: hosts, Exec: exec, Files: files, Jobs: jobs, Monitor: mon, Events: bus}
+func NewAPI(st *store.Store, box *cryptox.Box, pool *sshpool.Pool, hosts *hostmanager.Manager, exec *execx.Runner, files *files.Manager, jobs *jobs.Manager, mon *monitor.Manager, memory *memoryx.Engine, bus *events.Bus) *API {
+	return &API{Store: st, Box: box, Pool: pool, Hosts: hosts, Exec: exec, Files: files, Jobs: jobs, Monitor: mon, Memory: memory, Events: bus}
 }
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()

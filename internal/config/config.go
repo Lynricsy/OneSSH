@@ -6,16 +6,20 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type Config struct {
-	MasterKey     []byte
-	AdminPassword string
-	Listen        string
-	DataDir       string
-	PublicURL     string
-	PollInterval  time.Duration
+	MasterKey       []byte
+	AdminPassword   string
+	Listen          string
+	DataDir         string
+	PublicURL       string
+	PollInterval    time.Duration
+	EmbeddingAPIURL string
+	EmbeddingAPIKey string
+	EmbeddingModel  string
 }
 
 func Load() (Config, error) {
@@ -33,6 +37,9 @@ func Load() (Config, error) {
 	cfg.Listen = envDefault("ONESSH_LISTEN", ":8866")
 	cfg.DataDir = envDefault("ONESSH_DATA_DIR", "/data")
 	cfg.PublicURL = os.Getenv("ONESSH_PUBLIC_URL")
+	cfg.EmbeddingAPIURL = strings.TrimRight(os.Getenv("ONESSH_EMBEDDING_API_URL"), "/")
+	cfg.EmbeddingAPIKey = os.Getenv("ONESSH_EMBEDDING_API_KEY")
+	cfg.EmbeddingModel = os.Getenv("ONESSH_EMBEDDING_MODEL")
 	seconds, err := strconv.Atoi(envDefault("ONESSH_POLL_INTERVAL", "60"))
 	if err != nil || seconds < 0 {
 		return cfg, fmt.Errorf("ONESSH_POLL_INTERVAL 必须是非负整数")

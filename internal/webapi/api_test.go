@@ -11,6 +11,7 @@ import (
 
 	"onessh/internal/cryptox"
 	"onessh/internal/hostmanager"
+	"onessh/internal/memoryx"
 	"onessh/internal/sshpool"
 	"onessh/internal/store"
 )
@@ -28,7 +29,7 @@ func TestAdminKeyHostTokenLifecycle(t *testing.T) {
 	pool := sshpool.New(st, box)
 	defer pool.Close()
 	hosts := hostmanager.New(st, box, pool)
-	api := NewAPI(st, box, pool, hosts, nil, nil, nil, nil, nil).Handler()
+	api := NewAPI(st, box, pool, hosts, nil, nil, nil, nil, memoryx.New(st, memoryx.EmbeddingConfig{}), nil).Handler()
 	call := func(method, path, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")

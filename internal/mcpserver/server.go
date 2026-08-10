@@ -15,6 +15,7 @@ import (
 	"onessh/internal/files"
 	"onessh/internal/hostmanager"
 	"onessh/internal/jobs"
+	"onessh/internal/memoryx"
 	"onessh/internal/monitor"
 	"onessh/internal/searchx"
 	"onessh/internal/sshpool"
@@ -31,12 +32,13 @@ type Server struct {
 	Files       *files.Manager
 	Jobs        *jobs.Manager
 	Monitor     *monitor.Manager
+	Memory      *memoryx.Engine
 }
 
 // New 的 publicURL 必须是已规范化的来源地址（无尾斜杠、无路径），由 oauthserver.New 校验后传入；
 // 这里不再做第二次归一，避免同一份规则出现两套实现。
-func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanager.Manager, dataDir, publicURL string, pollInterval time.Duration) *Server {
-	s := &Server{Store: st, Pool: pool, Events: bus, HostManager: hosts, Exec: execx.New(dataDir)}
+func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanager.Manager, memory *memoryx.Engine, dataDir, publicURL string, pollInterval time.Duration) *Server {
+	s := &Server{Store: st, Pool: pool, Events: bus, HostManager: hosts, Memory: memory, Exec: execx.New(dataDir)}
 	s.Jobs = jobs.New(st, pool, s.Exec, bus)
 	s.Files = files.New(pool, s.Exec)
 	s.Monitor = monitor.New(st, pool, s.Exec, pollInterval)
