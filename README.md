@@ -335,7 +335,7 @@ ONESSH_URL=http://localhost:8866/mcp \
 - **frontend** — 锁定依赖安装、TypeScript 检查、生产构建
 - **e2e** — Docker Compose 三主机端到端（含无 `rg` / `fd` 的降级路径）
 
-只有 `main` 分支或 `v*` 标签的 push 在全部检查通过后才发布 `linux/amd64`、`linux/arm64` 多架构镜像。`v*` 标签还会创建 GitHub Release；两个 Windows 压缩包由对应架构的 Windows runner 原生构建，其余六个平台压缩包由 Linux runner 交叉构建，最后统一生成 `checksums.txt`。工作流使用仓库自带的 `GITHUB_TOKEN` 写入 GHCR、发布 Release 并生成镜像来源证明，不需要额外配置 PAT。默认的 `docker-compose.yml` 使用 `latest` 标签；更新部署时先拉取新镜像再重建容器：
+只有 `v*` 标签的 push 在全部检查通过后才发布 `linux/amd64`、`linux/arm64` 多架构镜像；普通分支 push 只运行检查，不写入 GHCR。镜像发布成功后才会创建对应的 GitHub Release，避免二进制 Release 与容器版本分离。两个 Windows 压缩包由对应架构的 Windows runner 原生构建，其余六个平台压缩包由 Linux runner 交叉构建，最后统一生成 `checksums.txt`。工作流使用仓库自带的 `GITHUB_TOKEN` 写入 GHCR、发布 Release 并生成镜像来源证明，不需要额外配置 PAT。默认的 `docker-compose.yml` 使用 `latest` 标签；更新部署时先拉取新镜像再重建容器：
 
 ```sh
 docker compose pull
@@ -348,7 +348,7 @@ docker compose up -d
 docker pull ghcr.io/lynricsy/onessh:latest
 ```
 
-镜像同时会打出分支、Git 标签和 `sha-<commit>` 三类标签。
+每次正式发布会同时更新 Git 标签、`sha-<commit>` 和 `latest` 三类镜像标签；分支名不再作为镜像标签发布。
 
 > [!NOTE]
 > GHCR 首次发布的包默认私有。需要匿名拉取的话，要在 GitHub Packages 设置里显式改为公开。

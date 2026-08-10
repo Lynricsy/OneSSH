@@ -259,7 +259,7 @@ jobs:
 
   publish:
     name: Publish GHCR image
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs:
       - backend
       - frontend
@@ -302,10 +302,9 @@ jobs:
         with:
           images: ghcr.io/${{ steps.image.outputs.name }}
           tags: |
-            type=ref,event=branch
             type=ref,event=tag
             type=sha,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
 
       - name: Build and push image
         id: push
@@ -330,11 +329,7 @@ jobs:
     name: Publish release binaries
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs:
-      - backend
-      - frontend
-      - e2e
-      - compatibility
-      - windows
+      - publish
     runs-on: ubuntu-latest
     permissions:
       contents: write
