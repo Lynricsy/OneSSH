@@ -367,7 +367,16 @@ func (a *API) audit(w http.ResponseWriter, r *http.Request) {
 	}
 	before, _ := strconv.ParseInt(q.Get("before"), 10, 64)
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	list, err := a.Store.ListAudit(r.Context(), tid, q.Get("host"), q.Get("tool"), before, limit)
+	var ok *bool
+	if q.Get("ok") != "" {
+		b, err := strconv.ParseBool(q.Get("ok"))
+		if err != nil {
+			apiError(w, 400, err)
+			return
+		}
+		ok = &b
+	}
+	list, err := a.Store.ListAudit(r.Context(), tid, q.Get("host"), q.Get("tool"), ok, before, limit)
 	if err != nil {
 		apiError(w, 500, err)
 		return

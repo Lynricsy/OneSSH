@@ -1,6 +1,7 @@
 import { Broadcast, Pulse } from '@phosphor-icons/react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { useAudit } from '@/api/queries'
+import { useEffect, useState } from 'react'
+import { useAudit, useHosts, useTokens, type AuditFilter } from '@/api/queries'
 import type { Audit } from '@/api/types'
 import { Badge, Dot } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -8,12 +9,16 @@ import { DataTable, type Column } from '@/components/ui/data-table'
 import { EmptyState } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
 import { PageTransition } from '@/components/ui/page-transition'
+import { Select } from '@/components/ui/select'
 import { useEventStream } from '@/hooks/use-event-stream'
 import { cn } from '@/lib/cn'
 import { formatBytes } from '@/lib/format'
 
 /** 审计与事件流的时间戳是「毫秒」，与 lib/format 的「秒」契约不同，故本页单独格式化 */
 const clock = (ms: number) => new Date(ms).toLocaleTimeString('zh-CN', { hour12: false })
+
+/** 筛选值全部是字符串：Radix Select 只接受 string，'all' 哨兵表示「不筛选」 */
+const ALL = 'all'
 
 /** 列定义与渲染无关联状态，放模块级避免每次渲染重建 */
 const auditColumns: Column<Audit>[] = [
@@ -87,7 +92,33 @@ const auditColumns: Column<Audit>[] = [
 
 export function ActivityPage() {
   const { events, status } = useEventStream()
-  const audit = useAudit()
+  const [tool, setTool] = useState(ALL)
+  const [token, setToken] = useState(ALL)
+  const [host, setHost] = useState(ALL)
+  const [result, setResult] = useState(ALL)
+  const filter: AuditFilter = {
+    tool: tool === ALL ? undefined : tool,
+    token: token === ALL ? undefined : Number(token),
+    host: host === ALL ? undefined : host,
+    ok: result === ALL ? undefined : result === 'ok',
+  }
+  const audit = useAudit(filter)
+  const hosts = useHosts()
+  const tokens = useTokens()
+  const filtered = tool !== ALL || token !== ALL || host !== ALL || result !== ALL
+
+  // 工具名没有独立接口：把每次响应里出现过的工具并入集合并按名排序，
+  // 筛选改变结果集也不丢已见过的选项
+  const [seenTools, setSeenTools] = useState<string[]>([])
+  useEffect(() => {
+    if (!audit.data?.length) return
+    setSeenTools((prev) => {
+      const next = new Set(prev)
+      for (const row of audit.data) next.add(row.Tool)
+      return next.size === prev.length ? prev : [...next].sort()
+    })
+  }, [audit.data])
+
   const reduceMotion = useReducedMotion()
   /**
    * 后端 SSE 在推出第一条事件前不会 flush 响应头，浏览器的 readyState 会长期停在
@@ -166,27 +197,91 @@ export function ActivityPage() {
             <CardTitle>审计记录</CardTitle>
             {audit.data && audit.data.length > 0 && (
               <span className="text-[12px] text-muted tabular-nums">
-                最近 {audit.data.length} 条
+                {filtered ? `筛选出 ${audit.data.length} 条` : `最近 ${audit.data.length} 条`}
               </span>
             )}
           </CardHeader>
+          {/* 四个维度即表格的四个列；改动即查，不设「查询」按钮 */}
+          <div className="grid grid-cols-2 gap-2 border-b border-border p-3 lg:grid-cols-4">
+            <label htmlFor="audit-filter-tool" className="sr-only">
+              按工具筛选
+            </label>
+            <Select
+              id="audit-filter-tool"
+              value={tool}
+              onChange={setTool}
+              options={[
+                { value: ALL, label: '全部工具' },
+                ...seenTools.map((name) => ({ value: name, label: name })),
+              ]}
+            />
+            <label htmlFor="audit-filter-token" className="sr-only">
+              按调用令牌筛选
+            </label>
+            <Select
+              id="audit-filter-token"
+              value={token}
+              onChange={setToken}
+              options={[
+                { value: ALL, label: '全部令牌' },
+                ...(tokens.data ?? []).map((item) => ({ value: String(item.id), label: item.name })),
+              ]}
+            />
+            <label htmlFor="audit-filter-host" className="sr-only">
+              按主机筛选
+            </label>
+            <Select
+              id="audit-filter-host"
+              value={host}
+              onChange={setHost}
+              options={[
+                { value: ALL, label: '全部主机' },
+                ...(hosts.data ?? []).map((item) => ({ value: item.name, label: item.name })),
+              ]}
+            />
+            <label htmlFor="audit-filter-result" className="sr-only">
+              按结果筛选
+            </label>
+            <Select
+              id="audit-filter-result"
+              value={result}
+              onChange={setResult}
+              options={[
+                { value: ALL, label: '全部结果' },
+                { value: 'ok', label: '成功' },
+                { value: 'fail', label: '失败' },
+              ]}
+            />
+          </div>
           <CardContent className="flex min-h-0 flex-1 flex-col p-0">
             <DataTable
               stickyHeader
               // 表格自身即滚动容器（overflow-x-auto 会让 y 轴一并变成 auto）；窄屏收紧单元格内边距，
               // 让「时间」列不用被砍掉也能塞下四列
-              className="min-h-0 flex-1 [&_td]:px-3 [&_th]:px-3 sm:[&_td]:px-4 sm:[&_th]:px-4"
+              className={cn(
+                'min-h-0 flex-1 transition-opacity duration-150 [&_td]:px-3 [&_th]:px-3 sm:[&_td]:px-4 sm:[&_th]:px-4',
+                audit.isPlaceholderData && 'opacity-60',
+              )}
               columns={auditColumns}
               rows={audit.data}
               rowKey={(item) => item.ID}
               loading={audit.isLoading}
               empty={
-                <EmptyState
-                  className="[&_p]:text-balance"
-                  icon={<Pulse size={22} />}
-                  title="暂无审计记录"
-                  description="Agent 通过 MCP 网关调用工具后，每一次调用都会记录在这里。"
-                />
+                filtered ? (
+                  <EmptyState
+                    className="[&_p]:text-balance"
+                    icon={<Pulse size={22} />}
+                    title="没有匹配的审计记录"
+                    description="当前筛选条件下暂无记录，调整条件再试。"
+                  />
+                ) : (
+                  <EmptyState
+                    className="[&_p]:text-balance"
+                    icon={<Pulse size={22} />}
+                    title="暂无审计记录"
+                    description="Agent 通过 MCP 网关调用工具后，每一次调用都会记录在这里。"
+                  />
+                )
               }
             />
           </CardContent>

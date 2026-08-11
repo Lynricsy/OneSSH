@@ -10,7 +10,7 @@ func (s *Store) AddAudit(ctx context.Context, a Audit) error {
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO audit(ts,token_id,token_name,tool,host,params_json,ok,exit_code,duration_ms,bytes_out) VALUES(?,?,?,?,?,?,?,?,?,?)`, a.Ts, nullInt(a.TokenID), nullString(a.TokenName), a.Tool, nullString(a.Host), a.ParamsJSON, boolInt(a.OK), nullInt(a.ExitCode), a.DurationMS, a.BytesOut)
 	return err
 }
-func (s *Store) ListAudit(ctx context.Context, tokenID *int64, host, tool string, before int64, limit int) ([]Audit, error) {
+func (s *Store) ListAudit(ctx context.Context, tokenID *int64, host, tool string, ok *bool, before int64, limit int) ([]Audit, error) {
 	q := `SELECT id,ts,token_id,token_name,tool,host,params_json,ok,exit_code,duration_ms,bytes_out FROM audit WHERE 1=1`
 	args := []any{}
 	if tokenID != nil {
@@ -24,6 +24,10 @@ func (s *Store) ListAudit(ctx context.Context, tokenID *int64, host, tool string
 	if tool != "" {
 		q += ` AND tool=?`
 		args = append(args, tool)
+	}
+	if ok != nil {
+		q += ` AND ok=?`
+		args = append(args, boolInt(*ok))
 	}
 	if before > 0 {
 		q += ` AND id<?`

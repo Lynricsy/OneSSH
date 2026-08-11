@@ -21,7 +21,7 @@ export const queryKeys = {
   keys: ['keys'] as const,
   tokens: ['tokens'] as const,
   jobs: ['jobs'] as const,
-  audit: ['audit'] as const,
+  audit: (filter: AuditFilter) => ['audit', filter] as const,
   metrics: (hostId: number, hours: number) => ['metrics', hostId, hours] as const,
   sftp: (hostId: number, path: string) => ['sftp', hostId, path] as const,
   /** 记忆列表与统计共用 ['memories'] 前缀：删除后一次前缀失效即可覆盖所有筛选与翻页缓存 */
@@ -98,8 +98,23 @@ export const useJobs = () =>
     refetchInterval: 4000,
   })
 
-export const useAudit = () =>
-  useQuery({ queryKey: queryKeys.audit, queryFn: () => api<Audit[]>('/audit?limit=100') })
+/** 审计筛选：缺省即不过滤；token 按 id，host/tool/ok 走后端精确匹配 */
+export type AuditFilter = { tool?: string; token?: number; host?: string; ok?: boolean }
+
+export const useAudit = (filter: AuditFilter = {}) =>
+  useQuery({
+    queryKey: queryKeys.audit(filter),
+    queryFn: () => {
+      const params = new URLSearchParams({ limit: '100' })
+      if (filter.tool) params.set('tool', filter.tool)
+      if (filter.token != null) params.set('token', String(filter.token))
+      if (filter.host) params.set('host', filter.host)
+      if (filter.ok != null) params.set('ok', String(filter.ok))
+      return api<Audit[]>(`/audit?${params}`)
+    },
+    // 切换筛选时旧数据留在原位渐隐，避免每改一个条件表格就塌成骨架屏
+    placeholderData: keepPreviousData,
+  })
 
 export const useMetrics = (hostId: number | undefined, hours: number) =>
   useQuery({
