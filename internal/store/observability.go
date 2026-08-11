@@ -14,12 +14,12 @@ func (s *Store) ListAudit(ctx context.Context, tokenID *int64, host, tool string
 	q := `SELECT id,ts,token_id,token_name,tool,host,params_json,ok,exit_code,duration_ms,bytes_out FROM audit WHERE 1=1`
 	args := []any{}
 	if tokenID != nil {
-		// 迁移前的 ID 可能已被复用；当前令牌存在时，只接受其安全创建边界之后的记录。
+		// 迁移前的 ID 可能已被复用；当前令牌存在时，只接受写入时已快照其名称的记录。
 		q += ` AND audit.token_id=? AND (
 			NOT EXISTS (SELECT 1 FROM tokens WHERE tokens.id=?)
 			OR EXISTS (
 				SELECT 1 FROM tokens
-				WHERE tokens.id=? AND audit.ts >= (tokens.created_at + 1) * 1000
+				WHERE tokens.id=? AND audit.token_name=tokens.name
 			)
 		)`
 		args = append(args, *tokenID, *tokenID, *tokenID)

@@ -58,19 +58,3 @@ WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'tokens_v8');
 
 DROP TABLE tokens;
 ALTER TABLE tokens_v8 RENAME TO tokens;
-
--- 令牌创建时间只有秒精度；跳过创建当秒，宁可保持未知，也不把旧主体归属给复用 ID 的新主体。
-UPDATE audit
-SET token_name = (
-  SELECT name
-  FROM tokens
-  WHERE tokens.id = audit.token_id
-)
-WHERE token_name IS NULL
-  AND token_id IS NOT NULL
-  AND EXISTS (
-    SELECT 1
-    FROM tokens
-    WHERE tokens.id = audit.token_id
-      AND audit.ts >= (tokens.created_at + 1) * 1000
-  );
