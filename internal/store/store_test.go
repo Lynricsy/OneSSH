@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -20,6 +21,38 @@ func TestOpenCreatesSchema(t *testing.T) {
 		if err := s.DB.QueryRowContext(context.Background(), `SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name); err != nil {
 			t.Fatalf("缺少表 %s: %v", table, err)
 		}
+	}
+}
+
+func TestOpenSupportsURICharactersInDataDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "data #% 空格")
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var versions int
+	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
+		t.Fatal(err)
+	}
+	if err = st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dbPath := filepath.Join(dir, "onessh.db")
+	if _, err = os.Stat(dbPath); err != nil {
+		t.Fatalf("数据库未创建在配置目录: %v", err)
+	}
+	st, err = Open(dir)
+	if err != nil {
+		t.Fatalf("重新打开特殊路径数据库失败: %v", err)
+	}
+	defer st.Close()
+	var reopenedVersions int
+	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&reopenedVersions); err != nil {
+		t.Fatal(err)
+	}
+	if reopenedVersions != versions {
+		t.Fatalf("重新打开后的迁移版本数 = %d，首次打开为 %d", reopenedVersions, versions)
 	}
 }
 
