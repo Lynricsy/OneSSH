@@ -671,10 +671,15 @@ func TestEndToEnd(t *testing.T) {
 	fileEditSeen := false
 	hostCreateRedacted := false
 	memoryRememberSeen := false
+	auditTokens := map[string]bool{}
 	for _, row := range audit {
 		tool, _ := row["Tool"].(string)
 		ok, _ := row["OK"].(bool)
 		params, _ := row["ParamsJSON"].(string)
+		if tokenName, valid := row["TokenName"].(map[string]any); valid && tokenName["Valid"] == true {
+			name, _ := tokenName["String"].(string)
+			auditTokens[name] = true
+		}
 		if tool == "file_edit" {
 			fileEditSeen = true
 			if strings.Contains(params, "old_text") || strings.Contains(params, "second") {
@@ -706,6 +711,11 @@ func TestEndToEnd(t *testing.T) {
 	}
 	if !memoryRememberSeen {
 		t.Fatal("审计缺少 memory_remember")
+	}
+	for _, name := range []string{"all", "ssh1-only", "host-manager"} {
+		if !auditTokens[name] {
+			t.Fatalf("审计缺少调用令牌 %s", name)
+		}
 	}
 	for tool, seen := range expectedManagement {
 		if !seen {

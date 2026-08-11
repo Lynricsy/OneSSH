@@ -37,6 +37,7 @@ func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 		INSERT INTO token_hosts(token_id,host_id) VALUES(1,99);
 		INSERT INTO sessions(token_id,host_id,label,cwd,env_json,updated_at) VALUES(1,99,'default','~','{}',1);
 		INSERT INTO jobs(id,host_id,token_id,command,cwd,status,started_at) VALUES('legacy-job',99,1,'true','~','exited',1);
+		INSERT INTO audit(ts,token_id,tool,params_json,ok) VALUES(1,1,'exec','{}',1);
 		INSERT INTO metrics(host_id,ts) VALUES(99,1);`); err != nil {
 		t.Fatal(err)
 	}
@@ -68,10 +69,17 @@ func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 		}
 	}
 	var versions int
-	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (1,2,3,4,5,6,7)`).Scan(&versions); err != nil {
+	var auditTokenName string
+	if err = st.DB.QueryRowContext(ctx, `SELECT token_name FROM audit WHERE token_id=1`).Scan(&auditTokenName); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 7 {
+	if auditTokenName != "legacy" {
+		t.Fatalf("旧审计令牌名称 = %q", auditTokenName)
+	}
+	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (1,2,3,4,5,6,7,8)`).Scan(&versions); err != nil {
+		t.Fatal(err)
+	}
+	if versions != 8 {
 		t.Fatalf("迁移版本数 = %d", versions)
 	}
 	if err = st.Close(); err != nil {
@@ -85,7 +93,7 @@ func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 7 {
+	if versions != 8 {
 		t.Fatalf("二次迁移版本数 = %d", versions)
 	}
 }
@@ -114,7 +122,7 @@ func TestOpenRecordsPreexistingManageHostsColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 7 {
+	if versions != 8 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 }

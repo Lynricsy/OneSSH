@@ -32,6 +32,9 @@ var migration0006 string
 //go:embed migrations/0007_jump_host.sql
 var migration0007 string
 
+//go:embed migrations/0008_audit_token_name.sql
+var migration0008 string
+
 type Store struct{ DB *sql.DB }
 
 func Open(dataDir string) (*Store, error) {
@@ -75,6 +78,7 @@ func migrate(db *sql.DB) error {
 		{version: 5, sql: migration0005},
 		{version: 6, sql: migration0006},
 		{version: 7, sql: migration0007},
+		{version: 8, sql: migration0008},
 	} {
 		if err := applyMigration(db, m); err != nil {
 			return fmt.Errorf("版本 %d: %w", m.version, err)

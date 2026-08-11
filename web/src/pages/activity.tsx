@@ -31,9 +31,27 @@ const auditColumns: Column<Audit>[] = [
     render: (item) => item.Tool,
   },
   {
+    key: 'TokenName',
+    title: '调用令牌',
+    className: 'max-w-[180px] text-muted',
+    render: (item) => {
+      const id = item.TokenID?.Valid ? `#${item.TokenID.Int64}` : ''
+      const label = item.TokenName?.Valid
+        ? `${item.TokenName.String}${id ? ` · ${id}` : ''}`
+        : id
+          ? `已删除令牌 · ${id}`
+          : '系统'
+      return (
+        <span className="block truncate" title={label}>
+          {label}
+        </span>
+      )
+    },
+  },
+  {
     key: 'Host',
     title: '主机',
-    className: 'hidden md:table-cell text-muted',
+    className: 'hidden lg:table-cell text-muted',
     render: (item) => (item.Host?.Valid ? item.Host.String : '—'),
   },
   {
