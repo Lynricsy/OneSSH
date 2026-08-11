@@ -23,6 +23,87 @@ func TestOpenCreatesSchema(t *testing.T) {
 	}
 }
 
+func TestOpenConfiguresEveryConnection(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	ctx := context.Background()
+	first, err := st.DB.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := st.DB.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+
+	for i, conn := range []*sql.Conn{first, second} {
+		var busyTimeout, foreignKeys int
+		if err = conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&busyTimeout); err != nil {
+			t.Fatal(err)
+		}
+		if err = conn.QueryRowContext(ctx, `PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil {
+			t.Fatal(err)
+		}
+		if busyTimeout != 5000 || foreignKeys != 1 {
+			t.Fatalf("连接 %d 的数据库参数异常: busy_timeout=%d foreign_keys=%d", i+1, busyTimeout, foreignKeys)
+		}
+	}
+}
+
+func TestOpenWaitsForConcurrentWriter(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	ctx := context.Background()
+	first, err := st.DB.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := st.DB.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+
+	if _, err = first.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+	defer first.ExecContext(ctx, `ROLLBACK`)
+
+	result := make(chan error, 1)
+	go func() {
+		_, execErr := second.ExecContext(ctx, `INSERT INTO metrics(host_id,ts) VALUES(1,1)`)
+		result <- execErr
+	}()
+
+	select {
+	case err = <-result:
+		t.Fatalf("并发写入未等待锁释放: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if _, err = first.ExecContext(ctx, `ROLLBACK`); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err = <-result:
+		if err != nil {
+			t.Fatalf("锁释放后并发写入失败: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("锁释放后并发写入仍未完成")
+	}
+}
+
 func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
