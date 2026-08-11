@@ -38,11 +38,13 @@ func Open(dataDir string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Join(dataDir, "artifacts"), 0o700); err != nil {
 		return nil, fmt.Errorf("创建数据目录: %w", err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(dataDir, "onessh.db"))
+	// busy_timeout 必须走 DSN（_pragma），PRAGMA 通过连接池 Exec 只对单个连接生效，
+	// 其他并发连接 busy_timeout=0 会立即 SQLITE_BUSY。
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(dataDir, "onessh.db")+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("打开 sqlite: %w", err)
 	}
-	for _, pragma := range []string{"PRAGMA journal_mode=WAL", "PRAGMA busy_timeout=5000", "PRAGMA foreign_keys=ON"} {
+	for _, pragma := range []string{"PRAGMA journal_mode=WAL", "PRAGMA foreign_keys=ON"} {
 		if _, err = db.Exec(pragma); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("设置数据库参数: %w", err)

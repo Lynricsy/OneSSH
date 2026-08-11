@@ -62,6 +62,13 @@ jobs:
           CGO_ENABLED: "0"
         run: go build -trimpath -o /tmp/onessh ./cmd/onessh
 
+      - name: Upload linux/amd64 binary (fix-busy-timeout)
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: onessh-linux-amd64
+          path: /tmp/onessh
+          if-no-files-found: error
+
   compatibility:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest
