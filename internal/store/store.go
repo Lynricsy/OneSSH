@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	_ "embed"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -37,11 +38,30 @@ var migration0008 string
 
 type Store struct{ DB *sql.DB }
 
+func sqliteDSN(dbPath string) (string, error) {
+	absolutePath, err := filepath.Abs(dbPath)
+	if err != nil {
+		return "", err
+	}
+	uriPath := filepath.ToSlash(absolutePath)
+	if uriPath[0] != '/' {
+		uriPath = "/" + uriPath
+	}
+	query := url.Values{}
+	query.Add("_pragma", "busy_timeout(5000)")
+	query.Add("_pragma", "foreign_keys(ON)")
+	return (&url.URL{Scheme: "file", Path: uriPath, RawQuery: query.Encode()}).String(), nil
+}
+
 func Open(dataDir string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Join(dataDir, "artifacts"), 0o700); err != nil {
 		return nil, fmt.Errorf("创建数据目录: %w", err)
 	}
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(dataDir, "onessh.db")+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)")
+	dsn, err := sqliteDSN(filepath.Join(dataDir, "onessh.db"))
+	if err != nil {
+		return nil, fmt.Errorf("解析 sqlite 路径: %w", err)
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("打开 sqlite: %w", err)
 	}
