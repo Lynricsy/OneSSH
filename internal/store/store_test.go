@@ -37,7 +37,7 @@ func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 		INSERT INTO token_hosts(token_id,host_id) VALUES(1,99);
 		INSERT INTO sessions(token_id,host_id,label,cwd,env_json,updated_at) VALUES(1,99,'default','~','{}',1);
 		INSERT INTO jobs(id,host_id,token_id,command,cwd,status,started_at) VALUES('legacy-job',99,1,'true','~','exited',1);
-		INSERT INTO audit(ts,token_id,tool,params_json,ok) VALUES(1,1,'exec','{}',1);
+		INSERT INTO audit(ts,token_id,tool,params_json,ok) VALUES(2000,1,'exec','{}',1);
 		INSERT INTO metrics(host_id,ts) VALUES(99,1);`); err != nil {
 		t.Fatal(err)
 	}
@@ -124,6 +124,131 @@ func TestOpenRecordsPreexistingManageHostsColumn(t *testing.T) {
 	}
 	if versions != 8 {
 		t.Fatalf("迁移登记数 = %d", versions)
+	}
+}
+
+func TestOpenRecordsPreexistingAuditTokenNameColumn(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "onessh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(migration0001); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`ALTER TABLE audit ADD COLUMN token_name TEXT;
+		INSERT INTO tokens(id,name,token_hash,all_hosts,created_at) VALUES(1,'legacy','legacy-hash',1,1);
+		INSERT INTO audit(id,ts,token_id,tool,params_json,ok) VALUES(1,2000,1,'exec','{}',1);
+		INSERT INTO audit(id,ts,token_id,token_name,tool,params_json,ok) VALUES(2,2001,1,'snapshot','exec','{}',1);`); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatalf("已有 token_name 列时升级失败: %v", err)
+	}
+	defer st.Close()
+	var tokenName sql.NullString
+	if err = st.DB.QueryRow(`SELECT token_name FROM audit WHERE id=1`).Scan(&tokenName); err != nil {
+		t.Fatal(err)
+	}
+	if !tokenName.Valid || tokenName.String != "legacy" {
+		t.Fatalf("旧审计令牌名称 = %#v", tokenName)
+	}
+	if err = st.DB.QueryRow(`SELECT token_name FROM audit WHERE id=2`).Scan(&tokenName); err != nil {
+		t.Fatal(err)
+	}
+	if !tokenName.Valid || tokenName.String != "snapshot" {
+		t.Fatalf("已有审计令牌快照被覆盖 = %#v", tokenName)
+	}
+	var versions int
+	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
+		t.Fatal(err)
+	}
+	if versions != 8 {
+		t.Fatalf("迁移登记数 = %d", versions)
+	}
+}
+
+func TestOpenDoesNotAttributeReusedTokenAudit(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "onessh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(migration0001); err != nil {
+		t.Fatal(err)
+	}
+	first, err := db.Exec(`INSERT INTO tokens(name,token_hash,all_hosts,created_at) VALUES('old-token','old-hash',1,1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldID, err := first.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO audit(ts,token_id,tool,params_json,ok,duration_ms,bytes_out) VALUES(1500,?,'exec','{}',1,0,0)`, oldID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`DELETE FROM tokens WHERE id=?`, oldID); err != nil {
+		t.Fatal(err)
+	}
+	second, err := db.Exec(`INSERT INTO tokens(name,token_hash,all_hosts,created_at) VALUES('new-token','new-hash',1,2)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newID, err := second.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newID != oldID {
+		t.Fatalf("测试前提不成立：SQLite 未复用令牌 ID，old=%d new=%d", oldID, newID)
+	}
+	if _, err = db.Exec(`INSERT INTO audit(ts,token_id,tool,params_json,ok,duration_ms,bytes_out) VALUES(3000,?,'exec','{}',1,0,0)`, newID); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	audit, err := st.ListAudit(ctx, nil, "", "", 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(audit) != 2 {
+		t.Fatalf("审计数量 = %d", len(audit))
+	}
+	if !audit[0].TokenName.Valid || audit[0].TokenName.String != "new-token" {
+		t.Fatalf("新令牌审计归属 = %#v", audit[0].TokenName)
+	}
+	if audit[1].TokenName.Valid {
+		t.Fatalf("旧令牌审计被错误归属为 %q", audit[1].TokenName.String)
+	}
+	filtered, err := st.ListAudit(ctx, &newID, "", "", 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 1 || filtered[0].Ts != 3000 {
+		t.Fatalf("新令牌过滤混入旧主体: %#v", filtered)
+	}
+	if err = st.DeleteToken(ctx, newID); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := st.CreateToken(ctx, TokenCreate{Name: "replacement", Hash: "replacement-hash", AllHosts: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replacement.ID <= newID {
+		t.Fatalf("迁移后令牌 ID 被复用: old=%d replacement=%d", newID, replacement.ID)
 	}
 }
 

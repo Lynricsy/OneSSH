@@ -101,11 +101,8 @@ func applyMigration(db *sql.DB, m migration) error {
 	if applied != 0 {
 		return tx.Commit()
 	}
-	if m.version != 2 {
-		if _, err = tx.Exec(m.sql); err != nil {
-			return err
-		}
-	} else {
+	switch m.version {
+	case 2:
 		hasColumn, err := tableHasColumn(tx, "tokens", "manage_hosts")
 		if err != nil {
 			return err
@@ -114,6 +111,23 @@ func applyMigration(db *sql.DB, m migration) error {
 			if _, err = tx.Exec(m.sql); err != nil {
 				return err
 			}
+		}
+	case 8:
+		hasColumn, err := tableHasColumn(tx, "audit", "token_name")
+		if err != nil {
+			return err
+		}
+		if !hasColumn {
+			if _, err = tx.Exec(`ALTER TABLE audit ADD COLUMN token_name TEXT`); err != nil {
+				return err
+			}
+		}
+		if _, err = tx.Exec(m.sql); err != nil {
+			return err
+		}
+	default:
+		if _, err = tx.Exec(m.sql); err != nil {
+			return err
 		}
 	}
 	if _, err = tx.Exec(`INSERT INTO schema_migrations(version,applied_at) VALUES(?,strftime('%s','now'))`, m.version); err != nil {
