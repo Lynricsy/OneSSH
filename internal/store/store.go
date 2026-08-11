@@ -32,6 +32,9 @@ var migration0006 string
 //go:embed migrations/0007_jump_host.sql
 var migration0007 string
 
+//go:embed migrations/0008_audit_token_name.sql
+var migration0008 string
+
 type Store struct{ DB *sql.DB }
 
 func Open(dataDir string) (*Store, error) {
@@ -73,6 +76,7 @@ func migrate(db *sql.DB) error {
 		{version: 5, sql: migration0005},
 		{version: 6, sql: migration0006},
 		{version: 7, sql: migration0007},
+		{version: 8, sql: migration0008},
 	} {
 		if err := applyMigration(db, m); err != nil {
 			return fmt.Errorf("版本 %d: %w", m.version, err)
@@ -95,11 +99,8 @@ func applyMigration(db *sql.DB, m migration) error {
 	if applied != 0 {
 		return tx.Commit()
 	}
-	if m.version != 2 {
-		if _, err = tx.Exec(m.sql); err != nil {
-			return err
-		}
-	} else {
+	switch m.version {
+	case 2:
 		hasColumn, err := tableHasColumn(tx, "tokens", "manage_hosts")
 		if err != nil {
 			return err
@@ -108,6 +109,23 @@ func applyMigration(db *sql.DB, m migration) error {
 			if _, err = tx.Exec(m.sql); err != nil {
 				return err
 			}
+		}
+	case 8:
+		hasColumn, err := tableHasColumn(tx, "audit", "token_name")
+		if err != nil {
+			return err
+		}
+		if !hasColumn {
+			if _, err = tx.Exec(`ALTER TABLE audit ADD COLUMN token_name TEXT`); err != nil {
+				return err
+			}
+		}
+		if _, err = tx.Exec(m.sql); err != nil {
+			return err
+		}
+	default:
+		if _, err = tx.Exec(m.sql); err != nil {
+			return err
 		}
 	}
 	if _, err = tx.Exec(`INSERT INTO schema_migrations(version,applied_at) VALUES(?,strftime('%s','now'))`, m.version); err != nil {

@@ -67,6 +67,8 @@ export type FileEntry = {
 export type Audit = {
   ID: number
   Ts: number
+  TokenID: { Int64: number; Valid: boolean }
+  TokenName: { String: string; Valid: boolean }
   Tool: string
   Host: { String: string; Valid: boolean }
   ParamsJSON: string

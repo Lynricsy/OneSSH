@@ -93,6 +93,7 @@ type Job struct {
 type Audit struct {
 	ID, Ts               int64
 	TokenID              sql.NullInt64
+	TokenName            sql.NullString
 	Tool                 string
 	Host                 sql.NullString
 	ParamsJSON           string

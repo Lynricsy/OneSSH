@@ -7,15 +7,22 @@ import (
 )
 
 func (s *Store) AddAudit(ctx context.Context, a Audit) error {
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO audit(ts,token_id,tool,host,params_json,ok,exit_code,duration_ms,bytes_out) VALUES(?,?,?,?,?,?,?,?,?)`, a.Ts, nullInt(a.TokenID), a.Tool, nullString(a.Host), a.ParamsJSON, boolInt(a.OK), nullInt(a.ExitCode), a.DurationMS, a.BytesOut)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO audit(ts,token_id,token_name,tool,host,params_json,ok,exit_code,duration_ms,bytes_out) VALUES(?,?,?,?,?,?,?,?,?,?)`, a.Ts, nullInt(a.TokenID), nullString(a.TokenName), a.Tool, nullString(a.Host), a.ParamsJSON, boolInt(a.OK), nullInt(a.ExitCode), a.DurationMS, a.BytesOut)
 	return err
 }
 func (s *Store) ListAudit(ctx context.Context, tokenID *int64, host, tool string, before int64, limit int) ([]Audit, error) {
-	q := `SELECT id,ts,token_id,tool,host,params_json,ok,exit_code,duration_ms,bytes_out FROM audit WHERE 1=1`
+	q := `SELECT id,ts,token_id,token_name,tool,host,params_json,ok,exit_code,duration_ms,bytes_out FROM audit WHERE 1=1`
 	args := []any{}
 	if tokenID != nil {
-		q += ` AND token_id=?`
-		args = append(args, *tokenID)
+		// 迁移前的 ID 可能已被复用；当前令牌存在时，只接受写入时已快照其名称的记录。
+		q += ` AND audit.token_id=? AND (
+			NOT EXISTS (SELECT 1 FROM tokens WHERE tokens.id=?)
+			OR EXISTS (
+				SELECT 1 FROM tokens
+				WHERE tokens.id=? AND audit.token_name=tokens.name
+			)
+		)`
+		args = append(args, *tokenID, *tokenID, *tokenID)
 	}
 	if host != "" {
 		q += ` AND host=?`
@@ -43,7 +50,7 @@ func (s *Store) ListAudit(ctx context.Context, tokenID *int64, host, tool string
 	for rows.Next() {
 		var a Audit
 		var ok int
-		if err := rows.Scan(&a.ID, &a.Ts, &a.TokenID, &a.Tool, &a.Host, &a.ParamsJSON, &ok, &a.ExitCode, &a.DurationMS, &a.BytesOut); err != nil {
+		if err := rows.Scan(&a.ID, &a.Ts, &a.TokenID, &a.TokenName, &a.Tool, &a.Host, &a.ParamsJSON, &ok, &a.ExitCode, &a.DurationMS, &a.BytesOut); err != nil {
 			return nil, err
 		}
 		a.OK = ok != 0

@@ -117,6 +117,7 @@ func register[In, Out any](s *Server, tool *mcp.Tool, handler mcp.ToolHandlerFor
 		a := store.Audit{Ts: store.NowAudit(), Tool: tool.Name, ParamsJSON: params, OK: ok, DurationMS: time.Since(started).Milliseconds()}
 		if p.Token.ID != 0 {
 			a.TokenID = sql.NullInt64{Int64: p.Token.ID, Valid: true}
+			a.TokenName = sql.NullString{String: p.Token.Name, Valid: true}
 		}
 		if host != "" {
 			a.Host = sql.NullString{String: host, Valid: true}
