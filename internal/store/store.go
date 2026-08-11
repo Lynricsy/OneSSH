@@ -41,15 +41,13 @@ func Open(dataDir string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Join(dataDir, "artifacts"), 0o700); err != nil {
 		return nil, fmt.Errorf("创建数据目录: %w", err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(dataDir, "onessh.db"))
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(dataDir, "onessh.db")+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)")
 	if err != nil {
 		return nil, fmt.Errorf("打开 sqlite: %w", err)
 	}
-	for _, pragma := range []string{"PRAGMA journal_mode=WAL", "PRAGMA busy_timeout=5000", "PRAGMA foreign_keys=ON"} {
-		if _, err = db.Exec(pragma); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("设置数据库参数: %w", err)
-		}
+	if _, err = db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("设置数据库参数: %w", err)
 	}
 	if err = migrate(db); err != nil {
 		db.Close()
