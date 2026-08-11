@@ -3,12 +3,13 @@ import { Controller, useForm } from 'react-hook-form'
 import { Check, Copy, Plus, Ticket, Trash, Warning, WarningCircle } from '@phosphor-icons/react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
-import { useCreateToken, useDeleteToken, useHosts, useTokens } from '@/api/queries'
+import { useCreateToken, useDeleteToken, useDeleteTokens, useHosts, useTokens } from '@/api/queries'
 import type { Host, Token, TokenPayload } from '@/api/types'
 import { ConfirmDialog } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { DataTable, type Column } from '@/components/ui/data-table'
 import { Dialog } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -18,8 +19,10 @@ import { Label } from '@/components/ui/label'
 import { MultiSelect } from '@/components/ui/multi-select'
 import { PageHeader } from '@/components/ui/page-header'
 import { PageTransition } from '@/components/ui/page-transition'
+import { SelectionBar } from '@/components/ui/selection-bar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
+import { cn } from '@/lib/cn'
 import { formatTime } from '@/lib/format'
 
 type TokenFormValues = {
@@ -88,10 +91,13 @@ export function TokensPage() {
   const hosts = useHosts()
   const createToken = useCreateToken()
   const deleteToken = useDeleteToken()
+  const deleteTokens = useDeleteTokens()
   const [createOpen, setCreateOpen] = useState(false)
   const [plainToken, setPlainToken] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [deleting, setDeleting] = useState<Token | null>(null)
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [batchDeleting, setBatchDeleting] = useState(false)
   const plainRef = useRef<HTMLElement>(null)
   const reduce = useReducedMotion()
   const {
@@ -244,6 +250,7 @@ export function TokensPage() {
               rows={tokens.data}
               rowKey={(token) => token.id}
               loading={tokens.isLoading}
+              selection={{ selected, onChange: setSelected }}
             />
           </Card>
 
@@ -251,9 +258,26 @@ export function TokensPage() {
             {tokens.isLoading
               ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} className="h-[124px]" />)
               : tokens.data?.map((token) => (
-                  <Card key={token.id} className="p-4">
+                  <Card
+                    key={token.id}
+                    className={cn('p-4', selected.has(token.id) && 'border-accent')}
+                  >
                     <div className="flex items-start justify-between gap-3">
-                      <p className="min-w-0 truncate font-medium text-text">{token.name}</p>
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <Checkbox
+                          checked={selected.has(token.id)}
+                          onCheckedChange={() =>
+                            setSelected((prev) => {
+                              const next = new Set(prev)
+                              if (next.has(token.id)) next.delete(token.id)
+                              else next.add(token.id)
+                              return next
+                            })
+                          }
+                          aria-label={`选择令牌 ${token.name}`}
+                        />
+                        <p className="min-w-0 truncate font-medium text-text">{token.name}</p>
+                      </div>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -445,6 +469,12 @@ export function TokensPage() {
         </div>
       </Dialog>
 
+      <SelectionBar count={selected.size} onClear={() => setSelected(new Set())}>
+        <Button variant="danger" size="sm" onClick={() => setBatchDeleting(true)}>
+          删除
+        </Button>
+      </SelectionBar>
+
       <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(open) => !open && setDeleting(null)}
@@ -453,7 +483,27 @@ export function TokensPage() {
         confirmText="删除"
         danger
         onConfirm={async () => {
-          if (deleting) await deleteToken.mutateAsync(deleting.id)
+          if (!deleting) return
+          setSelected((prev) => {
+            const next = new Set(prev)
+            next.delete(deleting.id)
+            return next
+          })
+          await deleteToken.mutateAsync(deleting.id)
+        }}
+      />
+
+      <ConfirmDialog
+        open={batchDeleting}
+        onOpenChange={setBatchDeleting}
+        title={`批量删除 ${selected.size} 个令牌？`}
+        description="使用这些令牌的 Agent 将立即失去访问权限。"
+        confirmText="删除"
+        danger
+        onConfirm={async () => {
+          // 失败的留在选中态，方便对照着重试
+          const { failedIds } = await deleteTokens.mutateAsync([...selected])
+          setSelected(new Set(failedIds))
         }}
       />
     </PageTransition>

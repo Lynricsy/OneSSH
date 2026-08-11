@@ -3,11 +3,12 @@ import { Controller, useForm } from 'react-hook-form'
 import { Check, Copy, Key, Plus, Trash } from '@phosphor-icons/react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
-import { useCreateKey, useDeleteKey, useHosts, useKeys } from '@/api/queries'
+import { useCreateKey, useDeleteKey, useDeleteKeys, useHosts, useKeys } from '@/api/queries'
 import type { KeyPayload, SSHKey } from '@/api/types'
 import { ConfirmDialog } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Field } from '@/components/ui/field'
@@ -15,8 +16,10 @@ import { Input } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
 import { PageTransition } from '@/components/ui/page-transition'
 import { Select } from '@/components/ui/select'
+import { SelectionBar } from '@/components/ui/selection-bar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
+import { cn } from '@/lib/cn'
 import { formatTime } from '@/lib/format'
 import { staggerContainer, staggerItem } from '@/lib/motion'
 
@@ -37,9 +40,12 @@ export function KeysPage() {
   const hosts = useHosts()
   const createKey = useCreateKey()
   const deleteKey = useDeleteKey()
+  const deleteKeys = useDeleteKeys()
   const reduceMotion = useReducedMotion()
   const [createOpen, setCreateOpen] = useState(false)
   const [deleting, setDeleting] = useState<SSHKey | null>(null)
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [batchDeleting, setBatchDeleting] = useState(false)
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const {
     control,
@@ -121,15 +127,35 @@ export function KeysPage() {
             const usage = usageOf(key.id)
             return (
               <motion.div key={key.id} variants={staggerItem}>
-                <Card className="flex h-full flex-col p-4">
+                <Card
+                  className={cn(
+                    'flex h-full flex-col p-4',
+                    selected.has(key.id) && 'border-accent',
+                  )}
+                >
                   <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate leading-5 font-medium text-text">{key.name}</p>
-                      <p className="mt-1 truncate text-[12px] text-muted">
-                        <span className="tabular-nums">{formatTime(key.created_at)}</span>
-                        <span className="px-1.5">·</span>
-                        {usage > 0 ? `${usage} 台主机在用` : '暂无主机使用'}
-                      </p>
+                    <div className="flex min-w-0 items-start gap-2.5">
+                      <Checkbox
+                        className="mt-0.5"
+                        checked={selected.has(key.id)}
+                        onCheckedChange={() =>
+                          setSelected((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(key.id)) next.delete(key.id)
+                            else next.add(key.id)
+                            return next
+                          })
+                        }
+                        aria-label={`选择密钥 ${key.name}`}
+                      />
+                      <div className="min-w-0">
+                        <p className="truncate leading-5 font-medium text-text">{key.name}</p>
+                        <p className="mt-1 truncate text-[12px] text-muted">
+                          <span className="tabular-nums">{formatTime(key.created_at)}</span>
+                          <span className="px-1.5">·</span>
+                          {usage > 0 ? `${usage} 台主机在用` : '暂无主机使用'}
+                        </p>
+                      </div>
                     </div>
                     <Button
                       variant="ghost"
@@ -276,6 +302,12 @@ export function KeysPage() {
         </form>
       </Dialog>
 
+      <SelectionBar count={selected.size} onClear={() => setSelected(new Set())}>
+        <Button variant="danger" size="sm" onClick={() => setBatchDeleting(true)}>
+          删除
+        </Button>
+      </SelectionBar>
+
       <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(open) => !open && setDeleting(null)}
@@ -288,7 +320,27 @@ export function KeysPage() {
         confirmText="删除"
         danger
         onConfirm={async () => {
-          if (deleting) await deleteKey.mutateAsync(deleting.id)
+          if (!deleting) return
+          setSelected((prev) => {
+            const next = new Set(prev)
+            next.delete(deleting.id)
+            return next
+          })
+          await deleteKey.mutateAsync(deleting.id)
+        }}
+      />
+
+      <ConfirmDialog
+        open={batchDeleting}
+        onOpenChange={setBatchDeleting}
+        title={`批量删除 ${selected.size} 把密钥？`}
+        description="所选密钥删除后无法恢复，正使用它们的主机将无法连接。"
+        confirmText="删除"
+        danger
+        onConfirm={async () => {
+          // 失败的留在选中态，方便对照着重试
+          const { failedIds } = await deleteKeys.mutateAsync([...selected])
+          setSelected(new Set(failedIds))
         }}
       />
     </PageTransition>

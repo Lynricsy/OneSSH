@@ -51,6 +51,35 @@ function useInvalidatingMutation<TVars, TData>(
   })
 }
 
+/**
+ * 批量操作收敛：后端没有批量端点，循环单条接口并全部落定（allSettled，永不 reject），
+ * 按成败汇总提示后失效缓存。resolve 值是失败的 id 列表，调用方可据此保留选中项以便重试。
+ */
+function useBatchMutation<TId>(
+  fn: (id: TId) => Promise<unknown>,
+  key: readonly unknown[],
+  verb: string,
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (ids: TId[]) => {
+      const results = await Promise.allSettled(ids.map((id) => fn(id)))
+      return {
+        failedIds: ids.filter((_, index) => results[index].status === 'rejected'),
+        firstError: results.find((r): r is PromiseRejectedResult => r.status === 'rejected')?.reason,
+      }
+    },
+    onSuccess: ({ failedIds, firstError }, ids) => {
+      const ok = ids.length - failedIds.length
+      if (failedIds.length === 0) toast.success(`已${verb} ${ok} 项`)
+      else if (ok === 0) toast.error(`${verb}失败：${(firstError as Error)?.message ?? '未知错误'}`)
+      else toast.warning(`已${verb} ${ok} 项，${failedIds.length} 项失败`)
+      void qc.invalidateQueries({ queryKey: key })
+    },
+    onError,
+  })
+}
+
 /* ── 查询 ───────────────────────────────────────────────────────── */
 
 export const useHosts = () =>
@@ -121,6 +150,9 @@ export const useSaveHost = (id?: number) =>
 export const useDeleteHost = () =>
   useInvalidatingMutation<number, void>((id) => del(`/hosts/${id}`), queryKeys.hosts, '主机已删除')
 
+export const useDeleteHosts = () =>
+  useBatchMutation<number>((id) => del(`/hosts/${id}`), queryKeys.hosts, '删除')
+
 export const useResetFingerprint = () =>
   useInvalidatingMutation<number, unknown>(
     (id) => post(`/hosts/${id}/reset-fingerprint`, {}),
@@ -140,11 +172,17 @@ export const useCreateKey = () =>
 export const useDeleteKey = () =>
   useInvalidatingMutation<number, void>((id) => del(`/keys/${id}`), queryKeys.keys, '密钥已删除')
 
+export const useDeleteKeys = () =>
+  useBatchMutation<number>((id) => del(`/keys/${id}`), queryKeys.keys, '删除')
+
 export const useCreateToken = () =>
   useInvalidatingMutation<TokenPayload, Token>((v) => post<Token>('/tokens', v), queryKeys.tokens)
 
 export const useDeleteToken = () =>
   useInvalidatingMutation<number, void>((id) => del(`/tokens/${id}`), queryKeys.tokens, '令牌已删除')
+
+export const useDeleteTokens = () =>
+  useBatchMutation<number>((id) => del(`/tokens/${id}`), queryKeys.tokens, '删除')
 
 export const useKillJob = () =>
   useInvalidatingMutation<string, unknown>(
@@ -152,6 +190,9 @@ export const useKillJob = () =>
     queryKeys.jobs,
     '已发送终止信号',
   )
+
+export const useKillJobs = () =>
+  useBatchMutation<string>((id) => post(`/jobs/${id}/kill`, {}), queryKeys.jobs, '终止')
 
 /* ── 记忆 ───────────────────────────────────────────────────────── */
 
@@ -162,6 +203,9 @@ export const useDeleteMemory = () =>
     queryKeys.memories,
     '记忆已删除',
   )
+
+export const useDeleteMemories = () =>
+  useBatchMutation<number>((id) => del(`/memories/${id}`), queryKeys.memories, '删除')
 
 /* ── SFTP 上传 ──────────────────────────────────────────────────── */
 

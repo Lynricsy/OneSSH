@@ -4,6 +4,7 @@ import { useId, useState } from 'react'
 import { toast } from 'sonner'
 import {
   useDeleteHost,
+  useDeleteHosts,
   useHosts,
   useKeys,
   useResetFingerprint,
@@ -16,6 +17,7 @@ import { ConfirmDialog } from '@/components/ui/alert-dialog'
 import { Dot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Code } from '@/components/ui/code'
 import { DataTable, type Column } from '@/components/ui/data-table'
 import { Dialog } from '@/components/ui/dialog'
@@ -32,10 +34,12 @@ import { Label } from '@/components/ui/label'
 import { PageHeader } from '@/components/ui/page-header'
 import { PageTransition } from '@/components/ui/page-transition'
 import { Select } from '@/components/ui/select'
+import { SelectionBar } from '@/components/ui/selection-bar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
+import { cn } from '@/lib/cn'
 
-type ConfirmState = { kind: 'reset' | 'delete'; host: Host } | null
+type ConfirmState = { kind: 'reset' | 'delete'; host: Host } | { kind: 'batch-delete' } | null
 
 const emptyForm: HostPayload = {
   name: '',
@@ -81,9 +85,11 @@ export function HostsPage() {
   const [editing, setEditing] = useState<Host>()
   const [testingId, setTestingId] = useState<number>()
   const [confirm, setConfirm] = useState<ConfirmState>(null)
+  const [selected, setSelected] = useState<Set<number>>(new Set())
   const monitorId = useId()
   const save = useSaveHost(editing?.id)
   const deleteHost = useDeleteHost()
+  const deleteHosts = useDeleteHosts()
   const resetFingerprint = useResetFingerprint()
   const testHost = useTestHost()
   const {
@@ -252,6 +258,7 @@ export function HostsPage() {
           rowKey={(host) => host.id}
           loading={hosts.isLoading}
           empty={emptyState}
+          selection={{ selected, onChange: setSelected }}
         />
       </Card>
 
@@ -266,11 +273,29 @@ export function HostsPage() {
           ))
         ) : hosts.data?.length ? (
           hosts.data.map((host) => (
-            <Card key={host.id} className="min-w-0 p-4">
+            <Card
+              key={host.id}
+              className={cn('min-w-0 p-4', selected.has(host.id) && 'border-accent')}
+            >
               <div className="flex min-w-0 items-start justify-between gap-2">
-                <div className="min-w-0 pt-0.5">
-                  <div className="truncate leading-5 font-medium text-text">{host.name}</div>
-                  <HostConnection host={host} />
+                <div className="flex min-w-0 items-start gap-2.5">
+                  <Checkbox
+                    className="mt-1"
+                    checked={selected.has(host.id)}
+                    onCheckedChange={() =>
+                      setSelected((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(host.id)) next.delete(host.id)
+                        else next.add(host.id)
+                        return next
+                      })
+                    }
+                    aria-label={`选择主机 ${host.name}`}
+                  />
+                  <div className="min-w-0 pt-0.5">
+                    <div className="truncate leading-5 font-medium text-text">{host.name}</div>
+                    <HostConnection host={host} />
+                  </div>
                 </div>
                 {hostMenu(host)}
               </div>
@@ -490,24 +515,47 @@ export function HostsPage() {
         </form>
       </Dialog>
 
+      <SelectionBar count={selected.size} onClear={() => setSelected(new Set())}>
+        <Button variant="danger" size="sm" onClick={() => setConfirm({ kind: 'batch-delete' })}>
+          删除
+        </Button>
+      </SelectionBar>
+
       <ConfirmDialog
         open={confirm !== null}
         onOpenChange={(open) => {
           if (!open) setConfirm(null)
         }}
-        title={confirm?.kind === 'reset' ? '重置主机指纹？' : '删除主机？'}
+        title={
+          confirm?.kind === 'reset'
+            ? '重置主机指纹？'
+            : confirm?.kind === 'batch-delete'
+              ? `批量删除 ${selected.size} 台主机？`
+              : '删除主机？'
+        }
         description={
           confirm?.kind === 'reset'
             ? `${confirm.host.name} 下次连接将重新执行 TOFU 首次信任。`
-            : `${confirm?.host.name ?? ''} 及其令牌授权会一并失效，此操作不可撤销。`
+            : confirm?.kind === 'batch-delete'
+              ? '所选主机及其令牌授权会一并失效，此操作不可撤销。'
+              : `${confirm?.host.name ?? ''} 及其令牌授权会一并失效，此操作不可撤销。`
         }
         confirmText={confirm?.kind === 'reset' ? '重置' : '删除'}
-        danger={confirm?.kind === 'delete'}
-        onConfirm={() => {
+        danger={confirm?.kind !== 'reset'}
+        onConfirm={async () => {
           if (!confirm) return
-          return confirm.kind === 'reset'
-            ? resetFingerprint.mutateAsync(confirm.host.id)
-            : deleteHost.mutateAsync(confirm.host.id)
+          if (confirm.kind === 'reset') return resetFingerprint.mutateAsync(confirm.host.id)
+          if (confirm.kind === 'delete') {
+            setSelected((prev) => {
+              const next = new Set(prev)
+              next.delete(confirm.host.id)
+              return next
+            })
+            return deleteHost.mutateAsync(confirm.host.id)
+          }
+          // 失败的留在选中态：列表刷新后用户能直接看到哪些没删掉，可立即重试
+          const { failedIds } = await deleteHosts.mutateAsync([...selected])
+          setSelected(new Set(failedIds))
         }}
       />
     </PageTransition>
