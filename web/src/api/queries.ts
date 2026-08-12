@@ -98,17 +98,17 @@ export const useJobs = () =>
     refetchInterval: 4000,
   })
 
-/** 审计筛选：缺省即不过滤；token 按 id，host/tool/ok 走后端精确匹配 */
-export type AuditFilter = { tool?: string; token?: number; host?: string; ok?: boolean }
+/** 审计筛选：缺省即不过滤；tool/token/host 支持多值（OR），ok 单值；多值以逗号拼接传输 */
+export type AuditFilter = { tool?: string[]; token?: number[]; host?: string[]; ok?: boolean }
 
 export const useAudit = (filter: AuditFilter = {}) =>
   useQuery({
     queryKey: queryKeys.audit(filter),
     queryFn: () => {
       const params = new URLSearchParams({ limit: '100' })
-      if (filter.tool) params.set('tool', filter.tool)
-      if (filter.token != null) params.set('token', String(filter.token))
-      if (filter.host) params.set('host', filter.host)
+      if (filter.tool?.length) params.set('tool', filter.tool.join(','))
+      if (filter.token?.length) params.set('token', filter.token.join(','))
+      if (filter.host?.length) params.set('host', filter.host.join(','))
       if (filter.ok != null) params.set('ok', String(filter.ok))
       return api<Audit[]>(`/audit?${params}`)
     },

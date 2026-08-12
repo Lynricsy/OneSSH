@@ -7,6 +7,7 @@ import { Badge, Dot } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { DataTable, type Column } from '@/components/ui/data-table'
 import { EmptyState } from '@/components/ui/empty-state'
+import { MultiSelect } from '@/components/ui/multi-select'
 import { PageHeader } from '@/components/ui/page-header'
 import { PageTransition } from '@/components/ui/page-transition'
 import { Select } from '@/components/ui/select'
@@ -17,7 +18,7 @@ import { formatBytes } from '@/lib/format'
 /** 审计与事件流的时间戳是「毫秒」，与 lib/format 的「秒」契约不同，故本页单独格式化 */
 const clock = (ms: number) => new Date(ms).toLocaleTimeString('zh-CN', { hour12: false })
 
-/** 筛选值全部是字符串：Radix Select 只接受 string，'all' 哨兵表示「不筛选」 */
+/** 结果筛选仍是单选（只有成功/失败两个值），故保留 'all' 哨兵；工具/令牌/主机改为多选数组 */
 const ALL = 'all'
 
 /** 列定义与渲染无关联状态，放模块级避免每次渲染重建 */
@@ -92,20 +93,20 @@ const auditColumns: Column<Audit>[] = [
 
 export function ActivityPage() {
   const { events, status } = useEventStream()
-  const [tool, setTool] = useState(ALL)
-  const [token, setToken] = useState(ALL)
-  const [host, setHost] = useState(ALL)
+  const [tool, setTool] = useState<string[]>([])
+  const [token, setToken] = useState<number[]>([])
+  const [host, setHost] = useState<string[]>([])
   const [result, setResult] = useState(ALL)
   const filter: AuditFilter = {
-    tool: tool === ALL ? undefined : tool,
-    token: token === ALL ? undefined : Number(token),
-    host: host === ALL ? undefined : host,
+    tool,
+    token,
+    host,
     ok: result === ALL ? undefined : result === 'ok',
   }
   const audit = useAudit(filter)
   const hosts = useHosts()
   const tokens = useTokens()
-  const filtered = tool !== ALL || token !== ALL || host !== ALL || result !== ALL
+  const filtered = tool.length > 0 || token.length > 0 || host.length > 0 || result !== ALL
 
   // 工具名没有独立接口：把每次响应里出现过的工具并入集合并按名排序，
   // 筛选改变结果集也不丢已见过的选项
@@ -201,43 +202,40 @@ export function ActivityPage() {
               </span>
             )}
           </CardHeader>
-          {/* 四个维度即表格的四个列；改动即查，不设「查询」按钮 */}
+          {/* 工具/令牌/主机支持多选 + 搜索；结果仅两个值，保留单选下拉；改动即查，不设「查询」按钮 */}
           <div className="grid grid-cols-2 gap-2 border-b border-border p-3 lg:grid-cols-4">
             <label htmlFor="audit-filter-tool" className="sr-only">
               按工具筛选
             </label>
-            <Select
+            <MultiSelect
               id="audit-filter-tool"
               value={tool}
               onChange={setTool}
-              options={[
-                { value: ALL, label: '全部工具' },
-                ...seenTools.map((name) => ({ value: name, label: name })),
-              ]}
+              placeholder="全部工具"
+              searchPlaceholder="搜索工具…"
+              options={seenTools.map((name) => ({ value: name, label: name }))}
             />
             <label htmlFor="audit-filter-token" className="sr-only">
               按调用令牌筛选
             </label>
-            <Select
+            <MultiSelect
               id="audit-filter-token"
               value={token}
               onChange={setToken}
-              options={[
-                { value: ALL, label: '全部令牌' },
-                ...(tokens.data ?? []).map((item) => ({ value: String(item.id), label: item.name })),
-              ]}
+              placeholder="全部令牌"
+              searchPlaceholder="搜索令牌…"
+              options={(tokens.data ?? []).map((item) => ({ value: item.id, label: item.name }))}
             />
             <label htmlFor="audit-filter-host" className="sr-only">
               按主机筛选
             </label>
-            <Select
+            <MultiSelect
               id="audit-filter-host"
               value={host}
               onChange={setHost}
-              options={[
-                { value: ALL, label: '全部主机' },
-                ...(hosts.data ?? []).map((item) => ({ value: item.name, label: item.name })),
-              ]}
+              placeholder="全部主机"
+              searchPlaceholder="搜索主机…"
+              options={(hosts.data ?? []).map((item) => ({ value: item.name, label: item.name }))}
             />
             <label htmlFor="audit-filter-result" className="sr-only">
               按结果筛选

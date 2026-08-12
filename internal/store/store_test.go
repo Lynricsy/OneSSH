@@ -335,7 +335,7 @@ func TestOpenDoesNotAttributeReusedTokenAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	audit, err := st.ListAudit(ctx, nil, "", "", 0, 10)
+	audit, err := st.ListAudit(ctx, nil, nil, nil, nil, 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestOpenDoesNotAttributeReusedTokenAudit(t *testing.T) {
 			t.Fatalf("无快照旧审计被错误归属为 %q: %#v", row.TokenName.String, row)
 		}
 	}
-	filtered, err := st.ListAudit(ctx, &newID, "", "", 0, 10)
+	filtered, err := st.ListAudit(ctx, []int64{newID}, nil, nil, nil, 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +364,7 @@ func TestOpenDoesNotAttributeReusedTokenAudit(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	filtered, err = st.ListAudit(ctx, &newID, "", "", 0, 10)
+	filtered, err = st.ListAudit(ctx, []int64{newID}, nil, nil, nil, 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

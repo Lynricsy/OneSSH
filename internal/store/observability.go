@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -10,27 +11,37 @@ func (s *Store) AddAudit(ctx context.Context, a Audit) error {
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO audit(ts,token_id,token_name,tool,host,params_json,ok,exit_code,duration_ms,bytes_out) VALUES(?,?,?,?,?,?,?,?,?,?)`, a.Ts, nullInt(a.TokenID), nullString(a.TokenName), a.Tool, nullString(a.Host), a.ParamsJSON, boolInt(a.OK), nullInt(a.ExitCode), a.DurationMS, a.BytesOut)
 	return err
 }
-func (s *Store) ListAudit(ctx context.Context, tokenID *int64, host, tool string, ok *bool, before int64, limit int) ([]Audit, error) {
+func (s *Store) ListAudit(ctx context.Context, tokenIDs []int64, hosts, tools []string, ok *bool, before int64, limit int) ([]Audit, error) {
 	q := `SELECT id,ts,token_id,token_name,tool,host,params_json,ok,exit_code,duration_ms,bytes_out FROM audit WHERE 1=1`
 	args := []any{}
-	if tokenID != nil {
+	if len(tokenIDs) > 0 {
 		// 迁移前的 ID 可能已被复用；当前令牌存在时，只接受写入时已快照其名称的记录。
-		q += ` AND audit.token_id=? AND (
+		// 多值是 OR 关系：任一 id 命中即保留，每个 id 独立做名称快照校验。
+		cond := `audit.token_id=? AND (
 			NOT EXISTS (SELECT 1 FROM tokens WHERE tokens.id=?)
 			OR EXISTS (
 				SELECT 1 FROM tokens
 				WHERE tokens.id=? AND audit.token_name=tokens.name
 			)
 		)`
-		args = append(args, *tokenID, *tokenID, *tokenID)
+		conds := make([]string, len(tokenIDs))
+		for i, id := range tokenIDs {
+			conds[i] = `(` + cond + `)`
+			args = append(args, id, id, id)
+		}
+		q += ` AND (` + strings.Join(conds, ` OR `) + `)`
 	}
-	if host != "" {
-		q += ` AND host=?`
-		args = append(args, host)
+	if len(hosts) > 0 {
+		q += ` AND host IN (` + placeholders(len(hosts)) + `)`
+		for _, h := range hosts {
+			args = append(args, h)
+		}
 	}
-	if tool != "" {
-		q += ` AND tool=?`
-		args = append(args, tool)
+	if len(tools) > 0 {
+		q += ` AND tool IN (` + placeholders(len(tools)) + `)`
+		for _, t := range tools {
+			args = append(args, t)
+		}
 	}
 	if ok != nil {
 		q += ` AND ok=?`
@@ -96,6 +107,11 @@ func nullString(v sql.NullString) any {
 		return v.String
 	}
 	return nil
+}
+
+// placeholders 生成 IN 子句的 ? 占位串：placeholders(3) → "?,?,?"
+func placeholders(n int) string {
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 func nullFloat(v sql.NullFloat64) any {
 	if v.Valid {

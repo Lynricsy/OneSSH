@@ -32,7 +32,7 @@ func TestAuditPreservesTokenIdentityAfterTokenDeletion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	audit, err := st.ListAudit(ctx, nil, "", "", nil, 0, 10)
+	audit, err := st.ListAudit(ctx, nil, nil, nil, nil, 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestListAuditFiltersByOK(t *testing.T) {
 	}
 
 	failed := false
-	audit, err := st.ListAudit(ctx, nil, "", "", &failed, 0, 10)
+	audit, err := st.ListAudit(ctx, nil, nil, nil, &failed, 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,11 +72,49 @@ func TestListAuditFiltersByOK(t *testing.T) {
 	}
 
 	succeeded := true
-	audit, err = st.ListAudit(ctx, nil, "", "", &succeeded, 0, 10)
+	audit, err = st.ListAudit(ctx, nil, nil, nil, &succeeded, 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(audit) != 1 || !audit[0].OK {
 		t.Fatalf("ok=true 过滤结果 = %#v", audit)
+	}
+}
+
+func TestListAuditFiltersByMultipleValues(t *testing.T) {
+	ctx := context.Background()
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	rows := []Audit{
+		{Ts: 1, Tool: "exec", Host: sql.NullString{String: "web-01", Valid: true}, ParamsJSON: "{}", OK: true},
+		{Ts: 2, Tool: "file_read", Host: sql.NullString{String: "web-02", Valid: true}, ParamsJSON: "{}", OK: true},
+		{Ts: 3, Tool: "job_list", Host: sql.NullString{String: "db-01", Valid: true}, ParamsJSON: "{}", OK: true},
+	}
+	for _, row := range rows {
+		if err = st.AddAudit(ctx, row); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 多工具 OR：exec + file_read 命中两条，job_list 被排除
+	audit, err := st.ListAudit(ctx, nil, nil, []string{"exec", "file_read"}, nil, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(audit) != 2 {
+		t.Fatalf("多工具过滤结果 = %#v", audit)
+	}
+
+	// 多主机 OR + 多工具 AND：两个维度都满足才保留
+	audit, err = st.ListAudit(ctx, nil, []string{"web-01", "db-01"}, []string{"job_list"}, nil, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(audit) != 1 || audit[0].Tool != "job_list" {
+		t.Fatalf("主机+工具组合过滤结果 = %#v", audit)
 	}
 }

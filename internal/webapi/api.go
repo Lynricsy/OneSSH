@@ -356,14 +356,21 @@ func (a *API) jobKill(w http.ResponseWriter, r *http.Request) {
 }
 func (a *API) audit(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	var tid *int64
+	var tids []int64
+	// tool/host/token 都接受逗号分隔的多值（多选筛选），空段忽略
 	if q.Get("token") != "" {
-		x, err := strconv.ParseInt(q.Get("token"), 10, 64)
-		if err != nil {
-			apiError(w, 400, err)
-			return
+		for _, part := range strings.Split(q.Get("token"), ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			x, err := strconv.ParseInt(part, 10, 64)
+			if err != nil {
+				apiError(w, 400, err)
+				return
+			}
+			tids = append(tids, x)
 		}
-		tid = &x
 	}
 	before, _ := strconv.ParseInt(q.Get("before"), 10, 64)
 	limit, _ := strconv.Atoi(q.Get("limit"))
@@ -376,12 +383,26 @@ func (a *API) audit(w http.ResponseWriter, r *http.Request) {
 		}
 		ok = &b
 	}
-	list, err := a.Store.ListAudit(r.Context(), tid, q.Get("host"), q.Get("tool"), ok, before, limit)
+	list, err := a.Store.ListAudit(r.Context(), tids, splitCSV(q.Get("host")), splitCSV(q.Get("tool")), ok, before, limit)
 	if err != nil {
 		apiError(w, 500, err)
 		return
 	}
 	jsonOut(w, 200, list)
+}
+
+// splitCSV 把逗号分隔的查询参数拆成多值列表，空段忽略；空串返回 nil（不过滤）
+func splitCSV(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 func (a *API) metrics(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r, "hostID")

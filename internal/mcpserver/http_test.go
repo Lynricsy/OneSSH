@@ -60,7 +60,7 @@ func TestAuditCapturesAuthenticatedTokenIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	audit, err := st.ListAudit(ctx, nil, "", "", nil, 0, 10)
+	audit, err := st.ListAudit(ctx, nil, nil, nil, nil, 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
