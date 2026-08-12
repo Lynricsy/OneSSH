@@ -10,7 +10,7 @@ import {
   WarningCircle,
 } from '@phosphor-icons/react'
 import { toast } from 'sonner'
-import { downloadUrl, fetchDownload } from '@/api/client'
+import { checkDownload, downloadUrl } from '@/api/client'
 import { useHosts, useSftpList, useUpload } from '@/api/queries'
 import type { FileEntry } from '@/api/types'
 import { Button } from '@/components/ui/button'
@@ -29,16 +29,13 @@ import { formatBytes, formatTime } from '@/lib/format'
 /** 固定 id：sonner 复用同一条 toast，SFTP 连续失败时不会堆叠刷屏 */
 const SFTP_ERROR_TOAST = 'sftp-error'
 
-/** blob → 触发一次浏览器下载；object URL 延一拍再回收，点击后浏览器还要异步取用它 */
-function saveBlob(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob)
+function startDownload(hostId: number, path: string, name: string) {
   const anchor = document.createElement('a')
-  anchor.href = url
+  anchor.href = downloadUrl(hostId, path)
   anchor.download = name
   document.body.append(anchor)
   anchor.click()
   anchor.remove()
-  window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 export function FilesPage() {
@@ -97,9 +94,8 @@ export function FilesPage() {
   }
 
   /**
-   * 逐个 fetch 再用 object URL 触发下载。直链 <a download> 拿不到状态码：会话过期时
-   * 浏览器会把 401 的错误页当成文件存下来，用户还以为下载成功了。串行发起也顺带避开了
-   * 浏览器对同一拍内多个下载的合并丢弃，不用再拿 setTimeout 错开。
+   * 先用 HEAD 验证响应，再交给浏览器原生下载栈流式处理正文，避免大文件进入 JS 堆。
+   * 串行预检也避免瞬间压满 SFTP 连接。
    */
   const downloadSelected = async () => {
     if (host == null || downloading) return
@@ -113,7 +109,8 @@ export function FilesPage() {
     try {
       for (const name of names) {
         try {
-          saveBlob(await fetchDownload(host, base + name), name)
+          await checkDownload(host, base + name)
+          startDownload(host, base + name, name)
         } catch (error) {
           failed.push(name)
           firstError ??= (error as Error).message
@@ -124,9 +121,9 @@ export function FilesPage() {
     }
 
     const ok = names.length - failed.length
-    if (failed.length === 0) toast.success(`已下载 ${ok} 个文件`)
+    if (failed.length === 0) toast.success(`已开始下载 ${ok} 个文件`)
     else if (ok === 0) toast.error(`下载失败：${firstError ?? '未知错误'}`)
-    else toast.warning(`已下载 ${ok} 个文件，${failed.length} 个失败`)
+    else toast.warning(`已开始下载 ${ok} 个文件，${failed.length} 个失败`)
     // 只有用户仍停留在启动下载的目录时才回写失败项；导航后的选择归新目录所有。
     if (selectionScope.current === scope) setSelected(new Set(failed))
   }

@@ -39,6 +39,7 @@ export function MultiSelect<T extends string | number>({
   emptyText = '无可选项',
   invalid,
   id,
+  maxSelected,
 }: {
   value: T[]
   onChange: (value: T[]) => void
@@ -47,13 +48,16 @@ export function MultiSelect<T extends string | number>({
   searchPlaceholder?: string
   emptyText?: string
   invalid?: boolean
+  maxSelected?: number
   id?: string
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
 
-  const toggle = (v: T) =>
+  const toggle = (v: T) => {
+    if (!value.includes(v) && maxSelected != null && value.length >= maxSelected) return
     onChange(value.includes(v) ? value.filter((x) => x !== v) : [...value, v])
+  }
   const labelOf = (v: T) => options.find((o) => o.value === v)?.label ?? String(v)
 
   const q = query.trim()
@@ -143,29 +147,41 @@ export function MultiSelect<T extends string | number>({
                 {q ? `没有匹配「${q}」的选项` : emptyText}
               </p>
             )}
-            {visible.map((o) => (
-              <label
-                key={String(o.value)}
-                className="flex cursor-pointer items-center gap-2.5 rounded-[8px] px-2.5 py-1.5 text-sm text-text hover:bg-surface-2"
-              >
-                <CheckboxPrimitive.Root
-                  checked={value.includes(o.value)}
-                  onCheckedChange={() => toggle(o.value)}
-                  className="flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-border-strong data-[state=checked]:border-accent data-[state=checked]:bg-accent"
+            {visible.map((o) => {
+              const disabled =
+                !value.includes(o.value) && maxSelected != null && value.length >= maxSelected
+              return (
+                <label
+                  key={String(o.value)}
+                  className={cn(
+                    'flex items-center gap-2.5 rounded-[8px] px-2.5 py-1.5 text-sm text-text',
+                    disabled
+                      ? 'cursor-not-allowed opacity-50'
+                      : 'cursor-pointer hover:bg-surface-2',
+                  )}
                 >
-                  <CheckboxPrimitive.Indicator>
-                    <Check size={11} weight="bold" className="text-accent-fg" />
-                  </CheckboxPrimitive.Indicator>
-                </CheckboxPrimitive.Root>
-                <span className="truncate">
-                  <Highlight text={o.label} query={q} />
-                </span>
-              </label>
-            ))}
+                  <CheckboxPrimitive.Root
+                    checked={value.includes(o.value)}
+                    disabled={disabled}
+                    onCheckedChange={() => toggle(o.value)}
+                    className="flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-border-strong data-[state=checked]:border-accent data-[state=checked]:bg-accent"
+                  >
+                    <CheckboxPrimitive.Indicator>
+                      <Check size={11} weight="bold" className="text-accent-fg" />
+                    </CheckboxPrimitive.Indicator>
+                  </CheckboxPrimitive.Root>
+                  <span className="truncate">
+                    <Highlight text={o.label} query={q} />
+                  </span>
+                </label>
+              )
+            })}
           </div>
           {value.length > 0 && (
             <div className="flex items-center justify-between border-t border-border px-3 py-1.5">
-              <span className="text-[12px] text-muted tabular-nums">已选 {value.length} 项</span>
+              <span className="text-[12px] text-muted tabular-nums">
+                已选 {value.length} 项{maxSelected != null && ` · 最多 ${maxSelected} 项`}
+              </span>
               <button
                 type="button"
                 onClick={() => onChange([])}

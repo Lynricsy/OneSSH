@@ -20,6 +20,7 @@ const clock = (ms: number) => new Date(ms).toLocaleTimeString('zh-CN', { hour12:
 
 /** 结果筛选仍是单选（只有成功/失败两个值），故保留 'all' 哨兵；工具/令牌/主机改为多选数组 */
 const ALL = 'all'
+const MAX_AUDIT_FILTER_VALUES = 100
 
 /** 列定义与渲染无关联状态，放模块级避免每次渲染重建 */
 const auditColumns: Column<Audit>[] = [
@@ -109,9 +110,11 @@ export function ActivityPage() {
   const tokens = useTokens()
   const filtered = tool.length > 0 || token.length > 0 || host.length > 0 || result !== ALL
 
-  // 工具选项取自 /audit/tools 的全量 distinct：从最近 100 条审计里累积会漏掉更早的工具，
-  // 而那正是需要往回筛的场景
-  const toolOptions = (auditTools.data ?? []).map((name) => ({ value: name, label: name }))
+  // 全量列表请求加载或失败时仍从当前审计结果回退；已选项也始终保留在选项中。
+  const toolNames = new Set(auditTools.data ?? [])
+  for (const row of audit.data ?? []) toolNames.add(row.Tool)
+  for (const name of tool) toolNames.add(name)
+  const toolOptions = [...toolNames].sort().map((name) => ({ value: name, label: name }))
 
   const reduceMotion = useReducedMotion()
   /**
@@ -207,6 +210,7 @@ export function ActivityPage() {
               placeholder="全部工具"
               searchPlaceholder="搜索工具…"
               options={toolOptions}
+              maxSelected={MAX_AUDIT_FILTER_VALUES}
             />
             <label htmlFor="audit-filter-token" className="sr-only">
               按调用令牌筛选
@@ -218,6 +222,7 @@ export function ActivityPage() {
               placeholder="全部令牌"
               searchPlaceholder="搜索令牌…"
               options={(tokens.data ?? []).map((item) => ({ value: item.id, label: item.name }))}
+              maxSelected={MAX_AUDIT_FILTER_VALUES}
             />
             <label htmlFor="audit-filter-host" className="sr-only">
               按主机筛选
@@ -229,6 +234,7 @@ export function ActivityPage() {
               placeholder="全部主机"
               searchPlaceholder="搜索主机…"
               options={(hosts.data ?? []).map((item) => ({ value: item.name, label: item.name }))}
+              maxSelected={MAX_AUDIT_FILTER_VALUES}
             />
             <label htmlFor="audit-filter-result" className="sr-only">
               按结果筛选
