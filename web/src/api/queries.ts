@@ -21,7 +21,8 @@ export const queryKeys = {
   keys: ['keys'] as const,
   tokens: ['tokens'] as const,
   jobs: ['jobs'] as const,
-  audit: ['audit'] as const,
+  audit: (filter: AuditFilter) => ['audit', filter] as const,
+  auditTools: ['audit', 'tools'] as const,
   metrics: (hostId: number, hours: number) => ['metrics', hostId, hours] as const,
   sftp: (hostId: number, path: string) => ['sftp', hostId, path] as const,
   /** 记忆列表与统计共用 ['memories'] 前缀：删除后一次前缀失效即可覆盖所有筛选与翻页缓存 */
@@ -51,6 +52,42 @@ function useInvalidatingMutation<TVars, TData>(
   })
 }
 
+/**
+ * 批量操作收敛：后端没有批量端点，循环单条接口。逐条顺序执行而不是 allSettled 并发——
+ * 这些都是破坏性写操作，一次打满并发会给网关和远端造成尖峰，出错时也说不清做到了哪一步；
+ * 顺序执行下失败列表与实际执行顺序一致。resolve 值是失败的 id 列表，调用方可据此保留选中项以便重试。
+ */
+function useBatchMutation<TId>(
+  fn: (id: TId) => Promise<unknown>,
+  key: readonly unknown[],
+  verb: string,
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (ids: TId[]) => {
+      const failedIds: TId[] = []
+      let firstError: unknown
+      for (const id of ids) {
+        try {
+          await fn(id)
+        } catch (error) {
+          failedIds.push(id)
+          firstError ??= error
+        }
+      }
+      return { failedIds, firstError }
+    },
+    onSuccess: ({ failedIds, firstError }, ids) => {
+      const ok = ids.length - failedIds.length
+      if (failedIds.length === 0) toast.success(`已${verb} ${ok} 项`)
+      else if (ok === 0) toast.error(`${verb}失败：${(firstError as Error)?.message ?? '未知错误'}`)
+      else toast.warning(`已${verb} ${ok} 项，${failedIds.length} 项失败`)
+      void qc.invalidateQueries({ queryKey: key })
+    },
+    onError,
+  })
+}
+
 /* ── 查询 ───────────────────────────────────────────────────────── */
 
 export const useHosts = () =>
@@ -69,8 +106,35 @@ export const useJobs = () =>
     refetchInterval: 4000,
   })
 
-export const useAudit = () =>
-  useQuery({ queryKey: queryKeys.audit, queryFn: () => api<Audit[]>('/audit?limit=100') })
+/** 审计筛选：缺省即不过滤；tool/token/host 支持多值（OR），ok 单值 */
+export type AuditFilter = { tool?: string[]; token?: number[]; host?: string[]; ok?: boolean }
+
+export const useAudit = (filter: AuditFilter = {}) =>
+  useQuery({
+    queryKey: queryKeys.audit(filter),
+    queryFn: () => {
+      // 重复参数而不是逗号拼接：主机名允许含逗号，拼起来后端拆不回来
+      const params = new URLSearchParams({ limit: '100' })
+      for (const tool of filter.tool ?? []) params.append('tool', tool)
+      for (const token of filter.token ?? []) params.append('token', String(token))
+      for (const host of filter.host ?? []) params.append('host', host)
+      if (filter.ok != null) params.set('ok', String(filter.ok))
+      return api<Audit[]>(`/audit?${params}`)
+    },
+    // 切换筛选时旧数据留在原位渐隐，避免每改一个条件表格就塌成骨架屏
+    placeholderData: keepPreviousData,
+  })
+
+/**
+ * 工具名全集：审计列表只回最近 100 条，从中累积出的选项会漏掉更早出现过的工具，
+ * 于是有了独立端点。工具集合是部署期固定的，缓存久一点避免每次进页面都拉。
+ */
+export const useAuditTools = () =>
+  useQuery({
+    queryKey: queryKeys.auditTools,
+    queryFn: () => api<string[]>('/audit/tools'),
+    staleTime: 5 * 60_000,
+  })
 
 export const useMetrics = (hostId: number | undefined, hours: number) =>
   useQuery({
@@ -121,6 +185,9 @@ export const useSaveHost = (id?: number) =>
 export const useDeleteHost = () =>
   useInvalidatingMutation<number, void>((id) => del(`/hosts/${id}`), queryKeys.hosts, '主机已删除')
 
+export const useDeleteHosts = () =>
+  useBatchMutation<number>((id) => del(`/hosts/${id}`), queryKeys.hosts, '删除')
+
 export const useResetFingerprint = () =>
   useInvalidatingMutation<number, unknown>(
     (id) => post(`/hosts/${id}/reset-fingerprint`, {}),
@@ -140,11 +207,17 @@ export const useCreateKey = () =>
 export const useDeleteKey = () =>
   useInvalidatingMutation<number, void>((id) => del(`/keys/${id}`), queryKeys.keys, '密钥已删除')
 
+export const useDeleteKeys = () =>
+  useBatchMutation<number>((id) => del(`/keys/${id}`), queryKeys.keys, '删除')
+
 export const useCreateToken = () =>
   useInvalidatingMutation<TokenPayload, Token>((v) => post<Token>('/tokens', v), queryKeys.tokens)
 
 export const useDeleteToken = () =>
   useInvalidatingMutation<number, void>((id) => del(`/tokens/${id}`), queryKeys.tokens, '令牌已删除')
+
+export const useDeleteTokens = () =>
+  useBatchMutation<number>((id) => del(`/tokens/${id}`), queryKeys.tokens, '删除')
 
 export const useKillJob = () =>
   useInvalidatingMutation<string, unknown>(
@@ -152,6 +225,9 @@ export const useKillJob = () =>
     queryKeys.jobs,
     '已发送终止信号',
   )
+
+export const useKillJobs = () =>
+  useBatchMutation<string>((id) => post(`/jobs/${id}/kill`, {}), queryKeys.jobs, '终止')
 
 /* ── 记忆 ───────────────────────────────────────────────────────── */
 
@@ -162,6 +238,9 @@ export const useDeleteMemory = () =>
     queryKeys.memories,
     '记忆已删除',
   )
+
+export const useDeleteMemories = () =>
+  useBatchMutation<number>((id) => del(`/memories/${id}`), queryKeys.memories, '删除')
 
 /* ── SFTP 上传 ──────────────────────────────────────────────────── */
 

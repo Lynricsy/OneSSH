@@ -22,6 +22,10 @@ func TestOpenCreatesSchema(t *testing.T) {
 			t.Fatalf("缺少表 %s: %v", table, err)
 		}
 	}
+	var index string
+	if err := s.DB.QueryRowContext(context.Background(), `SELECT name FROM sqlite_master WHERE type='index' AND name='idx_audit_tool'`).Scan(&index); err != nil {
+		t.Fatalf("缺少审计工具索引: %v", err)
+	}
 }
 
 func TestOpenSupportsURICharactersInDataDir(t *testing.T) {
@@ -207,7 +211,7 @@ func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 8 {
+	if versions != 9 {
 		t.Fatalf("二次迁移版本数 = %d", versions)
 	}
 }
@@ -236,7 +240,7 @@ func TestOpenRecordsPreexistingManageHostsColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 8 {
+	if versions != 9 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 }
@@ -282,7 +286,7 @@ func TestOpenRecordsPreexistingAuditTokenNameColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 8 {
+	if versions != 9 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 }
@@ -335,7 +339,7 @@ func TestOpenDoesNotAttributeReusedTokenAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	audit, err := st.ListAudit(ctx, nil, "", "", 0, 10)
+	audit, err := st.ListAudit(ctx, nil, nil, nil, nil, 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +351,7 @@ func TestOpenDoesNotAttributeReusedTokenAudit(t *testing.T) {
 			t.Fatalf("无快照旧审计被错误归属为 %q: %#v", row.TokenName.String, row)
 		}
 	}
-	filtered, err := st.ListAudit(ctx, &newID, "", "", 0, 10)
+	filtered, err := st.ListAudit(ctx, []int64{newID}, nil, nil, nil, 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +368,7 @@ func TestOpenDoesNotAttributeReusedTokenAudit(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	filtered, err = st.ListAudit(ctx, &newID, "", "", 0, 10)
+	filtered, err = st.ListAudit(ctx, []int64{newID}, nil, nil, nil, 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

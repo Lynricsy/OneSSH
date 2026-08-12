@@ -63,7 +63,7 @@ func TestStartCleansRetentionWhenPollingDisabled(t *testing.T) {
 	if _, err := st.LatestMetric(ctx, 1); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("过期 metrics 未删除: %v", err)
 	}
-	audit, err := st.ListAudit(ctx, nil, "", "", 0, 10)
+	audit, err := st.ListAudit(ctx, nil, nil, nil, nil, 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

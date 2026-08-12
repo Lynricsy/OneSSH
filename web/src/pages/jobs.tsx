@@ -1,19 +1,22 @@
 import { ArrowClockwise, Broadcast, WarningCircle } from '@phosphor-icons/react'
 import { animate, motion, useMotionValue, useReducedMotion } from 'motion/react'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useJobs, useKillJob } from '@/api/queries'
+import { useJobs, useKillJob, useKillJobs } from '@/api/queries'
 import type { JobStatus } from '@/api/types'
 import { ConfirmDialog } from '@/components/ui/alert-dialog'
 import { Badge, Dot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Code } from '@/components/ui/code'
 import { DataTable, type Column } from '@/components/ui/data-table'
 import { EmptyState } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
 import { PageTransition } from '@/components/ui/page-transition'
+import { SelectionBar } from '@/components/ui/selection-bar'
 import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/cn'
 import { formatBytes, formatTime } from '@/lib/format'
 
 /**
@@ -46,12 +49,32 @@ function JobBadge({ status }: { status: string }) {
 export function JobsPage() {
   const jobs = useJobs()
   const killJob = useKillJob()
+  const killJobs = useKillJobs()
   const navigate = useNavigate()
   const [confirmJobId, setConfirmJobId] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [batchConfirm, setBatchConfirm] = useState(false)
   const rotate = useMotionValue(0)
   const reduce = useReducedMotion()
   const fetching = useRef(false)
   const spinning = useRef(false)
+
+  // 列表每 4 秒轮询：已退出/被终止的任务留在选中态只会误导下一次批量终止，随数据自动剔除
+  useEffect(() => {
+    const rows = jobs.data
+    if (!rows) return
+    setSelected((prev) => {
+      if (prev.size === 0) return prev
+      // 只剔除「响应里确实存在且已不再 running」的任务。反过来按 running 白名单过滤的话，
+      // 响应里暂时缺席的 id（批量终止失败后的重试目标、竞态中的旧快照）会被静默清掉，
+      // 用户就再也点不到重试了
+      const settled = new Set(
+        rows.filter((item) => item.job.status !== 'running').map((item) => item.job.id),
+      )
+      const next = new Set([...prev].filter((id) => !settled.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [jobs.data])
 
   /**
    * 本地网关常在几十毫秒内返回：把 isFetching 直接绑到 animate-spin 只会让图标抖一下，
@@ -175,6 +198,12 @@ export function JobsPage() {
               rows={jobs.data}
               rowKey={(item) => item.job.id}
               loading={jobs.isLoading}
+              selection={{
+                selected,
+                onChange: setSelected,
+                // 只有运行中的任务能终止，其余行禁用勾选
+                isRowSelectable: (item) => item.job.status === 'running',
+              }}
             />
           </Card>
 
@@ -182,9 +211,27 @@ export function JobsPage() {
             {jobs.isLoading
               ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} className="h-[116px]" />)
               : jobs.data?.map((item) => (
-                  <Card key={item.job.id} className="p-4">
+                  <Card
+                    key={item.job.id}
+                    className={cn('p-4', selected.has(item.job.id) && 'border-accent')}
+                  >
                     <div className="flex items-center justify-between gap-3">
-                      <Code>{item.job.id.slice(0, 8)}</Code>
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <Checkbox
+                          checked={selected.has(item.job.id)}
+                          disabled={item.job.status !== 'running'}
+                          onCheckedChange={() =>
+                            setSelected((prev) => {
+                              const next = new Set(prev)
+                              if (next.has(item.job.id)) next.delete(item.job.id)
+                              else next.add(item.job.id)
+                              return next
+                            })
+                          }
+                          aria-label={`选择任务 ${item.job.id.slice(0, 8)}`}
+                        />
+                        <Code>{item.job.id.slice(0, 8)}</Code>
+                      </div>
                       <JobBadge status={item.job.status} />
                     </div>
                     <p className="mt-2 line-clamp-2 font-mono text-[12px] break-all text-muted">
@@ -206,6 +253,12 @@ export function JobsPage() {
         </>
       )}
 
+      <SelectionBar count={selected.size} onClear={() => setSelected(new Set())}>
+        <Button variant="danger" size="sm" onClick={() => setBatchConfirm(true)}>
+          终止
+        </Button>
+      </SelectionBar>
+
       <ConfirmDialog
         open={confirmJobId !== null}
         onOpenChange={(open) => {
@@ -217,6 +270,20 @@ export function JobsPage() {
         confirmText="终止"
         onConfirm={async () => {
           if (confirmJobId !== null) await killJob.mutateAsync(confirmJobId)
+        }}
+      />
+
+      <ConfirmDialog
+        open={batchConfirm}
+        onOpenChange={setBatchConfirm}
+        danger
+        title={`批量终止 ${selected.size} 个任务？`}
+        description="这些远程进程会收到终止信号，未落盘的输出可能丢失。"
+        confirmText="终止"
+        onConfirm={async () => {
+          // 失败的留在选中态，方便对照着重试
+          const { failedIds } = await killJobs.mutateAsync([...selected])
+          setSelected(new Set(failedIds))
         }}
       />
     </PageTransition>

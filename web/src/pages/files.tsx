@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   ArrowClockwise,
   CaretRight,
+  DownloadSimple,
   File,
   FolderOpen,
   PencilSimple,
@@ -9,7 +10,7 @@ import {
   WarningCircle,
 } from '@phosphor-icons/react'
 import { toast } from 'sonner'
-import { downloadUrl } from '@/api/client'
+import { checkDownload, downloadUrl } from '@/api/client'
 import { useHosts, useSftpList, useUpload } from '@/api/queries'
 import type { FileEntry } from '@/api/types'
 import { Button } from '@/components/ui/button'
@@ -20,12 +21,22 @@ import { Input } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
 import { PageTransition } from '@/components/ui/page-transition'
 import { Select } from '@/components/ui/select'
+import { SelectionBar } from '@/components/ui/selection-bar'
 import { Sheet } from '@/components/ui/sheet'
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatBytes, formatTime } from '@/lib/format'
 
 /** 固定 id：sonner 复用同一条 toast，SFTP 连续失败时不会堆叠刷屏 */
 const SFTP_ERROR_TOAST = 'sftp-error'
+
+function startDownload(hostId: number, path: string, name: string) {
+  const anchor = document.createElement('a')
+  anchor.href = downloadUrl(hostId, path)
+  anchor.download = name
+  document.body.append(anchor)
+  anchor.click()
+  anchor.remove()
+}
 
 export function FilesPage() {
   const [host, setHost] = useState<number>()
@@ -34,13 +45,23 @@ export function FilesPage() {
   // 后者每敲一个字符就会发一次 SFTP 请求（并弹一条错误 toast）
   const [draft, setDraft] = useState<string>()
   const [preview, setPreview] = useState<string>()
+  // 选中项按文件名记录，只对当前目录有意义——换主机/换目录即失效
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [downloading, setDownloading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const crumbsRef = useRef<HTMLElement>(null)
+  const selectionScope = useRef(0)
 
   const hosts = useHosts()
   const query = useSftpList(host, path)
   const upload = useUpload(host, path)
   const errorMessage = query.error instanceof Error ? query.error.message : undefined
+
+  useEffect(() => {
+    // 下载可能跨越主机/目录切换；递增作用域可阻止旧请求把失败项写回新目录。
+    selectionScope.current++
+    setSelected(new Set())
+  }, [host, path])
 
   useEffect(() => {
     // 依赖是消息字符串而不是 error 对象：对象每次 fetch 都是新引用，会让 effect 反复触发
@@ -70,6 +91,41 @@ export function FilesPage() {
     } else {
       window.open(downloadUrl(host, nextPath))
     }
+  }
+
+  /**
+   * 先用 HEAD 验证响应，再交给浏览器原生下载栈流式处理正文，避免大文件进入 JS 堆。
+   * 串行预检也避免瞬间压满 SFTP 连接。
+   */
+  const downloadSelected = async () => {
+    if (host == null || downloading) return
+    const base = path.replace(/\/$/, '') + '/'
+    const names = [...selected]
+    const scope = selectionScope.current
+    const failed: string[] = []
+    let firstError: string | undefined
+
+    setDownloading(true)
+    try {
+      for (const name of names) {
+        try {
+          await checkDownload(host, base + name)
+          startDownload(host, base + name, name)
+        } catch (error) {
+          failed.push(name)
+          firstError ??= (error as Error).message
+        }
+      }
+    } finally {
+      setDownloading(false)
+    }
+
+    const ok = names.length - failed.length
+    if (failed.length === 0) toast.success(`已开始下载 ${ok} 个文件`)
+    else if (ok === 0) toast.error(`下载失败：${firstError ?? '未知错误'}`)
+    else toast.warning(`已开始下载 ${ok} 个文件，${failed.length} 个失败`)
+    // 只有用户仍停留在启动下载的目录时才回写失败项；导航后的选择归新目录所有。
+    if (selectionScope.current === scope) setSelected(new Set(failed))
   }
 
   const segments = path === '/' ? ['/'] : path.split('/').filter(Boolean)
@@ -232,7 +288,7 @@ export function FilesPage() {
           </Card>
         ) : (
           <Card>
-            <DataTable<FileEntry>
+            <DataTable<FileEntry, string>
               columns={[
                 {
                   key: 'icon',
@@ -274,6 +330,12 @@ export function FilesPage() {
               rowKey={(entry) => entry.name}
               loading={query.isPending}
               onRowClick={openEntry}
+              selection={{
+                selected,
+                onChange: setSelected,
+                // 目录不能下载，只允许勾选文件
+                isRowSelectable: (entry) => !entry.directory,
+              }}
               empty={
                 <EmptyState
                   icon={<FolderOpen size={22} />}
@@ -285,6 +347,18 @@ export function FilesPage() {
           </Card>
         )}
       </div>
+
+      <SelectionBar count={selected.size} onClear={() => setSelected(new Set())}>
+        <Button
+          variant="primary"
+          size="sm"
+          loading={downloading}
+          onClick={() => void downloadSelected()}
+        >
+          {!downloading && <DownloadSimple size={14} />}
+          {downloading ? '下载中…' : '下载'}
+        </Button>
+      </SelectionBar>
 
       <Sheet
         open={!!preview}

@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"path/filepath"
@@ -62,11 +63,13 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /jobs", a.jobsList)
 	mux.HandleFunc("POST /jobs/{id}/kill", a.jobKill)
 	mux.HandleFunc("GET /audit", a.audit)
+	mux.HandleFunc("GET /audit/tools", a.auditTools)
 	mux.HandleFunc("GET /memories", a.memories)
 	mux.HandleFunc("GET /memories/stats", a.memoryStats)
 	mux.HandleFunc("DELETE /memories/{id}", a.memory)
 	mux.HandleFunc("GET /metrics/{hostID}", a.metrics)
 	mux.HandleFunc("GET /sftp/{hostID}/list", a.sftpList)
+	mux.HandleFunc("HEAD /sftp/{hostID}/download", a.sftpDownload)
 	mux.HandleFunc("GET /sftp/{hostID}/download", a.sftpDownload)
 	mux.HandleFunc("POST /sftp/{hostID}/upload", a.sftpUpload)
 	mux.HandleFunc("GET /events", a.sse)
@@ -354,25 +357,71 @@ func (a *API) jobKill(w http.ResponseWriter, r *http.Request) {
 	}
 	jsonOut(w, 200, map[string]bool{"ok": true})
 }
+func auditFilterValues(name string, raw []string) ([]string, error) {
+	values := make([]string, 0, len(raw))
+	for _, value := range raw {
+		if value = strings.TrimSpace(value); value != "" {
+			values = append(values, value)
+		}
+	}
+	if len(values) > store.MaxAuditFilterValues {
+		return nil, fmt.Errorf("审计%s筛选最多 %d 项", name, store.MaxAuditFilterValues)
+	}
+	return values, nil
+}
+
 func (a *API) audit(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	var tid *int64
-	if q.Get("token") != "" {
-		x, err := strconv.ParseInt(q.Get("token"), 10, 64)
-		if err != nil {
-			apiError(w, 400, err)
+	tokenValues, err := auditFilterValues("令牌", q["token"])
+	if err != nil {
+		apiError(w, http.StatusBadRequest, err)
+		return
+	}
+	tids := make([]int64, 0, len(tokenValues))
+	for _, value := range tokenValues {
+		id, parseErr := strconv.ParseInt(value, 10, 64)
+		if parseErr != nil {
+			apiError(w, http.StatusBadRequest, parseErr)
 			return
 		}
-		tid = &x
+		tids = append(tids, id)
+	}
+	hosts, err := auditFilterValues("主机", q["host"])
+	if err != nil {
+		apiError(w, http.StatusBadRequest, err)
+		return
+	}
+	tools, err := auditFilterValues("工具", q["tool"])
+	if err != nil {
+		apiError(w, http.StatusBadRequest, err)
+		return
 	}
 	before, _ := strconv.ParseInt(q.Get("before"), 10, 64)
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	list, err := a.Store.ListAudit(r.Context(), tid, q.Get("host"), q.Get("tool"), before, limit)
+	var ok *bool
+	if q.Get("ok") != "" {
+		value, parseErr := strconv.ParseBool(q.Get("ok"))
+		if parseErr != nil {
+			apiError(w, http.StatusBadRequest, parseErr)
+			return
+		}
+		ok = &value
+	}
+	list, err := a.Store.ListAudit(r.Context(), tids, hosts, tools, ok, before, limit)
 	if err != nil {
-		apiError(w, 500, err)
+		apiError(w, http.StatusInternalServerError, err)
 		return
 	}
-	jsonOut(w, 200, list)
+	jsonOut(w, http.StatusOK, list)
+}
+
+func (a *API) auditTools(w http.ResponseWriter, r *http.Request) {
+	tools, err := a.Store.ListAuditTools(r.Context())
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, err)
+		return
+	}
+	jsonOut(w, http.StatusOK, tools)
 }
 func (a *API) metrics(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r, "hostID")
@@ -423,16 +472,24 @@ func (a *API) sftpDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := r.URL.Query().Get("path")
-	data, err := a.Files.RawRead(r.Context(), name, p, 100<<20)
+	file, size, err := a.Files.OpenRead(r.Context(), name, p, 100<<20)
 	if err != nil {
 		apiError(w, 502, err)
 		return
 	}
+	defer file.Close()
 	if typ := mime.TypeByExtension(filepath.Ext(p)); typ != "" {
 		w.Header().Set("Content-Type", typ)
 	}
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(p)))
-	_, _ = w.Write(data)
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if _, err = io.CopyN(w, file, size); err != nil {
+		log.Printf("SFTP 下载 %s 中断: %v", p, err)
+	}
 }
 func (a *API) sftpUpload(w http.ResponseWriter, r *http.Request) {
 	name, err := a.hostNameByID(r.Context(), r.PathValue("hostID"))

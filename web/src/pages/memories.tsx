@@ -1,17 +1,19 @@
 import { Brain, Database, MagnifyingGlass, Sparkle, Trash, WarningCircle } from '@phosphor-icons/react'
 import { useEffect, useId, useMemo, useState } from 'react'
-import { useDeleteMemory, useHosts, useMemories, useMemoryStats } from '@/api/queries'
+import { useDeleteMemories, useDeleteMemory, useHosts, useMemories, useMemoryStats } from '@/api/queries'
 import type { MemoryRow } from '@/api/types'
 import { ConfirmDialog } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { DataTable, type Column } from '@/components/ui/data-table'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
 import { PageTransition } from '@/components/ui/page-transition'
 import { Select } from '@/components/ui/select'
+import { SelectionBar } from '@/components/ui/selection-bar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatCard, StatGroup } from '@/components/ui/stat-card'
 import { cn } from '@/lib/cn'
@@ -60,6 +62,8 @@ export function MemoriesPage() {
   const [query, setQuery] = useState('')
   const [offset, setOffset] = useState(0)
   const [deleting, setDeleting] = useState<MemoryRow | null>(null)
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [batchDeleting, setBatchDeleting] = useState(false)
   const bankSelectId = useId()
 
   useEffect(() => {
@@ -71,11 +75,18 @@ export function MemoriesPage() {
     return () => window.clearTimeout(timer)
   }, [search])
 
+  useEffect(() => {
+    // 选中项按 id 记录，只对当前这一屏结果有意义：跨库/跨搜索/跨页留着会让批量删除
+    // 误伤此刻根本看不见的记忆。依赖用实际生效的 query 而不是输入框的 search
+    setSelected((prev) => (prev.size === 0 ? prev : new Set()))
+  }, [bank, query, offset])
+
   const hosts = useHosts()
   const stats = useMemoryStats()
   const hostId = bank === ALL_BANKS ? undefined : Number(bank)
   const memories = useMemories({ hostId, q: query, limit: PAGE_SIZE, offset })
   const deleteMemory = useDeleteMemory()
+  const deleteMemories = useDeleteMemories()
 
   // 统计按 host_id 索引，全局库归到 0——与筛选值的编码保持同一套
   const statByBank = useMemo(
@@ -320,6 +331,7 @@ export function MemoriesPage() {
                 rows={rows}
                 rowKey={(memory) => memory.id}
                 loading={memories.isLoading}
+                selection={{ selected, onChange: setSelected }}
               />
             </Card>
 
@@ -329,11 +341,29 @@ export function MemoriesPage() {
                     <Skeleton key={index} className="h-[132px]" />
                   ))
                 : rows?.map((memory) => (
-                    <Card key={memory.id} className="p-4">
+                    <Card
+                      key={memory.id}
+                      className={cn('p-4', selected.has(memory.id) && 'border-accent')}
+                    >
                       <div className="flex items-start justify-between gap-3">
-                        <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-text">
-                          {memory.content}
-                        </p>
+                        <div className="flex min-w-0 flex-1 items-start gap-2.5">
+                          <Checkbox
+                            className="mt-0.5"
+                            checked={selected.has(memory.id)}
+                            onCheckedChange={() =>
+                              setSelected((prev) => {
+                                const next = new Set(prev)
+                                if (next.has(memory.id)) next.delete(memory.id)
+                                else next.add(memory.id)
+                                return next
+                              })
+                            }
+                            aria-label={`选择记忆 #${memory.id}`}
+                          />
+                          <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-text">
+                            {memory.content}
+                          </p>
+                        </div>
                         <Button
                           variant="ghost"
                           size="icon"
@@ -392,6 +422,12 @@ export function MemoriesPage() {
         )}
       </div>
 
+      <SelectionBar count={selected.size} onClear={() => setSelected(new Set())}>
+        <Button variant="danger" size="sm" onClick={() => setBatchDeleting(true)}>
+          删除
+        </Button>
+      </SelectionBar>
+
       <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(open) => {
@@ -407,8 +443,30 @@ export function MemoriesPage() {
         confirmText="删除"
         onConfirm={async () => {
           if (!deleting) return
-          // 失败提示由 mutation 的统一 onError 弹出，这里吞掉异常以免弹层卡在 pending
-          await deleteMemory.mutateAsync(deleting.id).catch(() => undefined)
+          // 不吞异常：失败时 mutateAsync 抛出，弹层保持打开可直接重试，
+          // 提示由 mutation 的统一 onError 给
+          await deleteMemory.mutateAsync(deleting.id)
+          // 删成功才摘掉选中项
+          setSelected((prev) => {
+            if (!prev.has(deleting.id)) return prev
+            const next = new Set(prev)
+            next.delete(deleting.id)
+            return next
+          })
+        }}
+      />
+
+      <ConfirmDialog
+        open={batchDeleting}
+        onOpenChange={setBatchDeleting}
+        danger
+        title={`批量删除 ${selected.size} 条记忆？`}
+        description="删除后 Agent 将无法再召回这些记忆，此操作不可撤销。"
+        confirmText="删除"
+        onConfirm={async () => {
+          // 失败的留在选中态，方便对照着重试
+          const { failedIds } = await deleteMemories.mutateAsync([...selected])
+          setSelected(new Set(failedIds))
         }}
       />
     </PageTransition>
