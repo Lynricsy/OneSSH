@@ -67,23 +67,31 @@ type TransferResult struct {
 func New(pool *sshpool.Pool, runner *execx.Runner) *Manager {
 	return &Manager{Clients: NewClientPool(pool), Pool: pool, Exec: runner}
 }
-func (m *Manager) RawRead(ctx context.Context, host, file string, max int64) ([]byte, error) {
+func (m *Manager) OpenRead(ctx context.Context, host, file string, max int64) (io.ReadCloser, int64, error) {
 	c, err := m.Clients.Get(ctx, host)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	file, err = resolvePath(c, file)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	info, err := c.Stat(file)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if info.Size() > max {
-		return nil, fmt.Errorf("文件大小 %d 超过限制 %d", info.Size(), max)
+		return nil, 0, fmt.Errorf("文件大小 %d 超过限制 %d", info.Size(), max)
 	}
 	f, err := c.Open(file)
+	if err != nil {
+		return nil, 0, err
+	}
+	return f, info.Size(), nil
+}
+
+func (m *Manager) RawRead(ctx context.Context, host, file string, max int64) ([]byte, error) {
+	f, _, err := m.OpenRead(ctx, host, file, max)
 	if err != nil {
 		return nil, err
 	}

@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"path/filepath"
@@ -68,6 +69,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("DELETE /memories/{id}", a.memory)
 	mux.HandleFunc("GET /metrics/{hostID}", a.metrics)
 	mux.HandleFunc("GET /sftp/{hostID}/list", a.sftpList)
+	mux.HandleFunc("HEAD /sftp/{hostID}/download", a.sftpDownload)
 	mux.HandleFunc("GET /sftp/{hostID}/download", a.sftpDownload)
 	mux.HandleFunc("POST /sftp/{hostID}/upload", a.sftpUpload)
 	mux.HandleFunc("GET /events", a.sse)
@@ -470,16 +472,24 @@ func (a *API) sftpDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := r.URL.Query().Get("path")
-	data, err := a.Files.RawRead(r.Context(), name, p, 100<<20)
+	file, size, err := a.Files.OpenRead(r.Context(), name, p, 100<<20)
 	if err != nil {
 		apiError(w, 502, err)
 		return
 	}
+	defer file.Close()
 	if typ := mime.TypeByExtension(filepath.Ext(p)); typ != "" {
 		w.Header().Set("Content-Type", typ)
 	}
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(p)))
-	_, _ = w.Write(data)
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if _, err = io.CopyN(w, file, size); err != nil {
+		log.Printf("SFTP 下载 %s 中断: %v", p, err)
+	}
 }
 func (a *API) sftpUpload(w http.ResponseWriter, r *http.Request) {
 	name, err := a.hostNameByID(r.Context(), r.PathValue("hostID"))
