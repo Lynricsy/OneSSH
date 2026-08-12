@@ -85,14 +85,16 @@ func (p *Pool) dial(ctx context.Context, h store.Host, via []string) (*ssh.Clien
 			return nil, err
 		}
 		// ESXi 等设备只接受 keyboard-interactive，不接受 password 方法。
-		// 同时提供两种 AuthMethod，Go SSH 客户端会自动选择服务器支持的方式。
+		// 使用 keyboard-interactive 替代 password 作为认证方法，避免提供两种方法时
+		// 密码错误导致双重尝试消耗 MaxAuthTries。仅处理单问题提示（标准密码输入），
+		// 多问题场景（如 OTP 二次验证）显式失败，防止密码泄漏到非密码字段。
 		password := string(plain)
-		auths = append(auths, ssh.Password(password), ssh.KeyboardInteractive(
+		auths = append(auths, ssh.KeyboardInteractive(
 			func(name, instruction string, questions []string, echos []bool) ([]string, error) {
-				answers := make([]string, len(questions))
-				for i := range questions {
-					answers[i] = password
+				if len(questions) != 1 {
+					return nil, fmt.Errorf("unexpected keyboard-interactive challenge: got %d questions, expected 1", len(questions))
 				}
+				answers := []string{password}
 				return answers, nil
 			},
 		))
