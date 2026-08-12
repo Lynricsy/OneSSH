@@ -77,33 +77,17 @@ func (p *Pool) get(ctx context.Context, name string, via []string) (*ssh.Client,
 	return client, nil
 }
 func (p *Pool) dial(ctx context.Context, h store.Host, via []string) (*ssh.Client, error) {
-	var auths []ssh.AuthMethod
+	var (
+		auths        []ssh.AuthMethod
+		authCallback ssh.ClientAuthCallback
+	)
 	switch h.AuthType {
 	case "password":
 		plain, err := p.box.Open(h.PasswordEnc)
 		if err != nil {
 			return nil, err
 		}
-		// ESXi 等设备只接受 keyboard-interactive，不接受 password 方法；
-		// 而部分设备只接受 RFC 4252 password。同时提供两种 AuthMethod，
-		// Go SSH 客户端按序尝试，兼容两类服务器。代价是密码错误时最多
-		// 尝试 2 次（MaxAuthTries 默认 6 次，足够）。
-		// handler 仅响应第一次单问题提示（标准密码输入）；后续挑战（如
-		// OTP 二次验证）显式失败，防止密码泄漏到非密码字段。
-		password := string(plain)
-		var answered bool
-		auths = append(auths, ssh.Password(password), ssh.KeyboardInteractive(
-			func(name, instruction string, questions []string, echos []bool) ([]string, error) {
-				if answered {
-					return nil, fmt.Errorf("unexpected second keyboard-interactive challenge (multi-factor auth not supported)")
-				}
-				if len(questions) != 1 {
-					return nil, fmt.Errorf("unexpected keyboard-interactive challenge: got %d questions, expected 1", len(questions))
-				}
-				answered = true
-				return []string{password}, nil
-			},
-		))
+		auths, authCallback = passwordAuthentication(string(plain))
 		for i := range plain {
 			plain[i] = 0
 		}
@@ -143,7 +127,13 @@ func (p *Pool) dial(ctx context.Context, h store.Host, via []string) (*ssh.Clien
 		}
 		return nil
 	}
-	config := &ssh.ClientConfig{User: h.Username, Auth: auths, HostKeyCallback: callback, Timeout: 15 * time.Second}
+	config := &ssh.ClientConfig{
+		User:            h.Username,
+		Auth:            auths,
+		AuthCallback:    authCallback,
+		HostKeyCallback: callback,
+		Timeout:         15 * time.Second,
+	}
 	addr := net.JoinHostPort(h.Addr, strconv.Itoa(h.Port))
 	var conn net.Conn
 	var err error
@@ -175,6 +165,40 @@ func (p *Pool) dial(ctx context.Context, h store.Host, via []string) (*ssh.Clien
 		return nil, fmt.Errorf("SSH 握手 %s: %w", nameAddr(h), err)
 	}
 	return ssh.NewClient(cc, chans, reqs), nil
+}
+
+func passwordAuthentication(password string) ([]ssh.AuthMethod, ssh.ClientAuthCallback) {
+	auths := []ssh.AuthMethod{
+		ssh.Password(password),
+		ssh.KeyboardInteractive(passwordChallenge(password)),
+	}
+	// 保留 x/crypto/ssh 的原生方法选择与回退，只在服务端已接受一个因素后中止。
+	// 这样既兼容仅支持 keyboard-interactive 的设备，也不会把保存的密码用于 OTP。
+	callback := func(ctx *ssh.ClientAuthContext) (ssh.AuthMethod, error) {
+		if len(ctx.PartialSuccessMethods) > 0 {
+			return nil, fmt.Errorf("不支持 SSH 多因素认证（已完成 %s）", strings.Join(ctx.PartialSuccessMethods, ", "))
+		}
+		return nil, nil
+	}
+	return auths, callback
+}
+
+func passwordChallenge(password string) ssh.KeyboardInteractiveChallenge {
+	var answered bool
+	return func(name, instruction string, questions []string, echos []bool) ([]string, error) {
+		if answered {
+			return nil, fmt.Errorf("不支持多轮 keyboard-interactive 认证")
+		}
+		if len(questions) != 1 || len(echos) != 1 {
+			return nil, fmt.Errorf("keyboard-interactive 提示数量异常")
+		}
+		if echos[0] {
+			return nil, fmt.Errorf("拒绝向可回显的 keyboard-interactive 字段发送密码")
+		}
+		// echo=false 是协议提供的秘密字段边界；提示文本可能被设备本地化或自定义。
+		answered = true
+		return []string{password}, nil
+	}
 }
 func nameAddr(h store.Host) string { return h.Name + "(" + h.Addr + ")" }
 func (p *Pool) keepalive(name string, e *entry, c *ssh.Client) {
