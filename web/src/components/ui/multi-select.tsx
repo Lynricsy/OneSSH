@@ -84,17 +84,19 @@ export function MultiSelect<T extends string | number>({
         )}
       >
         {value.length === 0 ? (
-          <span className="truncate text-muted">{placeholder}</span>
+          <span className="min-w-0 flex-1 truncate text-muted">{placeholder}</span>
         ) : (
-          <span className="flex min-w-0 items-center gap-1">
+          // flex-1 + overflow-hidden 把 chips 约束在 caret 左侧；chip 允许收缩截断，
+          // 否则两个长名字会越过 caret 被 overflow 裁掉（看起来像被下拉图标遮住）
+          <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
             {shown.map((v) => (
-              <Badge key={String(v)} variant="accent" className="max-w-36 shrink-0">
+              <Badge key={String(v)} variant="accent" className="min-w-0 max-w-36">
                 <span className="truncate">{labelOf(v)}</span>
                 <span
                   role="button"
                   tabIndex={-1}
                   aria-label={`移除 ${labelOf(v)}`}
-                  className="-mr-1 inline-flex cursor-pointer items-center rounded-[2px] p-0.5 hover:text-danger"
+                  className="-mr-1 inline-flex shrink-0 cursor-pointer items-center rounded-[2px] p-0.5 hover:text-danger"
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation()
