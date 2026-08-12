@@ -114,7 +114,7 @@ func TestListAuditFiltersByMultipleValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(audit) != 1 || audit[0].Tool != "job_list" {
+	if len(audit) != 1 || audit[0].Tool != "job_list" || audit[0].Host.String != "db-01" {
 		t.Fatalf("主机+工具组合过滤结果 = %#v", audit)
 	}
 
