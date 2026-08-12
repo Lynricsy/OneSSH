@@ -53,3 +53,25 @@ export async function uploadFile(hostId: number, path: string, file: File) {
 /** SFTP 下载/预览直链 */
 export const downloadUrl = (hostId: number, path: string) =>
   `/api/v1/sftp/${hostId}/download?path=${encodeURIComponent(path)}`
+
+/**
+ * 下载文件正文。直链 <a download> 拿不到状态码——会话过期时浏览器会把 401 的错误页
+ * 当作文件存下来，所以批量下载走 fetch，错误语义（含 401 广播）与 api() 保持一致。
+ */
+export async function fetchDownload(hostId: number, path: string): Promise<Blob> {
+  const response = await fetch(downloadUrl(hostId, path), { credentials: 'same-origin' })
+  if (!response.ok) {
+    let message = response.statusText
+    try {
+      const body = await response.json()
+      message = body.error || message
+    } catch {
+      /* 非 JSON 错误体，保留 statusText */
+    }
+    const error = new Error(message) as ApiError
+    error.status = response.status
+    if (response.status === 401) window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT))
+    throw error
+  }
+  return response.blob()
+}

@@ -546,12 +546,15 @@ export function HostsPage() {
           if (!confirm) return
           if (confirm.kind === 'reset') return resetFingerprint.mutateAsync(confirm.host.id)
           if (confirm.kind === 'delete') {
+            await deleteHost.mutateAsync(confirm.host.id)
+            // 删成功才摘掉选中项：失败时保留，批量条上还能看到它并重试
             setSelected((prev) => {
+              if (!prev.has(confirm.host.id)) return prev
               const next = new Set(prev)
               next.delete(confirm.host.id)
               return next
             })
-            return deleteHost.mutateAsync(confirm.host.id)
+            return
           }
           // 失败的留在选中态：列表刷新后用户能直接看到哪些没删掉，可立即重试
           const { failedIds } = await deleteHosts.mutateAsync([...selected])

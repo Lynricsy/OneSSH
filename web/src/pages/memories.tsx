@@ -75,6 +75,12 @@ export function MemoriesPage() {
     return () => window.clearTimeout(timer)
   }, [search])
 
+  useEffect(() => {
+    // 选中项按 id 记录，只对当前这一屏结果有意义：跨库/跨搜索/跨页留着会让批量删除
+    // 误伤此刻根本看不见的记忆。依赖用实际生效的 query 而不是输入框的 search
+    setSelected((prev) => (prev.size === 0 ? prev : new Set()))
+  }, [bank, query, offset])
+
   const hosts = useHosts()
   const stats = useMemoryStats()
   const hostId = bank === ALL_BANKS ? undefined : Number(bank)
@@ -437,13 +443,16 @@ export function MemoriesPage() {
         confirmText="删除"
         onConfirm={async () => {
           if (!deleting) return
+          // 不吞异常：失败时 mutateAsync 抛出，弹层保持打开可直接重试，
+          // 提示由 mutation 的统一 onError 给
+          await deleteMemory.mutateAsync(deleting.id)
+          // 删成功才摘掉选中项
           setSelected((prev) => {
+            if (!prev.has(deleting.id)) return prev
             const next = new Set(prev)
             next.delete(deleting.id)
             return next
           })
-          // 失败提示由 mutation 的统一 onError 弹出，这里吞掉异常以免弹层卡在 pending
-          await deleteMemory.mutateAsync(deleting.id).catch(() => undefined)
         }}
       />
 

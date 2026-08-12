@@ -484,12 +484,14 @@ export function TokensPage() {
         danger
         onConfirm={async () => {
           if (!deleting) return
+          await deleteToken.mutateAsync(deleting.id)
+          // 删成功才摘掉选中项：失败时保留，批量条上还能看到它并重试
           setSelected((prev) => {
+            if (!prev.has(deleting.id)) return prev
             const next = new Set(prev)
             next.delete(deleting.id)
             return next
           })
-          await deleteToken.mutateAsync(deleting.id)
         }}
       />
 

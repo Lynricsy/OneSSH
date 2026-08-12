@@ -61,14 +61,17 @@ export function JobsPage() {
 
   // 列表每 4 秒轮询：已退出/被终止的任务留在选中态只会误导下一次批量终止，随数据自动剔除
   useEffect(() => {
+    const rows = jobs.data
+    if (!rows) return
     setSelected((prev) => {
       if (prev.size === 0) return prev
-      const running = new Set(
-        (jobs.data ?? [])
-          .filter((item) => item.job.status === 'running')
-          .map((item) => item.job.id),
+      // 只剔除「响应里确实存在且已不再 running」的任务。反过来按 running 白名单过滤的话，
+      // 响应里暂时缺席的 id（批量终止失败后的重试目标、竞态中的旧快照）会被静默清掉，
+      // 用户就再也点不到重试了
+      const settled = new Set(
+        rows.filter((item) => item.job.status !== 'running').map((item) => item.job.id),
       )
-      const next = new Set([...prev].filter((id) => running.has(id)))
+      const next = new Set([...prev].filter((id) => !settled.has(id)))
       return next.size === prev.size ? prev : next
     })
   }, [jobs.data])

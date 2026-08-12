@@ -1,6 +1,6 @@
 import * as CheckboxPrimitive from '@radix-ui/react-checkbox'
 import * as PopoverPrimitive from '@radix-ui/react-popover'
-import { CaretDown, Check, MagnifyingGlass, X } from '@phosphor-icons/react'
+import { CaretDown, Check, MagnifyingGlass } from '@phosphor-icons/react'
 import { useState } from 'react'
 import { cn } from '@/lib/cn'
 import { Badge } from './badge'
@@ -76,6 +76,17 @@ export function MultiSelect<T extends string | number>({
       <PopoverPrimitive.Trigger
         id={id}
         aria-invalid={invalid || undefined}
+        // chip 被截断时靠 title 补全，触发器里不再塞第二层控件
+        title={value.length > 0 ? value.map(labelOf).join('、') : undefined}
+        onKeyDown={(e) => {
+          // 关闭态下 Backspace/Delete 摘掉最后一项：chip 上的伪按钮（span[role=button]）
+          // 是嵌在触发器里的嵌套控件，键盘根本够不着，改由触发器自身承担快捷移除，
+          // 完整的增删仍在弹层里的 checkbox 与「清空」上
+          if (!open && (e.key === 'Backspace' || e.key === 'Delete') && value.length > 0) {
+            e.preventDefault()
+            onChange(value.slice(0, -1))
+          }
+        }}
         className={cn(
           'flex h-9 w-full items-center justify-between gap-2 overflow-hidden rounded-[8px] border bg-surface px-3 text-sm',
           'transition-colors duration-150 hover:border-border-strong',
@@ -92,19 +103,6 @@ export function MultiSelect<T extends string | number>({
             {shown.map((v) => (
               <Badge key={String(v)} variant="accent" className="min-w-0 max-w-36">
                 <span className="truncate">{labelOf(v)}</span>
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  aria-label={`移除 ${labelOf(v)}`}
-                  className="-mr-1 inline-flex shrink-0 cursor-pointer items-center rounded-[2px] p-0.5 hover:text-danger"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    toggle(v)
-                  }}
-                >
-                  <X size={10} weight="bold" />
-                </span>
               </Badge>
             ))}
             {rest > 0 && (

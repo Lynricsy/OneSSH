@@ -1,7 +1,7 @@
 import { Broadcast, Pulse } from '@phosphor-icons/react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { useEffect, useState } from 'react'
-import { useAudit, useHosts, useTokens, type AuditFilter } from '@/api/queries'
+import { useState } from 'react'
+import { useAudit, useAuditTools, useHosts, useTokens, type AuditFilter } from '@/api/queries'
 import type { Audit } from '@/api/types'
 import { Badge, Dot } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -104,21 +104,14 @@ export function ActivityPage() {
     ok: result === ALL ? undefined : result === 'ok',
   }
   const audit = useAudit(filter)
+  const auditTools = useAuditTools()
   const hosts = useHosts()
   const tokens = useTokens()
   const filtered = tool.length > 0 || token.length > 0 || host.length > 0 || result !== ALL
 
-  // 工具名没有独立接口：把每次响应里出现过的工具并入集合并按名排序，
-  // 筛选改变结果集也不丢已见过的选项
-  const [seenTools, setSeenTools] = useState<string[]>([])
-  useEffect(() => {
-    if (!audit.data?.length) return
-    setSeenTools((prev) => {
-      const next = new Set(prev)
-      for (const row of audit.data) next.add(row.Tool)
-      return next.size === prev.length ? prev : [...next].sort()
-    })
-  }, [audit.data])
+  // 工具选项取自 /audit/tools 的全量 distinct：从最近 100 条审计里累积会漏掉更早的工具，
+  // 而那正是需要往回筛的场景
+  const toolOptions = (auditTools.data ?? []).map((name) => ({ value: name, label: name }))
 
   const reduceMotion = useReducedMotion()
   /**
@@ -213,7 +206,7 @@ export function ActivityPage() {
               onChange={setTool}
               placeholder="全部工具"
               searchPlaceholder="搜索工具…"
-              options={seenTools.map((name) => ({ value: name, label: name }))}
+              options={toolOptions}
             />
             <label htmlFor="audit-filter-token" className="sr-only">
               按调用令牌筛选

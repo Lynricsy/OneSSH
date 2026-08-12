@@ -10,7 +10,7 @@ import {
   WarningCircle,
 } from '@phosphor-icons/react'
 import { toast } from 'sonner'
-import { downloadUrl } from '@/api/client'
+import { downloadUrl, fetchDownload } from '@/api/client'
 import { useHosts, useSftpList, useUpload } from '@/api/queries'
 import type { FileEntry } from '@/api/types'
 import { Button } from '@/components/ui/button'
@@ -29,6 +29,18 @@ import { formatBytes, formatTime } from '@/lib/format'
 /** 固定 id：sonner 复用同一条 toast，SFTP 连续失败时不会堆叠刷屏 */
 const SFTP_ERROR_TOAST = 'sftp-error'
 
+/** blob → 触发一次浏览器下载；object URL 延一拍再回收，点击后浏览器还要异步取用它 */
+function saveBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = name
+  document.body.append(anchor)
+  anchor.click()
+  anchor.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
 export function FilesPage() {
   const [host, setHost] = useState<number>()
   const [path, setPath] = useState('~')
@@ -38,6 +50,7 @@ export function FilesPage() {
   const [preview, setPreview] = useState<string>()
   // 选中项按文件名记录，只对当前目录有意义——换主机/换目录即失效
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [downloading, setDownloading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const crumbsRef = useRef<HTMLElement>(null)
 
@@ -80,25 +93,38 @@ export function FilesPage() {
     }
   }
 
-  // 批量下载走隐藏的 <a download>：window.open 连发会被浏览器弹窗拦截
-  const downloadSelected = () => {
-    if (host == null) return
+  /**
+   * 逐个 fetch 再用 object URL 触发下载。直链 <a download> 拿不到状态码：会话过期时
+   * 浏览器会把 401 的错误页当成文件存下来，用户还以为下载成功了。串行发起也顺带避开了
+   * 浏览器对同一拍内多个下载的合并丢弃，不用再拿 setTimeout 错开。
+   */
+  const downloadSelected = async () => {
+    if (host == null || downloading) return
     const base = path.replace(/\/$/, '') + '/'
-    let index = 0
-    for (const name of selected) {
-      const anchor = document.createElement('a')
-      anchor.href = downloadUrl(host, base + name)
-      anchor.download = name
-      document.body.append(anchor)
-      // 错开触发，避免浏览器把同一拍里的连续下载合并丢弃
-      window.setTimeout(() => {
-        anchor.click()
-        anchor.remove()
-      }, index * 150)
-      index++
+    const names = [...selected]
+    const failed: string[] = []
+    let firstError: string | undefined
+
+    setDownloading(true)
+    try {
+      for (const name of names) {
+        try {
+          saveBlob(await fetchDownload(host, base + name), name)
+        } catch (error) {
+          failed.push(name)
+          firstError ??= (error as Error).message
+        }
+      }
+    } finally {
+      setDownloading(false)
     }
-    toast.success(`已开始下载 ${selected.size} 个文件`)
-    setSelected(new Set())
+
+    const ok = names.length - failed.length
+    if (failed.length === 0) toast.success(`已下载 ${ok} 个文件`)
+    else if (ok === 0) toast.error(`下载失败：${firstError ?? '未知错误'}`)
+    else toast.warning(`已下载 ${ok} 个文件，${failed.length} 个失败`)
+    // 失败的留在选中态，方便对照着重试
+    setSelected(new Set(failed))
   }
 
   const segments = path === '/' ? ['/'] : path.split('/').filter(Boolean)
@@ -322,9 +348,14 @@ export function FilesPage() {
       </div>
 
       <SelectionBar count={selected.size} onClear={() => setSelected(new Set())}>
-        <Button variant="primary" size="sm" onClick={downloadSelected}>
-          <DownloadSimple size={14} />
-          下载
+        <Button
+          variant="primary"
+          size="sm"
+          loading={downloading}
+          onClick={() => void downloadSelected()}
+        >
+          {!downloading && <DownloadSimple size={14} />}
+          {downloading ? '下载中…' : '下载'}
         </Button>
       </SelectionBar>
 

@@ -22,6 +22,7 @@ export const queryKeys = {
   tokens: ['tokens'] as const,
   jobs: ['jobs'] as const,
   audit: (filter: AuditFilter) => ['audit', filter] as const,
+  auditTools: ['audit', 'tools'] as const,
   metrics: (hostId: number, hours: number) => ['metrics', hostId, hours] as const,
   sftp: (hostId: number, path: string) => ['sftp', hostId, path] as const,
   /** 记忆列表与统计共用 ['memories'] 前缀：删除后一次前缀失效即可覆盖所有筛选与翻页缓存 */
@@ -52,8 +53,9 @@ function useInvalidatingMutation<TVars, TData>(
 }
 
 /**
- * 批量操作收敛：后端没有批量端点，循环单条接口并全部落定（allSettled，永不 reject），
- * 按成败汇总提示后失效缓存。resolve 值是失败的 id 列表，调用方可据此保留选中项以便重试。
+ * 批量操作收敛：后端没有批量端点，循环单条接口。逐条顺序执行而不是 allSettled 并发——
+ * 这些都是破坏性写操作，一次打满并发会给网关和远端造成尖峰，出错时也说不清做到了哪一步；
+ * 顺序执行下失败列表与实际执行顺序一致。resolve 值是失败的 id 列表，调用方可据此保留选中项以便重试。
  */
 function useBatchMutation<TId>(
   fn: (id: TId) => Promise<unknown>,
@@ -63,11 +65,17 @@ function useBatchMutation<TId>(
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (ids: TId[]) => {
-      const results = await Promise.allSettled(ids.map((id) => fn(id)))
-      return {
-        failedIds: ids.filter((_, index) => results[index].status === 'rejected'),
-        firstError: results.find((r): r is PromiseRejectedResult => r.status === 'rejected')?.reason,
+      const failedIds: TId[] = []
+      let firstError: unknown
+      for (const id of ids) {
+        try {
+          await fn(id)
+        } catch (error) {
+          failedIds.push(id)
+          firstError ??= error
+        }
       }
+      return { failedIds, firstError }
     },
     onSuccess: ({ failedIds, firstError }, ids) => {
       const ok = ids.length - failedIds.length
@@ -98,22 +106,34 @@ export const useJobs = () =>
     refetchInterval: 4000,
   })
 
-/** 审计筛选：缺省即不过滤；tool/token/host 支持多值（OR），ok 单值；多值以逗号拼接传输 */
+/** 审计筛选：缺省即不过滤；tool/token/host 支持多值（OR），ok 单值 */
 export type AuditFilter = { tool?: string[]; token?: number[]; host?: string[]; ok?: boolean }
 
 export const useAudit = (filter: AuditFilter = {}) =>
   useQuery({
     queryKey: queryKeys.audit(filter),
     queryFn: () => {
+      // 重复参数而不是逗号拼接：主机名允许含逗号，拼起来后端拆不回来
       const params = new URLSearchParams({ limit: '100' })
-      if (filter.tool?.length) params.set('tool', filter.tool.join(','))
-      if (filter.token?.length) params.set('token', filter.token.join(','))
-      if (filter.host?.length) params.set('host', filter.host.join(','))
+      for (const tool of filter.tool ?? []) params.append('tool', tool)
+      for (const token of filter.token ?? []) params.append('token', String(token))
+      for (const host of filter.host ?? []) params.append('host', host)
       if (filter.ok != null) params.set('ok', String(filter.ok))
       return api<Audit[]>(`/audit?${params}`)
     },
     // 切换筛选时旧数据留在原位渐隐，避免每改一个条件表格就塌成骨架屏
     placeholderData: keepPreviousData,
+  })
+
+/**
+ * 工具名全集：审计列表只回最近 100 条，从中累积出的选项会漏掉更早出现过的工具，
+ * 于是有了独立端点。工具集合是部署期固定的，缓存久一点避免每次进页面都拉。
+ */
+export const useAuditTools = () =>
+  useQuery({
+    queryKey: queryKeys.auditTools,
+    queryFn: () => api<string[]>('/audit/tools'),
+    staleTime: 5 * 60_000,
   })
 
 export const useMetrics = (hostId: number | undefined, hours: number) =>
