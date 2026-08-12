@@ -124,7 +124,7 @@ export function FilesPage() {
     if (failed.length === 0) toast.success(`已开始下载 ${ok} 个文件`)
     else if (ok === 0) toast.error(`下载失败：${firstError ?? '未知错误'}`)
     else toast.warning(`已开始下载 ${ok} 个文件，${failed.length} 个失败`)
-    // 只有用户仍停留在启动下载的目录时才回写失败项；导航后的选择归新目录所有。
+    // 导航或手动清除会让本次选择作用域失效，避免下载完成后把失败项重新选中。
     if (selectionScope.current === scope) setSelected(new Set(failed))
   }
 
@@ -348,7 +348,13 @@ export function FilesPage() {
         )}
       </div>
 
-      <SelectionBar count={selected.size} onClear={() => setSelected(new Set())}>
+      <SelectionBar
+        count={selected.size}
+        onClear={() => {
+          selectionScope.current++
+          setSelected(new Set())
+        }}
+      >
         <Button
           variant="primary"
           size="sm"
