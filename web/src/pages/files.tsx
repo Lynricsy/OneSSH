@@ -53,6 +53,7 @@ export function FilesPage() {
   const [downloading, setDownloading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const crumbsRef = useRef<HTMLElement>(null)
+  const selectionScope = useRef(0)
 
   const hosts = useHosts()
   const query = useSftpList(host, path)
@@ -60,6 +61,8 @@ export function FilesPage() {
   const errorMessage = query.error instanceof Error ? query.error.message : undefined
 
   useEffect(() => {
+    // 下载可能跨越主机/目录切换；递增作用域可阻止旧请求把失败项写回新目录。
+    selectionScope.current++
     setSelected(new Set())
   }, [host, path])
 
@@ -102,6 +105,7 @@ export function FilesPage() {
     if (host == null || downloading) return
     const base = path.replace(/\/$/, '') + '/'
     const names = [...selected]
+    const scope = selectionScope.current
     const failed: string[] = []
     let firstError: string | undefined
 
@@ -123,8 +127,8 @@ export function FilesPage() {
     if (failed.length === 0) toast.success(`已下载 ${ok} 个文件`)
     else if (ok === 0) toast.error(`下载失败：${firstError ?? '未知错误'}`)
     else toast.warning(`已下载 ${ok} 个文件，${failed.length} 个失败`)
-    // 失败的留在选中态，方便对照着重试
-    setSelected(new Set(failed))
+    // 只有用户仍停留在启动下载的目录时才回写失败项；导航后的选择归新目录所有。
+    if (selectionScope.current === scope) setSelected(new Set(failed))
   }
 
   const segments = path === '/' ? ['/'] : path.split('/').filter(Boolean)
