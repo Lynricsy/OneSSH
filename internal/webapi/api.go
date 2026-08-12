@@ -62,6 +62,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /jobs", a.jobsList)
 	mux.HandleFunc("POST /jobs/{id}/kill", a.jobKill)
 	mux.HandleFunc("GET /audit", a.audit)
+	mux.HandleFunc("GET /audit/tools", a.auditTools)
 	mux.HandleFunc("GET /memories", a.memories)
 	mux.HandleFunc("GET /memories/stats", a.memoryStats)
 	mux.HandleFunc("DELETE /memories/{id}", a.memory)
@@ -354,55 +355,71 @@ func (a *API) jobKill(w http.ResponseWriter, r *http.Request) {
 	}
 	jsonOut(w, 200, map[string]bool{"ok": true})
 }
+func auditFilterValues(name string, raw []string) ([]string, error) {
+	values := make([]string, 0, len(raw))
+	for _, value := range raw {
+		if value = strings.TrimSpace(value); value != "" {
+			values = append(values, value)
+		}
+	}
+	if len(values) > store.MaxAuditFilterValues {
+		return nil, fmt.Errorf("审计%s筛选最多 %d 项", name, store.MaxAuditFilterValues)
+	}
+	return values, nil
+}
+
 func (a *API) audit(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	var tids []int64
-	// tool/host/token 都接受逗号分隔的多值（多选筛选），空段忽略
-	if q.Get("token") != "" {
-		for _, part := range strings.Split(q.Get("token"), ",") {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			x, err := strconv.ParseInt(part, 10, 64)
-			if err != nil {
-				apiError(w, 400, err)
-				return
-			}
-			tids = append(tids, x)
+	tokenValues, err := auditFilterValues("令牌", q["token"])
+	if err != nil {
+		apiError(w, http.StatusBadRequest, err)
+		return
+	}
+	tids := make([]int64, 0, len(tokenValues))
+	for _, value := range tokenValues {
+		id, parseErr := strconv.ParseInt(value, 10, 64)
+		if parseErr != nil {
+			apiError(w, http.StatusBadRequest, parseErr)
+			return
 		}
+		tids = append(tids, id)
+	}
+	hosts, err := auditFilterValues("主机", q["host"])
+	if err != nil {
+		apiError(w, http.StatusBadRequest, err)
+		return
+	}
+	tools, err := auditFilterValues("工具", q["tool"])
+	if err != nil {
+		apiError(w, http.StatusBadRequest, err)
+		return
 	}
 	before, _ := strconv.ParseInt(q.Get("before"), 10, 64)
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	var ok *bool
 	if q.Get("ok") != "" {
-		b, err := strconv.ParseBool(q.Get("ok"))
-		if err != nil {
-			apiError(w, 400, err)
+		value, parseErr := strconv.ParseBool(q.Get("ok"))
+		if parseErr != nil {
+			apiError(w, http.StatusBadRequest, parseErr)
 			return
 		}
-		ok = &b
+		ok = &value
 	}
-	list, err := a.Store.ListAudit(r.Context(), tids, splitCSV(q.Get("host")), splitCSV(q.Get("tool")), ok, before, limit)
+	list, err := a.Store.ListAudit(r.Context(), tids, hosts, tools, ok, before, limit)
 	if err != nil {
-		apiError(w, 500, err)
+		apiError(w, http.StatusInternalServerError, err)
 		return
 	}
-	jsonOut(w, 200, list)
+	jsonOut(w, http.StatusOK, list)
 }
 
-// splitCSV 把逗号分隔的查询参数拆成多值列表，空段忽略；空串返回 nil（不过滤）
-func splitCSV(raw string) []string {
-	if raw == "" {
-		return nil
+func (a *API) auditTools(w http.ResponseWriter, r *http.Request) {
+	tools, err := a.Store.ListAuditTools(r.Context())
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, err)
+		return
 	}
-	var out []string
-	for _, part := range strings.Split(raw, ",") {
-		if part = strings.TrimSpace(part); part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
+	jsonOut(w, http.StatusOK, tools)
 }
 func (a *API) metrics(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r, "hostID")

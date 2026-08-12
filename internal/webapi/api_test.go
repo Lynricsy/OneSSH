@@ -2,10 +2,12 @@ package webapi
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -87,6 +89,57 @@ func TestAdminKeyHostTokenLifecycle(t *testing.T) {
 	}
 	if !permissions["manager"] || permissions["ordinary"] {
 		t.Fatalf("令牌列表权限异常: %#v", permissions)
+	}
+}
+
+func TestAuditFiltersUseRepeatedQueryValues(t *testing.T) {
+	ctx := t.Context()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	for _, row := range []store.Audit{
+		{Ts: 1, Tool: "exec", Host: sql.NullString{String: "edge,west", Valid: true}, ParamsJSON: "{}", OK: true},
+		{Ts: 2, Tool: "file_read", Host: sql.NullString{String: "edge,west", Valid: true}, ParamsJSON: "{}", OK: true},
+		{Ts: 3, Tool: "job_list", Host: sql.NullString{String: "other", Valid: true}, ParamsJSON: "{}", OK: true},
+	} {
+		if err := st.AddAudit(ctx, row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	handler := (&API{Store: st}).Handler()
+	query := url.Values{
+		"host": {"edge,west"},
+		"tool": {"exec", "file_read"},
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/audit?"+query.Encode(), nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("审计筛选状态码 = %d: %s", response.Code, response.Body.String())
+	}
+	var audit []store.Audit
+	if err := json.Unmarshal(response.Body.Bytes(), &audit); err != nil {
+		t.Fatal(err)
+	}
+	if len(audit) != 2 || audit[0].Tool != "file_read" || audit[1].Tool != "exec" {
+		t.Fatalf("审计筛选结果 = %#v", audit)
+	}
+
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/audit/tools", nil))
+	if response.Code != http.StatusOK || response.Body.String() != "[\"exec\",\"file_read\",\"job_list\"]\n" {
+		t.Fatalf("审计工具列表 = %d %s", response.Code, response.Body.String())
+	}
+
+	tooMany := make([]string, store.MaxAuditFilterValues+1)
+	for i := range tooMany {
+		tooMany[i] = "host"
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/audit?"+url.Values{"host": tooMany}.Encode(), nil))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("超大审计筛选状态码 = %d: %s", response.Code, response.Body.String())
 	}
 }
 

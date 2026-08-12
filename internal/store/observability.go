@@ -3,15 +3,36 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"time"
 )
+
+// MaxAuditFilterValues 将单个筛选维度限制在 SQLite 常见变量上限以内。
+// token 条件每项占 3 个变量；三个维度各 100 项时总计不超过 500。
+const MaxAuditFilterValues = 100
 
 func (s *Store) AddAudit(ctx context.Context, a Audit) error {
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO audit(ts,token_id,token_name,tool,host,params_json,ok,exit_code,duration_ms,bytes_out) VALUES(?,?,?,?,?,?,?,?,?,?)`, a.Ts, nullInt(a.TokenID), nullString(a.TokenName), a.Tool, nullString(a.Host), a.ParamsJSON, boolInt(a.OK), nullInt(a.ExitCode), a.DurationMS, a.BytesOut)
 	return err
 }
+
+func validateAuditFilterCount(name string, count int) error {
+	if count > MaxAuditFilterValues {
+		return fmt.Errorf("审计%s筛选最多 %d 项", name, MaxAuditFilterValues)
+	}
+	return nil
+}
 func (s *Store) ListAudit(ctx context.Context, tokenIDs []int64, hosts, tools []string, ok *bool, before int64, limit int) ([]Audit, error) {
+	if err := validateAuditFilterCount("令牌", len(tokenIDs)); err != nil {
+		return nil, err
+	}
+	if err := validateAuditFilterCount("主机", len(hosts)); err != nil {
+		return nil, err
+	}
+	if err := validateAuditFilterCount("工具", len(tools)); err != nil {
+		return nil, err
+	}
 	q := `SELECT id,ts,token_id,token_name,tool,host,params_json,ok,exit_code,duration_ms,bytes_out FROM audit WHERE 1=1`
 	args := []any{}
 	if len(tokenIDs) > 0 {
@@ -72,6 +93,23 @@ func (s *Store) ListAudit(ctx context.Context, tokenIDs []int64, hosts, tools []
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) ListAuditTools(ctx context.Context) ([]string, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT DISTINCT tool FROM audit WHERE tool<>'' ORDER BY tool`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	tools := make([]string, 0)
+	for rows.Next() {
+		var tool string
+		if err := rows.Scan(&tool); err != nil {
+			return nil, err
+		}
+		tools = append(tools, tool)
+	}
+	return tools, rows.Err()
 }
 func (s *Store) AddMetric(ctx context.Context, m Metric) error {
 	_, err := s.DB.ExecContext(ctx, `INSERT OR REPLACE INTO metrics(host_id,ts,cpu_pct,mem_used_kb,mem_total_kb,load1,disks_json) VALUES(?,?,?,?,?,?,?)`, m.HostID, m.Ts, nullFloat(m.CPUPct), nullInt(m.MemUsedKB), nullInt(m.MemTotalKB), nullFloat(m.Load1), m.DisksJSON)

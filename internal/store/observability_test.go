@@ -105,7 +105,7 @@ func TestListAuditFiltersByMultipleValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(audit) != 2 {
+	if len(audit) != 2 || audit[0].Tool != "file_read" || audit[1].Tool != "exec" {
 		t.Fatalf("多工具过滤结果 = %#v", audit)
 	}
 
@@ -116,5 +116,21 @@ func TestListAuditFiltersByMultipleValues(t *testing.T) {
 	}
 	if len(audit) != 1 || audit[0].Tool != "job_list" {
 		t.Fatalf("主机+工具组合过滤结果 = %#v", audit)
+	}
+
+	tools, err := st.ListAuditTools(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools) != 3 || tools[0] != "exec" || tools[1] != "file_read" || tools[2] != "job_list" {
+		t.Fatalf("审计工具列表 = %#v", tools)
+	}
+}
+
+func TestListAuditRejectsOversizedFilters(t *testing.T) {
+	st := &Store{}
+	hosts := make([]string, MaxAuditFilterValues+1)
+	if _, err := st.ListAudit(context.Background(), nil, hosts, nil, nil, 0, 10); err == nil {
+		t.Fatal("超出上限的审计筛选未被拒绝")
 	}
 }
