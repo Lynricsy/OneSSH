@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -37,6 +38,7 @@ func runPasswordHandshake(t *testing.T, serverConfig *ssh.ServerConfig) error {
 			serverDone <- acceptErr
 			return
 		}
+		_ = rawConn.SetDeadline(time.Now().Add(5 * time.Second))
 		defer rawConn.Close()
 		conn, _, _, serverErr := ssh.NewServerConn(rawConn, serverConfig)
 		if conn != nil {
@@ -49,6 +51,7 @@ func runPasswordHandshake(t *testing.T, serverConfig *ssh.ServerConfig) error {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_ = clientSide.SetDeadline(time.Now().Add(5 * time.Second))
 	defer clientSide.Close()
 	auths, authCallback := passwordAuthentication(testPassword)
 	clientConfig := &ssh.ClientConfig{
@@ -62,7 +65,11 @@ func runPasswordHandshake(t *testing.T, serverConfig *ssh.ServerConfig) error {
 		_ = conn.Close()
 	}
 	_ = clientSide.Close()
-	<-serverDone
+	select {
+	case <-serverDone:
+	case <-time.After(6 * time.Second):
+		t.Fatal("等待 SSH 测试服务端结束超时")
+	}
 	return clientErr
 }
 
