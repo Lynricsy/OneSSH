@@ -75,6 +75,76 @@ func TestAuditCapturesAuthenticatedTokenIdentity(t *testing.T) {
 	}
 }
 
+func TestToolCallEventIncludesCommandSummary(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err = st.CreateToken(ctx, store.TokenCreate{Name: "agent", Hash: store.TokenHash("secret"), AllHosts: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	bus := events.New()
+	ch, unsub := bus.Subscribe()
+	defer unsub()
+	server := &Server{MCP: newProtocolServer(""), Store: st, Events: bus}
+	type cmdIn struct {
+		Host    string `json:"host"`
+		Command string `json:"command"`
+	}
+	register(server, &mcp.Tool{Name: "audit_exec"}, func(context.Context, *mcp.CallToolRequest, cmdIn) (*mcp.CallToolResult, Empty, error) {
+		return nil, Empty{}, nil
+	})
+	resolve := func(*http.Request) (string, string) {
+		return "https://onessh.example/mcp", "https://onessh.example/.well-known/oauth-protected-resource/mcp"
+	}
+	httpServer := httptest.NewServer(Handler(st, server, resolve))
+	defer httpServer.Close()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "audit-test", Version: "1"}, nil)
+	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint:   httpServer.URL,
+		HTTPClient: &http.Client{Transport: bearerTransport{token: "secret"}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	if _, err = session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "audit_exec",
+		Arguments: map[string]any{"host": "web-01", "command": "uname -a"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case event := <-ch:
+		if event.Type != "tool_call" {
+			t.Fatalf("事件类型 = %q", event.Type)
+		}
+		data, _ := event.Data.(map[string]any)
+		if data["summary"] != "uname -a" {
+			t.Fatalf("事件摘要 = %#v", event.Data)
+		}
+		if data["host"] != "web-01" || data["tool"] != "audit_exec" {
+			t.Fatalf("事件字段 = %#v", event.Data)
+		}
+	case <-ctx.Done():
+		t.Fatal("没有收到 tool_call 事件")
+	}
+
+	audit, err := st.ListAudit(ctx, nil, nil, nil, nil, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(audit) != 1 || !strings.Contains(audit[0].ParamsJSON, `"command":"uname -a"`) {
+		t.Fatalf("审计参数未记录命令: %#v", audit)
+	}
+}
+
 func TestHandlerUsesModernStatelessTransport(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {

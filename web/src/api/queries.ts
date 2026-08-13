@@ -123,6 +123,8 @@ export const useAudit = (filter: AuditFilter = {}) =>
     },
     // 切换筛选时旧数据留在原位渐隐，避免每改一个条件表格就塌成骨架屏
     placeholderData: keepPreviousData,
+    // 活动页是盯梢用的：新的工具调用几秒内要出现，不能等用户改筛选才重拉
+    refetchInterval: 4000,
   })
 
 /**

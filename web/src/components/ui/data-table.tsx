@@ -124,9 +124,22 @@ export function DataTable<T, K extends string | number = string | number>({
               <tr
                 key={rowKey(row)}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
+                onKeyDown={
+                  onRowClick
+                    ? (event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          onRowClick(row)
+                        }
+                      }
+                    : undefined
+                }
+                tabIndex={onRowClick ? 0 : undefined}
                 className={cn(
                   'transition-colors [&:last-child>td]:border-b-0',
-                  onRowClick ? 'cursor-pointer hover:bg-surface-2' : 'hover:bg-surface-2/60',
+                  onRowClick
+                    ? 'cursor-pointer hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none'
+                    : 'hover:bg-surface-2/60',
                   selection?.selected.has(rowKey(row)) && 'bg-accent/5',
                 )}
               >

@@ -1,17 +1,21 @@
-import { Broadcast, Pulse } from '@phosphor-icons/react'
+import { Broadcast, Check, Copy, MagnifyingGlass, Pulse } from '@phosphor-icons/react'
+import { toast } from 'sonner'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useAudit, useAuditTools, useHosts, useTokens, type AuditFilter } from '@/api/queries'
-import type { Audit } from '@/api/types'
+import type { Audit, StreamEvent } from '@/api/types'
 import { Badge, Dot } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { DataTable, type Column } from '@/components/ui/data-table'
+import { Dialog } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Input } from '@/components/ui/input'
 import { MultiSelect } from '@/components/ui/multi-select'
 import { PageHeader } from '@/components/ui/page-header'
 import { PageTransition } from '@/components/ui/page-transition'
 import { Select } from '@/components/ui/select'
 import { useEventStream } from '@/hooks/use-event-stream'
+import { auditSummary, formatAuditParam, parseAuditParams } from '@/lib/audit'
 import { cn } from '@/lib/cn'
 import { formatBytes } from '@/lib/format'
 
@@ -34,20 +38,29 @@ const auditColumns: Column<Audit>[] = [
   {
     key: 'Tool',
     title: '工具',
-    className: 'font-mono text-[13px]',
+    className: 'w-[7.5rem] font-mono text-[13px]',
     render: (item) => item.Tool,
+  },
+  {
+    key: 'ParamsJSON',
+    title: '调用',
+    // 这列才是「Agent 跑了什么」：命令、路径、检索式。窄屏也留着，靠 truncate + title 看全句
+    className: 'min-w-[10rem] max-w-[28rem]',
+    render: (item) => {
+      const summary = auditSummary(item)
+      return (
+        <span className="block truncate font-mono text-[12px] text-muted" title={summary || undefined}>
+          {summary || '—'}
+        </span>
+      )
+    },
   },
   {
     key: 'TokenName',
     title: '调用令牌',
-    className: 'max-w-[180px] text-muted',
+    className: 'hidden max-w-[180px] text-muted xl:table-cell',
     render: (item) => {
-      const id = item.TokenID?.Valid ? `#${item.TokenID.Int64}` : ''
-      const label = item.TokenName?.Valid
-        ? `${item.TokenName.String}${id ? ` · ${id}` : ''}`
-        : id
-          ? `已删除令牌 · ${id}`
-          : '系统'
+      const label = tokenLabel(item)
       return (
         <span className="block truncate" title={label}>
           {label}
@@ -87,10 +100,151 @@ const auditColumns: Column<Audit>[] = [
     title: '耗时',
     className: 'w-[92px] text-right tabular-nums',
     // 四位数以上的毫秒既难读又会撑宽列，统一在 1s 处进位
-    render: (item) =>
-      item.DurationMS < 1000 ? `${item.DurationMS} ms` : `${(item.DurationMS / 1000).toFixed(2)} s`,
+    render: (item) => formatDuration(item.DurationMS),
   },
 ]
+
+function tokenLabel(item: Audit): string {
+  const id = item.TokenID?.Valid ? `#${item.TokenID.Int64}` : ''
+  if (item.TokenName?.Valid) return `${item.TokenName.String}${id ? ` · ${id}` : ''}`
+  if (id) return `已删除令牌 · ${id}`
+  return '系统'
+}
+
+function formatDuration(ms: number): string {
+  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(2)} s`
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function EventPayload({ event }: { event: StreamEvent }) {
+  const data = event.data
+  if (event.type === 'tool_call' && isRecord(data)) {
+    const summary = typeof data.summary === 'string' ? data.summary : ''
+    const host = typeof data.host === 'string' ? data.host : ''
+    const duration = typeof data.duration_ms === 'number' ? formatDuration(data.duration_ms) : ''
+    const bits = [data.ok === false ? '失败' : '成功', host, duration].filter(Boolean)
+    return (
+      <div className="mt-1.5 space-y-1">
+        {summary ? (
+          <p className="font-mono text-[12px] leading-[1.6] break-words text-text">{summary}</p>
+        ) : null}
+        <p className="text-[12px] text-muted">{bits.join(' · ')}</p>
+      </div>
+    )
+  }
+  return (
+    <pre className="mt-1.5 max-h-24 overflow-auto font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap text-muted">
+      {JSON.stringify(event.data)}
+    </pre>
+  )
+}
+
+function CopyableBlock({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(true)
+      toast.success('已复制')
+      window.setTimeout(() => setCopied(false), 1600)
+    } catch {
+      toast.error('复制失败，请手动选择文本')
+    }
+  }
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <p className="text-[11px] tracking-wide text-muted uppercase">{label}</p>
+        <button
+          type="button"
+          onClick={() => void copy()}
+          aria-label={`复制${label}`}
+          className="rounded-[4px] p-0.5 text-muted transition-colors hover:bg-surface-2 hover:text-text"
+        >
+          {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
+        </button>
+      </div>
+      <pre className="rounded-[8px] bg-surface-2 px-3 py-2.5 font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap text-text">
+        {value}
+      </pre>
+    </div>
+  )
+}
+
+function AuditDetail({ item }: { item: Audit }) {
+  const params = parseAuditParams(item.ParamsJSON)
+  const command = params && typeof params.command === 'string' ? params.command.trim() : ''
+  const summary = command ? '' : auditSummary(item)
+  const entries = params
+    ? Object.entries(params).filter(([key, value]) => {
+        if (key === 'command' && command) return false
+        return value != null && value !== ''
+      })
+    : []
+
+  return (
+    <div className="space-y-4">
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[13px] sm:grid-cols-3">
+        <div>
+          <dt className="text-[11px] tracking-wide text-muted uppercase">结果</dt>
+          <dd className="mt-1">
+            {item.OK ? (
+              <span className="inline-flex items-center gap-1.5 text-muted">
+                <Dot className="text-success" />
+                成功
+              </span>
+            ) : (
+              <Badge variant="danger">失败</Badge>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[11px] tracking-wide text-muted uppercase">耗时</dt>
+          <dd className="mt-1 tabular-nums">{formatDuration(item.DurationMS)}</dd>
+        </div>
+        <div>
+          <dt className="text-[11px] tracking-wide text-muted uppercase">输出</dt>
+          <dd className="mt-1 tabular-nums text-muted">
+            {item.BytesOut ? formatBytes(item.BytesOut) : '—'}
+          </dd>
+        </div>
+        <div className="col-span-2 sm:col-span-1">
+          <dt className="text-[11px] tracking-wide text-muted uppercase">令牌</dt>
+          <dd className="mt-1 truncate" title={tokenLabel(item)}>
+            {tokenLabel(item)}
+          </dd>
+        </div>
+      </dl>
+
+      {command ? (
+        <CopyableBlock label="命令" value={command} />
+      ) : summary ? (
+        <CopyableBlock label="调用" value={summary} />
+      ) : null}
+
+      {entries.length > 0 ? (
+        <div>
+          <p className="mb-1.5 text-[11px] tracking-wide text-muted uppercase">参数</p>
+          <dl className="divide-y divide-border rounded-[8px] border border-border">
+            {entries.map(([key, value]) => (
+              <div key={key} className="grid gap-1 px-3 py-2 sm:grid-cols-[8rem_1fr] sm:gap-3">
+                <dt className="font-mono text-[12px] text-muted">{key}</dt>
+                <dd className="font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap">
+                  {formatAuditParam(value)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : !command && !summary ? (
+        <p className="text-[13px] text-muted">此次调用没有记录额外参数。</p>
+      ) : null}
+    </div>
+  )
+}
 
 export function ActivityPage() {
   const { events, status } = useEventStream()
@@ -98,6 +252,8 @@ export function ActivityPage() {
   const [token, setToken] = useState<number[]>([])
   const [host, setHost] = useState<string[]>([])
   const [result, setResult] = useState(ALL)
+  const [query, setQuery] = useState('')
+  const [selected, setSelected] = useState<Audit | null>(null)
   const filter: AuditFilter = {
     tool,
     token,
@@ -108,7 +264,17 @@ export function ActivityPage() {
   const auditTools = useAuditTools()
   const hosts = useHosts()
   const tokens = useTokens()
-  const filtered = tool.length > 0 || token.length > 0 || host.length > 0 || result !== ALL
+  const needle = query.trim().toLowerCase()
+  const rows = useMemo(() => {
+    const list = audit.data ?? []
+    if (!needle) return list
+    // 只在当前页 100 条里搜命令/参数：审计接口没有全文检索，避免把「没搜到」说成「从没发生」
+    return list.filter((row) => {
+      const hay = `${row.Tool} ${auditSummary(row)} ${row.ParamsJSON} ${row.Host?.Valid ? row.Host.String : ''}`
+      return hay.toLowerCase().includes(needle)
+    })
+  }, [audit.data, needle])
+  const filtered = tool.length > 0 || token.length > 0 || host.length > 0 || result !== ALL || needle !== ''
 
   // 全量列表请求加载或失败时仍从当前审计结果回退；已选项也始终保留在选项中。
   const toolNames = new Set(auditTools.data ?? [])
@@ -126,7 +292,7 @@ export function ActivityPage() {
 
   return (
     <PageTransition>
-      <PageHeader title="活动流" subtitle="实时工具调用、输出与结构化审计" />
+      <PageHeader title="活动流" subtitle="每次工具调用的命令、参数与结果" />
 
       {/* 两栏在 xl 起固定为一屏高：事件与审计都是「持续刷新的流」，各自内部滚动比把页面拉成几千像素更好用 */}
       <div className="grid gap-4 xl:h-[calc(100dvh-11.5rem)] xl:min-h-[520px] xl:grid-cols-[2fr_3fr]">
@@ -176,12 +342,10 @@ export function ActivityPage() {
                       </time>
                     </div>
                     {/*
-                      载荷压成单行：这是「流」不是「详情页」，缩进 JSON 会让每条事件占掉
-                      六七行，一屏只剩四五条；限高兜住 exec_output 那种整块 stdout。
+                      tool_call 把命令/路径摊开；其余事件（尤其 exec_output）仍压成一行 JSON，
+                      避免整块 stdout 把一屏挤成四五条。
                     */}
-                    <pre className="mt-1.5 max-h-24 overflow-auto font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap text-muted">
-                      {JSON.stringify(event.data)}
-                    </pre>
+                    <EventPayload event={event} />
                   </motion.article>
                 ))}
               </AnimatePresence>
@@ -194,12 +358,25 @@ export function ActivityPage() {
             <CardTitle>审计记录</CardTitle>
             {audit.data && audit.data.length > 0 && (
               <span className="text-[12px] text-muted tabular-nums">
-                {filtered ? `筛选出 ${audit.data.length} 条` : `最近 ${audit.data.length} 条`}
+                {filtered ? `筛选出 ${rows.length} 条` : `最近 ${rows.length} 条`}
               </span>
             )}
           </CardHeader>
           {/* 工具/令牌/主机支持多选 + 搜索；结果仅两个值，保留单选下拉；改动即查，不设「查询」按钮 */}
           <div className="grid grid-cols-2 gap-2 border-b border-border p-3 lg:grid-cols-4">
+            <div className="col-span-2 lg:col-span-4">
+              <label htmlFor="audit-filter-query" className="sr-only">
+                搜索命令或参数
+              </label>
+              <Input
+                id="audit-filter-query"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="搜索命令、路径或参数…"
+                spellCheck={false}
+                prefix={<MagnifyingGlass size={14} />}
+              />
+            </div>
             <label htmlFor="audit-filter-tool" className="sr-only">
               按工具筛选
             </label>
@@ -260,23 +437,28 @@ export function ActivityPage() {
                 audit.isPlaceholderData && 'opacity-60',
               )}
               columns={auditColumns}
-              rows={audit.data}
+              rows={rows}
               rowKey={(item) => item.ID}
               loading={audit.isLoading}
+              onRowClick={setSelected}
               empty={
                 filtered ? (
                   <EmptyState
                     className="[&_p]:text-balance"
                     icon={<Pulse size={22} />}
                     title="没有匹配的审计记录"
-                    description="当前筛选条件下暂无记录，调整条件再试。"
+                    description={
+                      needle
+                        ? '当前已加载的记录里没有匹配的命令或参数，调整关键词再试。'
+                        : '当前筛选条件下暂无记录，调整条件再试。'
+                    }
                   />
                 ) : (
                   <EmptyState
                     className="[&_p]:text-balance"
                     icon={<Pulse size={22} />}
                     title="暂无审计记录"
-                    description="Agent 通过 MCP 网关调用工具后，每一次调用都会记录在这里。"
+                    description="Agent 通过 MCP 网关调用工具后，每一次调用都会记录在这里。点开一行可看完整命令和参数。"
                   />
                 )
               }
@@ -284,6 +466,22 @@ export function ActivityPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog
+        open={selected != null}
+        onOpenChange={(open) => {
+          if (!open) setSelected(null)
+        }}
+        title={selected?.Tool ?? '调用详情'}
+        description={
+          selected
+            ? `${clock(selected.Ts)}${selected.Host?.Valid ? ` · ${selected.Host.String}` : ''}`
+            : undefined
+        }
+        size="lg"
+      >
+        {selected ? <AuditDetail item={selected} /> : null}
+      </Dialog>
     </PageTransition>
   )
 }

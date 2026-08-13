@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -126,7 +127,11 @@ func register[In, Out any](s *Server, tool *mcp.Tool, handler mcp.ToolHandlerFor
 			a.BytesOut = int64(len(raw))
 		}
 		_ = s.Store.AddAudit(context.Background(), a)
-		s.Events.Publish("tool_call", map[string]any{"tool": tool.Name, "host": host, "ok": ok, "duration_ms": a.DurationMS})
+		event := map[string]any{"tool": tool.Name, "host": host, "ok": ok, "duration_ms": a.DurationMS}
+		if summary := callSummary(in); summary != "" {
+			event["summary"] = summary
+		}
+		s.Events.Publish("tool_call", event)
 		return
 	})
 }
@@ -172,4 +177,64 @@ func hostOf(v any) string {
 		}
 	}
 	return ""
+}
+
+// callSummary 从工具入参抽出活动流上一眼能看懂的摘要。优先 command，其次 path / 搜索式 / 传输路径。
+// 实时事件只带这段短文本，完整参数仍在审计的 params_json 里。
+func callSummary(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	var raw any
+	if err = json.Unmarshal(b, &raw); err != nil {
+		return ""
+	}
+	return truncateSummary(summarizeParams(raw))
+}
+
+func summarizeParams(v any) string {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return ""
+	}
+	if command := stringField(m, "command"); command != "" {
+		return command
+	}
+	path := stringField(m, "path")
+	pattern := stringField(m, "pattern")
+	if path != "" && pattern != "" {
+		return pattern + "  " + path
+	}
+	if path != "" {
+		return path
+	}
+	src := stringField(m, "src_path")
+	dst := stringField(m, "dst_path")
+	if src != "" && dst != "" {
+		return src + " → " + dst
+	}
+	if src != "" {
+		return src
+	}
+	for _, key := range []string{"query", "pattern", "content", "job_id", "artifact_id"} {
+		if value := stringField(m, key); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func stringField(m map[string]any, key string) string {
+	s, _ := m[key].(string)
+	return strings.TrimSpace(s)
+}
+
+func truncateSummary(s string) string {
+	const max = 240
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "…"
 }
