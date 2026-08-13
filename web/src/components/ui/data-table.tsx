@@ -25,6 +25,7 @@ export function DataTable<T, K extends string | number = string | number>({
   empty,
   onRowClick,
   stickyHeader,
+  fixedLayout,
   className,
   selection,
 }: {
@@ -36,6 +37,8 @@ export function DataTable<T, K extends string | number = string | number>({
   onRowClick?: (row: T) => void
   /** 表头吸顶：卡片内长表格滚动时列头不丢 */
   stickyHeader?: boolean
+  /** 固定布局：列宽只由列定义的宽度决定，内容超长截断而不是挤压其他列（适合持续刷新的表格，列宽不随数据跳动） */
+  fixedLayout?: boolean
   className?: string
   selection?: TableSelection<T, K>
 }) {
@@ -69,7 +72,13 @@ export function DataTable<T, K extends string | number = string | number>({
     <div className={cn('overflow-x-auto', className)}>
       {/* 一律 border-separate：border-collapse 下 Chrome 的 sticky th 会失效，
           分隔线因此挂在单元格而不是 tr 上——两种模式渲染结果一致，不必分叉 */}
-      <table className={cn('w-full border-separate border-spacing-0 text-sm', showEmpty && 'hidden')}>
+      <table
+        className={cn(
+          'w-full border-separate border-spacing-0 text-sm',
+          fixedLayout && 'table-fixed',
+          showEmpty && 'hidden',
+        )}
+      >
         <thead>
           <tr>
             {selection && (

@@ -39,13 +39,17 @@ const auditColumns: Column<Audit>[] = [
     key: 'Tool',
     title: '工具',
     className: 'w-[7.5rem] font-mono text-[13px]',
-    render: (item) => item.Tool,
+    render: (item) => (
+      <span className="block truncate" title={item.Tool}>
+        {item.Tool}
+      </span>
+    ),
   },
   {
     key: 'ParamsJSON',
     title: '调用',
-    // 这列才是「Agent 跑了什么」：命令、路径、检索式。窄屏也留着，靠 truncate + title 看全句
-    className: 'min-w-[10rem] max-w-[28rem]',
+    // 这列才是「Agent 跑了什么」：命令、路径、检索式。固定布局下它不设宽度、吃掉剩余空间，
+    // 窄屏也留着，靠 truncate + title 看全句
     render: (item) => {
       const summary = auditSummary(item)
       return (
@@ -58,7 +62,7 @@ const auditColumns: Column<Audit>[] = [
   {
     key: 'TokenName',
     title: '调用令牌',
-    className: 'hidden max-w-[180px] text-muted xl:table-cell',
+    className: 'hidden w-[10rem] text-muted xl:table-cell',
     render: (item) => {
       const label = tokenLabel(item)
       return (
@@ -71,8 +75,15 @@ const auditColumns: Column<Audit>[] = [
   {
     key: 'Host',
     title: '主机',
-    className: 'hidden lg:table-cell text-muted',
-    render: (item) => (item.Host?.Valid ? item.Host.String : '—'),
+    className: 'hidden w-[9rem] lg:table-cell text-muted',
+    render: (item) => {
+      const host = item.Host?.Valid ? item.Host.String : '—'
+      return (
+        <span className="block truncate" title={host}>
+          {host}
+        </span>
+      )
+    },
   },
   {
     key: 'OK',
@@ -430,6 +441,9 @@ export function ActivityPage() {
           <CardContent className="flex min-h-0 flex-1 flex-col p-0">
             <DataTable
               stickyHeader
+              // 固定布局：审计数据持续刷新，auto 布局下列宽随内容跳动、长命令会把时间/结果列挤变形；
+              // 固定后列宽稳定，超长内容只在各自单元格内截断
+              fixedLayout
               // 表格自身即滚动容器（overflow-x-auto 会让 y 轴一并变成 auto）；窄屏收紧单元格内边距，
               // 让「时间」列不用被砍掉也能塞下四列
               className={cn(
