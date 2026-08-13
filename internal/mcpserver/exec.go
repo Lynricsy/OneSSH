@@ -19,7 +19,16 @@ type ExecInput struct {
 	MaxLines int    `json:"max_lines,omitempty" jsonschema:"output 返回的最大行数，默认 200；超出部分只在 artifact 中"`
 	Tail     bool   `json:"tail,omitempty" jsonschema:"true 返回末尾若干行，默认返回开头若干行"`
 }
-type ExecOutput struct{ execx.Result }
+type ExecOutput struct {
+	RunID string `json:"run_id"`
+	execx.Result
+}
+
+func (out ExecOutput) auditOutcome() (bool, *int64) {
+	code := int64(out.ExitCode)
+	return !out.Timeout && out.ExitCode == 0, &code
+}
+
 type SessionEnvInput struct {
 	Host    string            `json:"host" jsonschema:"SSH 主机名，取自 hosts_list"`
 	Session string            `json:"session" jsonschema:"持久会话标签，留空表示 default"`
@@ -67,9 +76,16 @@ func (s *Server) registerExec(runner *execx.Runner) {
 		if err != nil {
 			return nil, ExecOutput{}, err
 		}
+		run, err := s.startCommandRun(ctx, "exec", h, in.Command, state.Cwd, label)
+		if err != nil {
+			return nil, ExecOutput{}, err
+		}
 		client, err := s.Pool.Get(ctx, in.Host)
 		if err != nil {
-			return errorResult(err.Error()), ExecOutput{}, nil
+			if finishErr := s.finishCommandRun(ctx, run, execx.Result{}, err); finishErr != nil {
+				return nil, ExecOutput{RunID: run.ID}, finishErr
+			}
+			return errorResult(err.Error()), ExecOutput{RunID: run.ID}, nil
 		}
 		timeout := in.TimeoutS
 		if timeout <= 0 {
@@ -82,17 +98,23 @@ func (s *Server) registerExec(runner *execx.Runner) {
 		if max <= 0 {
 			max = 200
 		}
-		res, err := runner.Run(ctx, client, in.Command, state.Cwd, state.Env, execx.Options{Timeout: time.Duration(timeout) * time.Second, MaxLines: max, Tail: in.Tail, OnOutput: func(stream string, chunk []byte) {
-			s.Events.Publish("exec_output", map[string]any{"host": in.Host, "stream": stream, "data": string(chunk)})
-		}})
+		publisher := newCommandOutputPublisher(s, run)
+		res, err := runner.Run(ctx, client, in.Command, state.Cwd, state.Env, execx.Options{
+			Timeout: time.Duration(timeout) * time.Second, MaxLines: max, Tail: in.Tail,
+			CaptureID: run.ID, OnOutput: publisher.Publish,
+		})
+		publisher.Finish()
+		if finishErr := s.finishCommandRun(ctx, run, res, err); finishErr != nil {
+			return nil, ExecOutput{RunID: run.ID, Result: res}, finishErr
+		}
 		if err != nil {
-			return errorResult(err.Error()), ExecOutput{}, nil
+			return errorResult(err.Error()), ExecOutput{RunID: run.ID, Result: res}, nil
 		}
 		if res.Cwd != "" && !res.Timeout {
 			state.Cwd = res.Cwd
 			_ = s.Store.SaveSession(context.Background(), state)
 		}
-		return nil, ExecOutput{Result: res}, nil
+		return nil, ExecOutput{RunID: run.ID, Result: res}, nil
 	})
 	register[SessionEnvInput, SessionEnvOutput](s, &mcp.Tool{
 		Name:  "session_env",

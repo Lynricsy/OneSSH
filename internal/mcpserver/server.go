@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"reflect"
 	"strings"
 	"time"
@@ -56,6 +57,9 @@ const serverInstructions = `OneSSH 是受主机权限控制的 SSH 运维网关�
 // 这里不再做第二次归一，避免同一份规则出现两套实现。
 func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanager.Manager, memory *memoryx.Engine, dataDir, publicURL string, pollInterval time.Duration, searchHelper bool) *Server {
 	s := &Server{Store: st, Pool: pool, Events: bus, HostManager: hosts, Memory: memory, Exec: execx.New(dataDir)}
+	if err := st.RecoverInterruptedCommandRuns(context.Background(), time.Now().UnixMilli()); err != nil {
+		log.Printf("恢复中断的命令执行记录失败: %v", err)
+	}
 	s.Jobs = jobs.New(st, pool, s.Exec, bus)
 	s.Files = files.New(pool, s.Exec)
 	s.Monitor = monitor.New(st, pool, s.Exec, pollInterval)
@@ -112,6 +116,10 @@ func register[In, Out any](s *Server, tool *mcp.Tool, handler mcp.ToolHandlerFor
 		started := time.Now()
 		result, out, err = handler(ctx, req, in)
 		ok := err == nil && (result == nil || !result.IsError)
+		var exitCode *int64
+		if outcome, found := any(out).(auditOutcome); found && ok {
+			ok, exitCode = outcome.auditOutcome()
+		}
 		params := redactedJSON(in)
 		host := hostOf(in)
 		p, _ := FromContext(ctx)
@@ -122,6 +130,9 @@ func register[In, Out any](s *Server, tool *mcp.Tool, handler mcp.ToolHandlerFor
 		}
 		if host != "" {
 			a.Host = sql.NullString{String: host, Valid: true}
+		}
+		if exitCode != nil {
+			a.ExitCode = sql.NullInt64{Int64: *exitCode, Valid: true}
 		}
 		if raw, e := json.Marshal(out); e == nil {
 			a.BytesOut = int64(len(raw))
@@ -135,6 +146,11 @@ func register[In, Out any](s *Server, tool *mcp.Tool, handler mcp.ToolHandlerFor
 		return
 	})
 }
+
+type auditOutcome interface {
+	auditOutcome() (ok bool, exitCode *int64)
+}
+
 func redactedJSON(v any) string {
 	var raw any
 	b, _ := json.Marshal(v)

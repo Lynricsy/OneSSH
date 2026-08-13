@@ -42,6 +42,9 @@ var migration0009 string
 //go:embed migrations/0010_host_tags.sql
 var migration0010 string
 
+//go:embed migrations/0011_command_runs.sql
+var migration0011 string
+
 type Store struct{ DB *sql.DB }
 
 func sqliteDSN(dbPath string) (string, error) {
@@ -60,8 +63,14 @@ func sqliteDSN(dbPath string) (string, error) {
 }
 
 func Open(dataDir string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Join(dataDir, "artifacts"), 0o700); err != nil {
-		return nil, fmt.Errorf("创建数据目录: %w", err)
+	for _, name := range []string{"artifacts", "command-runs"} {
+		dir := filepath.Join(dataDir, name)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("创建数据目录 %s: %w", name, err)
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("设置数据目录权限 %s: %w", name, err)
+		}
 	}
 	dsn, err := sqliteDSN(filepath.Join(dataDir, "onessh.db"))
 	if err != nil {
@@ -105,6 +114,7 @@ func migrate(db *sql.DB) error {
 		{version: 8, sql: migration0008},
 		{version: 9, sql: migration0009},
 		{version: 10, sql: migration0010},
+		{version: 11, sql: migration0011},
 	} {
 		if err := applyMigration(db, m); err != nil {
 			return fmt.Errorf("版本 %d: %w", m.version, err)
@@ -145,6 +155,19 @@ func applyMigration(db *sql.DB, m migration) error {
 		}
 		if !hasColumn {
 			if _, err = tx.Exec(`ALTER TABLE audit ADD COLUMN token_name TEXT`); err != nil {
+				return err
+			}
+		}
+		if _, err = tx.Exec(m.sql); err != nil {
+			return err
+		}
+	case 10:
+		hasColumn, err := tableHasColumn(tx, "jobs", "log_bytes")
+		if err != nil {
+			return err
+		}
+		if !hasColumn {
+			if _, err = tx.Exec(`ALTER TABLE jobs ADD COLUMN log_bytes INTEGER NOT NULL DEFAULT 0`); err != nil {
 				return err
 			}
 		}

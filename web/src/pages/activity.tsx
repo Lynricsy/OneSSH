@@ -146,6 +146,43 @@ function EventPayload({ event }: { event: StreamEvent }) {
       </div>
     )
   }
+  if (event.type === 'command_started' && isRecord(data)) {
+    const command = typeof data.command === 'string' ? data.command : ''
+    const host = typeof data.host === 'string' ? data.host : ''
+    const runID = typeof data.run_id === 'string' ? data.run_id.slice(0, 8) : ''
+    return (
+      <div className="mt-1.5 space-y-1">
+        <p className="font-mono text-[12px] leading-[1.6] break-words text-text">{command}</p>
+        <p className="text-[12px] text-muted">{['开始执行', host, runID].filter(Boolean).join(' · ')}</p>
+      </div>
+    )
+  }
+  if (event.type === 'command_output' && isRecord(data)) {
+    const content = typeof data.data === 'string' ? data.data : ''
+    const stream = typeof data.stream === 'string' ? data.stream : 'output'
+    const runID = typeof data.run_id === 'string' ? data.run_id.slice(0, 8) : ''
+    return (
+      <div className="mt-1.5">
+        <p className="mb-1 text-[11px] font-mono text-muted">
+          {[stream, runID].filter(Boolean).join(' · ')}
+        </p>
+        <pre className="max-h-24 overflow-auto font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap text-text">
+          {content}
+        </pre>
+      </div>
+    )
+  }
+  if (event.type === 'command_finished' && isRecord(data)) {
+    const status = typeof data.status === 'string' ? data.status : ''
+    const exitCode = typeof data.exit_code === 'number' ? `退出码 ${data.exit_code}` : ''
+    const host = typeof data.host === 'string' ? data.host : ''
+    const runID = typeof data.run_id === 'string' ? data.run_id.slice(0, 8) : ''
+    return (
+      <p className="mt-1.5 text-[12px] text-muted">
+        {[status, exitCode, host, runID].filter(Boolean).join(' · ')}
+      </p>
+    )
+  }
   return (
     <pre className="mt-1.5 max-h-24 overflow-auto font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap text-muted">
       {JSON.stringify(event.data)}
@@ -353,8 +390,7 @@ export function ActivityPage() {
                       </time>
                     </div>
                     {/*
-                      tool_call 把命令/路径摊开；其余事件（尤其 exec_output）仍压成一行 JSON，
-                      避免整块 stdout 把一屏挤成四五条。
+                      tool_call 与 command_* 展示人能直接阅读的摘要和输出；未知事件才回退 JSON。
                     */}
                     <EventPayload event={event} />
                   </motion.article>

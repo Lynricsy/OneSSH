@@ -1,8 +1,16 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api, del, post, put, uploadFile } from './client'
 import type {
   Audit,
+  CommandOutputChunk,
+  CommandRun,
   FileEntry,
   Host,
   HostPayload,
@@ -21,8 +29,12 @@ export const queryKeys = {
   keys: ['keys'] as const,
   tokens: ['tokens'] as const,
   jobs: ['jobs'] as const,
+  jobLogs: (id: string) => ['jobs', id, 'logs'] as const,
   audit: (filter: AuditFilter) => ['audit', filter] as const,
   auditTools: ['audit', 'tools'] as const,
+  commandRuns: (filter: CommandRunFilter) => ['command-runs', 'list', filter] as const,
+  commandRun: (id: string) => ['command-runs', 'detail', id] as const,
+  commandOutput: (id: string, stream: string) => ['command-runs', 'output', id, stream] as const,
   metrics: (hostId: number, hours: number) => ['metrics', hostId, hours] as const,
   sftp: (hostId: number, path: string) => ['sftp', hostId, path] as const,
   /** 记忆列表与统计共用 ['memories'] 前缀：删除后一次前缀失效即可覆盖所有筛选与翻页缓存 */
@@ -106,6 +118,23 @@ export const useJobs = () =>
     refetchInterval: 4000,
   })
 
+export const useJobLogs = (id: string, running: boolean) =>
+  useInfiniteQuery({
+    queryKey: queryKeys.jobLogs(id),
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams({
+        offset_bytes: String(pageParam),
+        limit_bytes: String(128 << 10),
+      })
+      return api<CommandOutputChunk>(`/jobs/${id}/logs?${params}`)
+    },
+    initialPageParam: 0,
+    getNextPageParam: (last) => (last.complete ? undefined : last.next_offset_bytes),
+    enabled: id !== '',
+    retry: false,
+    refetchInterval: running ? 2000 : false,
+  })
+
 /** 审计筛选：缺省即不过滤；tool/token/host 支持多值（OR），ok 单值 */
 export type AuditFilter = { tool?: string[]; token?: number[]; host?: string[]; ok?: boolean }
 
@@ -136,6 +165,65 @@ export const useAuditTools = () =>
     queryKey: queryKeys.auditTools,
     queryFn: () => api<string[]>('/audit/tools'),
     staleTime: 5 * 60_000,
+  })
+
+export type CommandRunFilter = {
+  tool?: string[]
+  token?: number[]
+  host?: string[]
+  status?: string[]
+  query?: string
+}
+
+export const useCommandRuns = (filter: CommandRunFilter = {}) =>
+  useInfiniteQuery({
+    queryKey: queryKeys.commandRuns(filter),
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams({ limit: '100' })
+      for (const tool of filter.tool ?? []) params.append('tool', tool)
+      for (const token of filter.token ?? []) params.append('token', String(token))
+      for (const host of filter.host ?? []) params.append('host', host)
+      for (const status of filter.status ?? []) params.append('status', status)
+      if (filter.query) params.set('q', filter.query)
+      if (pageParam > 0) params.set('before', String(pageParam))
+      return api<CommandRun[]>(`/command-runs?${params}`)
+    },
+    initialPageParam: 0,
+    getNextPageParam: (last) => (last.length < 100 ? undefined : last[last.length - 1]?.seq),
+    placeholderData: keepPreviousData,
+    refetchInterval: 3000,
+  })
+
+export const useCommandRun = (id: string | null) =>
+  useQuery({
+    queryKey: queryKeys.commandRun(id ?? ''),
+    queryFn: () => api<CommandRun>(`/command-runs/${id}`),
+    enabled: id != null,
+    refetchInterval: (query) =>
+      (query.state.data as CommandRun | undefined)?.status === 'running' ? 2000 : false,
+  })
+
+export const useCommandOutput = (
+  id: string,
+  stream: 'stdout' | 'stderr' | 'combined',
+  enabled: boolean,
+  running: boolean,
+) =>
+  useInfiniteQuery({
+    queryKey: queryKeys.commandOutput(id, stream),
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams({
+        stream,
+        offset_bytes: String(pageParam),
+        limit_bytes: String(128 << 10),
+      })
+      return api<CommandOutputChunk>(`/command-runs/${id}/output?${params}`)
+    },
+    initialPageParam: 0,
+    getNextPageParam: (last) => (last.complete ? undefined : last.next_offset_bytes),
+    enabled,
+    retry: false,
+    refetchInterval: running ? 2000 : false,
   })
 
 export const useMetrics = (hostId: number | undefined, hours: number) =>

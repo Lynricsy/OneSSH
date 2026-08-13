@@ -36,6 +36,7 @@ export const navGroups: NavGroup[] = [
   {
     title: '观测',
     items: [
+      { to: '/commands', label: '命令记录', icon: Terminal },
       { to: '/activity', label: '活动', icon: Pulse },
       { to: '/metrics', label: '指标', icon: ChartLine },
       { to: '/memories', label: '记忆', icon: Brain },

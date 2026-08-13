@@ -87,6 +87,15 @@ func (m *Manager) cleanup(ctx context.Context) {
 	if _, err := m.Exec.CleanupArtifacts(cutoff); err != nil {
 		log.Printf("清理过期 artifact 失败: %v", err)
 	}
+	running, err := m.Store.RunningCommandRunIDs(ctx)
+	if err != nil {
+		log.Printf("读取运行中的命令记录失败: %v", err)
+	} else if _, err := m.Exec.CleanupCommandOutputs(cutoff, running); err != nil {
+		log.Printf("清理过期命令输出失败: %v", err)
+	}
+	if err := m.Store.ExpireCommandRunOutputs(ctx, cutoff.UnixMilli()); err != nil {
+		log.Printf("标记过期命令输出失败: %v", err)
+	}
 }
 func (m *Manager) Poll(ctx context.Context) {
 	hosts, err := m.Store.MonitoredHosts(ctx)
