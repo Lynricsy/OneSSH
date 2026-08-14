@@ -14,7 +14,7 @@ import type { Audit, StreamEvent } from '@/api/types'
 import { Badge, Dot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { CommandRunDetail } from '@/components/command-run-detail'
+import { CommandRunDetail, ParamsList } from '@/components/command-run-detail'
 import { DataTable, type Column } from '@/components/ui/data-table'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
@@ -25,7 +25,7 @@ import { Select } from '@/components/ui/select'
 import { Sheet } from '@/components/ui/sheet'
 import { Spinner } from '@/components/ui/spinner'
 import { useEventStream } from '@/hooks/use-event-stream'
-import { auditSummary, formatAuditParam, parseAuditParams } from '@/lib/audit'
+import { auditParamEntries, auditSummary, parseAuditParams } from '@/lib/audit'
 import { cn } from '@/lib/cn'
 import { formatBytes } from '@/lib/format'
 
@@ -232,31 +232,6 @@ function CopyableBlock({ label, value }: { label: string; value: string }) {
   )
 }
 
-/** command 已单独成块展示，参数条目里跳过；空值一并过滤 */
-function auditParamEntries(item: Audit): [string, unknown][] {
-  const params = parseAuditParams(item.ParamsJSON)
-  if (!params) return []
-  const command = typeof params.command === 'string' ? params.command.trim() : ''
-  return Object.entries(params).filter(
-    ([key, value]) => !(key === 'command' && command) && value != null && value !== '',
-  )
-}
-
-function ParamsList({ entries }: { entries: [string, unknown][] }) {
-  return (
-    <dl className="divide-y divide-border rounded-[8px] border border-border">
-      {entries.map(([key, value]) => (
-        <div key={key} className="grid gap-1 px-3 py-2 sm:grid-cols-[8rem_1fr] sm:gap-3">
-          <dt className="font-mono text-[12px] text-muted">{key}</dt>
-          <dd className="font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap">
-            {formatAuditParam(value)}
-          </dd>
-        </div>
-      ))}
-    </dl>
-  )
-}
-
 function AuditDetail({ item }: { item: Audit }) {
   const params = parseAuditParams(item.ParamsJSON)
   const command = params && typeof params.command === 'string' ? params.command.trim() : ''
@@ -312,34 +287,6 @@ function AuditDetail({ item }: { item: Audit }) {
         <p className="text-[13px] text-muted">此次调用没有记录额外参数。</p>
       ) : null}
     </div>
-  )
-}
-
-/**
- * 匹配到命令执行记录时，状态/耗时/输出/令牌/命令已由 CommandRunDetail 展示，
- * 审计侧只补它没有的：工具调用级结果（与命令退出码语义不同）和原始调用参数。
- */
-function AuditSupplement({ item }: { item: Audit }) {
-  const entries = auditParamEntries(item)
-  return (
-    <section className="space-y-3 rounded-[8px] border border-border px-3 py-2.5">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-[11px] tracking-wide text-muted uppercase">审计信息</p>
-        {item.OK ? (
-          <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
-            <Dot className="text-success" />
-            调用成功
-          </span>
-        ) : (
-          <Badge variant="danger">调用失败</Badge>
-        )}
-      </div>
-      {entries.length > 0 ? (
-        <ParamsList entries={entries} />
-      ) : (
-        <p className="text-[12px] text-muted">此次调用没有记录额外参数。</p>
-      )}
-    </section>
   )
 }
 
@@ -415,8 +362,7 @@ function AuditSheetContent({ item }: { item: Audit }) {
             </div>
           </div>
         )}
-        <CommandRunDetail id={activeRunID} />
-        <AuditSupplement item={item} />
+        <CommandRunDetail id={activeRunID} audit={item} />
       </div>
     )
   }

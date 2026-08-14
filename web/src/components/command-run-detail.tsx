@@ -2,11 +2,12 @@ import { ArrowDown, Check, Copy, WarningCircle } from '@phosphor-icons/react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { useCommandOutput, useCommandRun } from '@/api/queries'
-import type { CommandRun, CommandRunStatus } from '@/api/types'
+import type { Audit, CommandRun, CommandRunStatus } from '@/api/types'
 import { Badge, Dot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Spinner } from '@/components/ui/spinner'
+import { auditParamEntries, formatAuditParam } from '@/lib/audit'
 import { formatBytes } from '@/lib/format'
 
 function formatTime(ms: number) {
@@ -134,7 +135,22 @@ function OutputBlock({
   )
 }
 
-export function CommandRunDetail({ id }: { id: string }) {
+export function ParamsList({ entries }: { entries: [string, unknown][] }) {
+  return (
+    <dl className="divide-y divide-border rounded-[8px] border border-border">
+      {entries.map(([key, value]) => (
+        <div key={key} className="grid gap-1 px-3 py-2 sm:grid-cols-[8rem_1fr] sm:gap-3">
+          <dt className="font-mono text-[12px] text-muted">{key}</dt>
+          <dd className="font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap">
+            {formatAuditParam(value)}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+export function CommandRunDetail({ id, audit }: { id: string; audit?: Audit }) {
   const detail = useCommandRun(id)
   if (detail.isLoading) {
     return (
@@ -154,6 +170,7 @@ export function CommandRunDetail({ id }: { id: string }) {
   }
   const run = detail.data
   const outputBytes = run.stdout_bytes + run.stderr_bytes
+  const auditEntries = audit ? auditParamEntries(audit) : []
   return (
     <div className="space-y-4">
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[13px] sm:grid-cols-4">
@@ -163,6 +180,21 @@ export function CommandRunDetail({ id }: { id: string }) {
             <RunStatus status={run.status} />
           </dd>
         </div>
+        {audit && (
+          <div>
+            <dt className="text-[11px] tracking-wide text-muted uppercase">调用结果</dt>
+            <dd className="mt-1">
+              {audit.OK ? (
+                <span className="inline-flex items-center gap-1.5 text-muted">
+                  <Dot className="text-success" />
+                  成功
+                </span>
+              ) : (
+                <Badge variant="danger">失败</Badge>
+              )}
+            </dd>
+          </div>
+        )}
         <div>
           <dt className="text-[11px] tracking-wide text-muted uppercase">退出码</dt>
           <dd className="mt-1 font-mono tabular-nums">{run.exit_code ?? '—'}</dd>
@@ -200,6 +232,13 @@ export function CommandRunDetail({ id }: { id: string }) {
       </dl>
 
       <CopyableBlock label="命令" value={run.command} />
+
+      {auditEntries.length > 0 && (
+        <div>
+          <p className="mb-1.5 text-[11px] tracking-wide text-muted uppercase">调用参数</p>
+          <ParamsList entries={auditEntries} />
+        </div>
+      )}
 
       {run.error && (
         <div className="rounded-[8px] border border-danger/30 bg-danger/8 px-3 py-2.5 text-[13px] text-danger">

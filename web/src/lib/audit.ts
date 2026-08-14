@@ -54,3 +54,13 @@ export function formatAuditParam(value: unknown): string {
     return String(value)
   }
 }
+
+/** command 已单独成块展示，参数条目里跳过；空值一并过滤 */
+export function auditParamEntries(item: Pick<Audit, 'ParamsJSON'>): [string, unknown][] {
+  const params = parseAuditParams(item.ParamsJSON)
+  if (!params) return []
+  const command = typeof params.command === 'string' ? params.command.trim() : ''
+  return Object.entries(params).filter(
+    ([key, value]) => !(key === 'command' && command) && value != null && value !== '',
+  )
+}
