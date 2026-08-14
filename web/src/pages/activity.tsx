@@ -232,16 +232,36 @@ function CopyableBlock({ label, value }: { label: string; value: string }) {
   )
 }
 
+/** command 已单独成块展示，参数条目里跳过；空值一并过滤 */
+function auditParamEntries(item: Audit): [string, unknown][] {
+  const params = parseAuditParams(item.ParamsJSON)
+  if (!params) return []
+  const command = typeof params.command === 'string' ? params.command.trim() : ''
+  return Object.entries(params).filter(
+    ([key, value]) => !(key === 'command' && command) && value != null && value !== '',
+  )
+}
+
+function ParamsList({ entries }: { entries: [string, unknown][] }) {
+  return (
+    <dl className="divide-y divide-border rounded-[8px] border border-border">
+      {entries.map(([key, value]) => (
+        <div key={key} className="grid gap-1 px-3 py-2 sm:grid-cols-[8rem_1fr] sm:gap-3">
+          <dt className="font-mono text-[12px] text-muted">{key}</dt>
+          <dd className="font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap">
+            {formatAuditParam(value)}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
 function AuditDetail({ item }: { item: Audit }) {
   const params = parseAuditParams(item.ParamsJSON)
   const command = params && typeof params.command === 'string' ? params.command.trim() : ''
   const summary = command ? '' : auditSummary(item)
-  const entries = params
-    ? Object.entries(params).filter(([key, value]) => {
-        if (key === 'command' && command) return false
-        return value != null && value !== ''
-      })
-    : []
+  const entries = auditParamEntries(item)
 
   return (
     <div className="space-y-4">
@@ -286,21 +306,40 @@ function AuditDetail({ item }: { item: Audit }) {
       {entries.length > 0 ? (
         <div>
           <p className="mb-1.5 text-[11px] tracking-wide text-muted uppercase">参数</p>
-          <dl className="divide-y divide-border rounded-[8px] border border-border">
-            {entries.map(([key, value]) => (
-              <div key={key} className="grid gap-1 px-3 py-2 sm:grid-cols-[8rem_1fr] sm:gap-3">
-                <dt className="font-mono text-[12px] text-muted">{key}</dt>
-                <dd className="font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap">
-                  {formatAuditParam(value)}
-                </dd>
-              </div>
-            ))}
-          </dl>
+          <ParamsList entries={entries} />
         </div>
       ) : !command && !summary ? (
         <p className="text-[13px] text-muted">此次调用没有记录额外参数。</p>
       ) : null}
     </div>
+  )
+}
+
+/**
+ * 匹配到命令执行记录时，状态/耗时/输出/令牌/命令已由 CommandRunDetail 展示，
+ * 审计侧只补它没有的：工具调用级结果（与命令退出码语义不同）和原始调用参数。
+ */
+function AuditSupplement({ item }: { item: Audit }) {
+  const entries = auditParamEntries(item)
+  return (
+    <section className="space-y-3 rounded-[8px] border border-border px-3 py-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px] tracking-wide text-muted uppercase">审计信息</p>
+        {item.OK ? (
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
+            <Dot className="text-success" />
+            调用成功
+          </span>
+        ) : (
+          <Badge variant="danger">调用失败</Badge>
+        )}
+      </div>
+      {entries.length > 0 ? (
+        <ParamsList entries={entries} />
+      ) : (
+        <p className="text-[12px] text-muted">此次调用没有记录额外参数。</p>
+      )}
+    </section>
   )
 }
 
@@ -377,14 +416,7 @@ function AuditSheetContent({ item }: { item: Audit }) {
           </div>
         )}
         <CommandRunDetail id={activeRunID} />
-        <details className="rounded-[8px] border border-border px-3 py-2.5">
-          <summary className="cursor-pointer text-[13px] font-medium text-muted hover:text-text">
-            查看原始审计信息
-          </summary>
-          <div className="mt-4 border-t border-border pt-4">
-            <AuditDetail item={item} />
-          </div>
-        </details>
+        <AuditSupplement item={item} />
       </div>
     )
   }
