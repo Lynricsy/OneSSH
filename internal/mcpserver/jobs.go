@@ -3,8 +3,10 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"onessh/internal/execx"
 	"onessh/internal/jobs"
 	"onessh/internal/store"
 )
@@ -17,8 +19,17 @@ type JobStartInput struct {
 }
 type JobStartOutput struct {
 	JobID string `json:"job_id"`
+	RunID string `json:"run_id"`
 	PID   int64  `json:"pid"`
 }
+
+func (out JobStartOutput) auditCommandRunIDs() []string {
+	if out.RunID == "" {
+		return nil
+	}
+	return []string{out.RunID}
+}
+
 type JobIDInput struct {
 	JobID string `json:"job_id" jsonschema:"job_start 返回的任务 ID"`
 }
@@ -59,14 +70,24 @@ func (s *Server) registerJobs(m *jobs.Manager) {
 			return errorResult(err.Error()), JobStartOutput{}, nil
 		}
 		p, _ := FromContext(ctx)
+		if strings.TrimSpace(in.Command) == "" {
+			return errorResult("command 不能为空"), JobStartOutput{}, nil
+		}
 		if in.Cwd == "" {
 			in.Cwd = "~"
 		}
-		j, err := m.Start(ctx, h, p.Token.ID, in.Command, in.Cwd, in.Env)
+		run, err := s.startCommandRun(ctx, "job_start", h, in.Command, in.Cwd, "")
 		if err != nil {
-			return errorResult(err.Error()), JobStartOutput{}, nil
+			return nil, JobStartOutput{}, err
 		}
-		return nil, JobStartOutput{JobID: j.ID, PID: j.PID.Int64}, nil
+		j, err := m.StartTracked(ctx, h, p.Token.ID, in.Command, in.Cwd, in.Env, run.ID)
+		if err != nil {
+			if finishErr := s.finishCommandRun(ctx, run, execx.Result{}, err); finishErr != nil {
+				return nil, JobStartOutput{RunID: run.ID}, finishErr
+			}
+			return errorResult(err.Error()), JobStartOutput{RunID: run.ID}, nil
+		}
+		return nil, JobStartOutput{JobID: j.ID, RunID: run.ID, PID: j.PID.Int64}, nil
 	})
 	register[JobListInput, JobListOutput](s, &mcp.Tool{
 		Name:        "job_list",

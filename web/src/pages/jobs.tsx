@@ -1,8 +1,8 @@
-import { ArrowClockwise, Broadcast, WarningCircle } from '@phosphor-icons/react'
+import { ArrowClockwise, ArrowDown, Broadcast, FileText, WarningCircle } from '@phosphor-icons/react'
 import { animate, motion, useMotionValue, useReducedMotion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useJobs, useKillJob, useKillJobs } from '@/api/queries'
+import { useJobLogs, useJobs, useKillJob, useKillJobs } from '@/api/queries'
 import type { JobStatus } from '@/api/types'
 import { ConfirmDialog } from '@/components/ui/alert-dialog'
 import { Badge, Dot } from '@/components/ui/badge'
@@ -11,6 +11,7 @@ import { Card } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Code } from '@/components/ui/code'
 import { DataTable, type Column } from '@/components/ui/data-table'
+import { Dialog } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
 import { PageTransition } from '@/components/ui/page-transition'
@@ -46,12 +47,53 @@ function JobBadge({ status }: { status: string }) {
   )
 }
 
+function JobLogs({ job }: { job: JobStatus }) {
+  const logs = useJobLogs(job.job.id, job.job.status === 'running')
+  const content = logs.data?.pages.map((page) => page.content).join('') ?? ''
+  const total = logs.data?.pages[0]?.total_bytes ?? job.log_bytes
+  if (logs.isError && !content) {
+    return (
+      <EmptyState
+        icon={<WarningCircle size={22} />}
+        title="日志读取失败"
+        description={(logs.error as Error).message}
+      />
+    )
+  }
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-3 text-[12px] text-muted">
+        <span>合并日志 · {formatBytes(total)}</span>
+        {job.job.exit_code != null && (
+          <span className="font-mono tabular-nums">退出码 {job.job.exit_code}</span>
+        )}
+      </div>
+      <pre className="max-h-[55dvh] min-h-40 overflow-auto rounded-[8px] bg-[#0d1117] px-3 py-2.5 font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap text-[#d8dee9]">
+        {content || (logs.isLoading ? '正在读取…' : '（暂无输出）')}
+      </pre>
+      {logs.hasNextPage && (
+        <Button
+          className="mt-2"
+          size="sm"
+          variant="outline"
+          loading={logs.isFetchingNextPage}
+          onClick={() => void logs.fetchNextPage()}
+        >
+          <ArrowDown size={14} />
+          继续读取
+        </Button>
+      )}
+    </div>
+  )
+}
+
 export function JobsPage() {
   const jobs = useJobs()
   const killJob = useKillJob()
   const killJobs = useKillJobs()
   const navigate = useNavigate()
   const [confirmJobId, setConfirmJobId] = useState<string | null>(null)
+  const [logsJobId, setLogsJobId] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [batchConfirm, setBatchConfirm] = useState(false)
   const rotate = useMotionValue(0)
@@ -134,13 +176,20 @@ export function JobsPage() {
     {
       key: 'actions',
       title: '操作',
-      className: 'w-16 text-right',
-      render: (item) =>
-        item.job.status === 'running' ? (
-          <Button size="sm" variant="danger" onClick={() => setConfirmJobId(item.job.id)}>
-            终止
+      className: 'w-[148px] text-right',
+      render: (item) => (
+        <div className="flex justify-end gap-1.5">
+          <Button size="sm" variant="outline" onClick={() => setLogsJobId(item.job.id)}>
+            <FileText size={14} />
+            日志
           </Button>
-        ) : null,
+          {item.job.status === 'running' && (
+            <Button size="sm" variant="danger" onClick={() => setConfirmJobId(item.job.id)}>
+              终止
+            </Button>
+          )}
+        </div>
+      ),
     },
   ]
 
@@ -241,11 +290,16 @@ export function JobsPage() {
                       <span>
                         日志 {formatBytes(item.log_bytes)} · {formatTime(item.job.started_at)}
                       </span>
-                      {item.job.status === 'running' && (
-                        <Button size="sm" variant="danger" onClick={() => setConfirmJobId(item.job.id)}>
-                          终止
+                      <div className="flex gap-1.5">
+                        <Button size="sm" variant="outline" onClick={() => setLogsJobId(item.job.id)}>
+                          日志
                         </Button>
-                      )}
+                        {item.job.status === 'running' && (
+                          <Button size="sm" variant="danger" onClick={() => setConfirmJobId(item.job.id)}>
+                            终止
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </Card>
                 ))}
@@ -258,6 +312,23 @@ export function JobsPage() {
           终止
         </Button>
       </SelectionBar>
+
+      <Dialog
+        open={logsJobId != null}
+        onOpenChange={(open) => {
+          if (!open) setLogsJobId(null)
+        }}
+        title="后台任务日志"
+        description={logsJobId ? `job_id · ${logsJobId}` : undefined}
+        size="lg"
+      >
+        {logsJobId && jobs.data ? (
+          <JobLogs job={jobs.data.find((item) => item.job.id === logsJobId) ?? {
+            job: { id: logsJobId, host_id: 0, command: '', cwd: '', status: 'exited', started_at: 0 },
+            log_bytes: 0,
+          }} />
+        ) : null}
+      </Dialog>
 
       <ConfirmDialog
         open={confirmJobId !== null}

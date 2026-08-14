@@ -16,7 +16,7 @@ func TestOpenCreatesSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	for _, table := range []string{"keys", "hosts", "tokens", "sessions", "jobs", "audit", "metrics", "oauth_clients", "oauth_authorization_codes", "oauth_refresh_tokens", "memories", "memories_fts"} {
+	for _, table := range []string{"keys", "hosts", "tokens", "sessions", "jobs", "audit", "command_runs", "metrics", "oauth_clients", "oauth_authorization_codes", "oauth_refresh_tokens", "memories", "memories_fts"} {
 		var name string
 		if err := s.DB.QueryRowContext(context.Background(), `SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name); err != nil {
 			t.Fatalf("缺少表 %s: %v", table, err)
@@ -211,7 +211,7 @@ func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 10 {
+	if versions != 12 {
 		t.Fatalf("二次迁移版本数 = %d", versions)
 	}
 }
@@ -240,7 +240,7 @@ func TestOpenRecordsPreexistingManageHostsColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 10 {
+	if versions != 12 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 }
@@ -286,8 +286,78 @@ func TestOpenRecordsPreexistingAuditTokenNameColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 10 {
+	if versions != 12 {
 		t.Fatalf("迁移登记数 = %d", versions)
+	}
+}
+
+func TestOpenRecordsPreexistingJobLogBytesColumn(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "onessh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(migration0001); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`ALTER TABLE jobs ADD COLUMN log_bytes INTEGER NOT NULL DEFAULT 0`); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatalf("已有 log_bytes 列时升级失败: %v", err)
+	}
+	defer st.Close()
+	var versions int
+	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
+		t.Fatal(err)
+	}
+	if versions != 12 {
+		t.Fatalf("迁移登记数 = %d", versions)
+	}
+	var commandRuns string
+	if err = st.DB.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='command_runs'`).Scan(&commandRuns); err != nil {
+		t.Fatalf("命令记录表未创建: %v", err)
+	}
+}
+
+func TestOpenRecordsPreexistingAuditCommandRunIDsColumn(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "onessh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(migration0001); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`ALTER TABLE audit ADD COLUMN command_run_ids_json TEXT;
+		INSERT INTO audit(ts,tool,params_json,command_run_ids_json,ok,duration_ms,bytes_out) VALUES(1,'exec','{}','["run-1"]',1,0,0)`); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatalf("已有 command_run_ids_json 列时升级失败: %v", err)
+	}
+	defer st.Close()
+	var versions int
+	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
+		t.Fatal(err)
+	}
+	if versions != 12 {
+		t.Fatalf("迁移登记数 = %d", versions)
+	}
+	audit, err := st.ListAudit(context.Background(), nil, nil, nil, nil, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(audit) != 1 || len(audit[0].RunIDs) != 1 || audit[0].RunIDs[0] != "run-1" {
+		t.Fatalf("已有命令关联未被保留: %#v", audit)
 	}
 }
 

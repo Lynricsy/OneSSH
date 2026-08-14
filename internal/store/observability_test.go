@@ -24,6 +24,7 @@ func TestAuditPreservesTokenIdentityAfterTokenDeletion(t *testing.T) {
 		TokenName:  sql.NullString{String: token.Name, Valid: true},
 		Tool:       "exec",
 		ParamsJSON: "{}",
+		RunIDs:     []string{"run-1", "run-2"},
 		OK:         true,
 	}); err != nil {
 		t.Fatal(err)
@@ -44,6 +45,9 @@ func TestAuditPreservesTokenIdentityAfterTokenDeletion(t *testing.T) {
 	}
 	if audit[0].TokenName != (sql.NullString{String: token.Name, Valid: true}) {
 		t.Fatalf("审计令牌名称 = %#v", audit[0].TokenName)
+	}
+	if len(audit[0].RunIDs) != 2 || audit[0].RunIDs[0] != "run-1" || audit[0].RunIDs[1] != "run-2" {
+		t.Fatalf("审计命令关联 = %#v", audit[0].RunIDs)
 	}
 }
 

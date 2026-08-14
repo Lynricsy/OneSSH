@@ -1,17 +1,31 @@
-import { Broadcast, Pulse } from '@phosphor-icons/react'
+import { Broadcast, Check, Copy, MagnifyingGlass, Pulse, WarningCircle } from '@phosphor-icons/react'
+import { toast } from 'sonner'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { useState } from 'react'
-import { useAudit, useAuditTools, useHosts, useTokens, type AuditFilter } from '@/api/queries'
-import type { Audit } from '@/api/types'
+import { useMemo, useState } from 'react'
+import {
+  useAudit,
+  useAuditTools,
+  useCommandRuns,
+  useHosts,
+  useTokens,
+  type AuditFilter,
+} from '@/api/queries'
+import type { Audit, StreamEvent } from '@/api/types'
 import { Badge, Dot } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { CommandRunDetail, ParamsList } from '@/components/command-run-detail'
 import { DataTable, type Column } from '@/components/ui/data-table'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Input } from '@/components/ui/input'
 import { MultiSelect } from '@/components/ui/multi-select'
 import { PageHeader } from '@/components/ui/page-header'
 import { PageTransition } from '@/components/ui/page-transition'
 import { Select } from '@/components/ui/select'
+import { Sheet } from '@/components/ui/sheet'
+import { Spinner } from '@/components/ui/spinner'
 import { useEventStream } from '@/hooks/use-event-stream'
+import { auditParamEntries, auditSummary, parseAuditParams } from '@/lib/audit'
 import { cn } from '@/lib/cn'
 import { formatBytes } from '@/lib/format'
 
@@ -34,20 +48,33 @@ const auditColumns: Column<Audit>[] = [
   {
     key: 'Tool',
     title: '工具',
-    className: 'font-mono text-[13px]',
-    render: (item) => item.Tool,
+    className: 'w-[7.5rem] font-mono text-[13px]',
+    render: (item) => (
+      <span className="block truncate" title={item.Tool}>
+        {item.Tool}
+      </span>
+    ),
+  },
+  {
+    key: 'ParamsJSON',
+    title: '调用',
+    // 这列才是「Agent 跑了什么」：命令、路径、检索式。固定布局下它不设宽度、吃掉剩余空间，
+    // 窄屏也留着，靠 truncate + title 看全句
+    render: (item) => {
+      const summary = auditSummary(item)
+      return (
+        <span className="block truncate font-mono text-[12px] text-muted" title={summary || undefined}>
+          {summary || '—'}
+        </span>
+      )
+    },
   },
   {
     key: 'TokenName',
     title: '调用令牌',
-    className: 'max-w-[180px] text-muted',
+    className: 'hidden w-[10rem] text-muted xl:table-cell',
     render: (item) => {
-      const id = item.TokenID?.Valid ? `#${item.TokenID.Int64}` : ''
-      const label = item.TokenName?.Valid
-        ? `${item.TokenName.String}${id ? ` · ${id}` : ''}`
-        : id
-          ? `已删除令牌 · ${id}`
-          : '系统'
+      const label = tokenLabel(item)
       return (
         <span className="block truncate" title={label}>
           {label}
@@ -58,12 +85,19 @@ const auditColumns: Column<Audit>[] = [
   {
     key: 'Host',
     title: '主机',
-    className: 'hidden lg:table-cell text-muted',
-    render: (item) => (item.Host?.Valid ? item.Host.String : '—'),
+    className: 'hidden w-[9rem] lg:table-cell text-muted',
+    render: (item) => {
+      const host = item.Host?.Valid ? item.Host.String : '—'
+      return (
+        <span className="block truncate" title={host}>
+          {host}
+        </span>
+      )
+    },
   },
   {
     key: 'OK',
-    title: '结果',
+    title: '调用结果',
     className: 'w-[80px]',
     // 一屏几十行里全是绿 badge 会淹没真正需要注意的失败，成功态降级为中性文字 + 状态点
     render: (item) =>
@@ -87,10 +121,264 @@ const auditColumns: Column<Audit>[] = [
     title: '耗时',
     className: 'w-[92px] text-right tabular-nums',
     // 四位数以上的毫秒既难读又会撑宽列，统一在 1s 处进位
-    render: (item) =>
-      item.DurationMS < 1000 ? `${item.DurationMS} ms` : `${(item.DurationMS / 1000).toFixed(2)} s`,
+    render: (item) => formatDuration(item.DurationMS),
   },
 ]
+
+function tokenLabel(item: Audit): string {
+  const id = item.TokenID?.Valid ? `#${item.TokenID.Int64}` : ''
+  if (item.TokenName?.Valid) return `${item.TokenName.String}${id ? ` · ${id}` : ''}`
+  if (id) return `已删除令牌 · ${id}`
+  return '系统'
+}
+
+function formatDuration(ms: number): string {
+  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(2)} s`
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function EventPayload({ event }: { event: StreamEvent }) {
+  const data = event.data
+  if (event.type === 'tool_call' && isRecord(data)) {
+    const summary = typeof data.summary === 'string' ? data.summary : ''
+    const host = typeof data.host === 'string' ? data.host : ''
+    const duration = typeof data.duration_ms === 'number' ? formatDuration(data.duration_ms) : ''
+    const bits = [data.ok === false ? '失败' : '成功', host, duration].filter(Boolean)
+    return (
+      <div className="mt-1.5 space-y-1">
+        {summary ? (
+          <p className="font-mono text-[12px] leading-[1.6] break-words text-text">{summary}</p>
+        ) : null}
+        <p className="text-[12px] text-muted">{bits.join(' · ')}</p>
+      </div>
+    )
+  }
+  if (event.type === 'command_started' && isRecord(data)) {
+    const command = typeof data.command === 'string' ? data.command : ''
+    const host = typeof data.host === 'string' ? data.host : ''
+    const runID = typeof data.run_id === 'string' ? data.run_id.slice(0, 8) : ''
+    return (
+      <div className="mt-1.5 space-y-1">
+        <p className="font-mono text-[12px] leading-[1.6] break-words text-text">{command}</p>
+        <p className="text-[12px] text-muted">{['开始执行', host, runID].filter(Boolean).join(' · ')}</p>
+      </div>
+    )
+  }
+  if (event.type === 'command_output' && isRecord(data)) {
+    const content = typeof data.data === 'string' ? data.data : ''
+    const stream = typeof data.stream === 'string' ? data.stream : 'output'
+    const runID = typeof data.run_id === 'string' ? data.run_id.slice(0, 8) : ''
+    return (
+      <div className="mt-1.5">
+        <p className="mb-1 text-[11px] font-mono text-muted">
+          {[stream, runID].filter(Boolean).join(' · ')}
+        </p>
+        <pre className="max-h-24 overflow-auto font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap text-text">
+          {content}
+        </pre>
+      </div>
+    )
+  }
+  if (event.type === 'command_finished' && isRecord(data)) {
+    const status = typeof data.status === 'string' ? data.status : ''
+    const exitCode = typeof data.exit_code === 'number' ? `退出码 ${data.exit_code}` : ''
+    const host = typeof data.host === 'string' ? data.host : ''
+    const runID = typeof data.run_id === 'string' ? data.run_id.slice(0, 8) : ''
+    return (
+      <p className="mt-1.5 text-[12px] text-muted">
+        {[status, exitCode, host, runID].filter(Boolean).join(' · ')}
+      </p>
+    )
+  }
+  return (
+    <pre className="mt-1.5 max-h-24 overflow-auto font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap text-muted">
+      {JSON.stringify(event.data)}
+    </pre>
+  )
+}
+
+function CopyableBlock({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(true)
+      toast.success('已复制')
+      window.setTimeout(() => setCopied(false), 1600)
+    } catch {
+      toast.error('复制失败，请手动选择文本')
+    }
+  }
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <p className="text-[11px] tracking-wide text-muted uppercase">{label}</p>
+        <button
+          type="button"
+          onClick={() => void copy()}
+          aria-label={`复制${label}`}
+          className="rounded-[4px] p-0.5 text-muted transition-colors hover:bg-surface-2 hover:text-text"
+        >
+          {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
+        </button>
+      </div>
+      <pre className="rounded-[8px] bg-surface-2 px-3 py-2.5 font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap text-text">
+        {value}
+      </pre>
+    </div>
+  )
+}
+
+function AuditDetail({ item }: { item: Audit }) {
+  const params = parseAuditParams(item.ParamsJSON)
+  const command = params && typeof params.command === 'string' ? params.command.trim() : ''
+  const summary = command ? '' : auditSummary(item)
+  const entries = auditParamEntries(item)
+
+  return (
+    <div className="space-y-4">
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[13px] sm:grid-cols-3">
+        <div>
+          <dt className="text-[11px] tracking-wide text-muted uppercase">结果</dt>
+          <dd className="mt-1">
+            {item.OK ? (
+              <span className="inline-flex items-center gap-1.5 text-muted">
+                <Dot className="text-success" />
+                成功
+              </span>
+            ) : (
+              <Badge variant="danger">失败</Badge>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[11px] tracking-wide text-muted uppercase">耗时</dt>
+          <dd className="mt-1 tabular-nums">{formatDuration(item.DurationMS)}</dd>
+        </div>
+        <div>
+          <dt className="text-[11px] tracking-wide text-muted uppercase">输出</dt>
+          <dd className="mt-1 tabular-nums text-muted">
+            {item.BytesOut ? formatBytes(item.BytesOut) : '—'}
+          </dd>
+        </div>
+        <div className="col-span-2 sm:col-span-1">
+          <dt className="text-[11px] tracking-wide text-muted uppercase">令牌</dt>
+          <dd className="mt-1 truncate" title={tokenLabel(item)}>
+            {tokenLabel(item)}
+          </dd>
+        </div>
+      </dl>
+
+      {command ? (
+        <CopyableBlock label="命令" value={command} />
+      ) : summary ? (
+        <CopyableBlock label="调用" value={summary} />
+      ) : null}
+
+      {entries.length > 0 ? (
+        <div>
+          <p className="mb-1.5 text-[11px] tracking-wide text-muted uppercase">参数</p>
+          <ParamsList entries={entries} />
+        </div>
+      ) : !command && !summary ? (
+        <p className="text-[13px] text-muted">此次调用没有记录额外参数。</p>
+      ) : null}
+    </div>
+  )
+}
+
+const commandTools = new Set(['exec', 'exec_many', 'job_start'])
+
+function AuditSheetContent({ item }: { item: Audit }) {
+  const params = parseAuditParams(item.ParamsJSON)
+  const command = params && typeof params.command === 'string' ? params.command.trim() : ''
+  const explicitRunIDs = item.RunIDs ?? []
+  const needsLegacyMatch = commandTools.has(item.Tool) && explicitRunIDs.length === 0 && command !== ''
+  const candidates = useCommandRuns(
+    {
+      tool: [item.Tool],
+      token: item.TokenID?.Valid ? [item.TokenID.Int64] : undefined,
+      host: item.Host?.Valid ? [item.Host.String] : undefined,
+      query: command,
+    },
+    needsLegacyMatch,
+  )
+  const inferredRunIDs = useMemo(() => {
+    if (!needsLegacyMatch) return []
+    const earliest = item.Ts - Math.max(0, item.DurationMS) - 5_000
+    const latest = item.Ts + 2_000
+    return (candidates.data?.pages.flat() ?? [])
+      .filter(
+        (run) =>
+          run.command.trim() === command &&
+          run.started_at >= earliest &&
+          run.started_at <= latest,
+      )
+      .sort((left, right) => left.started_at - right.started_at)
+      .map((run) => run.id)
+  }, [candidates.data, command, item.DurationMS, item.Ts, needsLegacyMatch])
+  const runIDs = explicitRunIDs.length > 0 ? explicitRunIDs : inferredRunIDs
+  const [preferredRunID, setPreferredRunID] = useState('')
+  const activeRunID = runIDs.includes(preferredRunID) ? preferredRunID : runIDs[0]
+
+  if (needsLegacyMatch && candidates.isLoading) {
+    return (
+      <div className="flex min-h-56 items-center justify-center gap-2 text-[13px] text-muted">
+        <Spinner className="size-4" />
+        正在关联命令执行记录…
+      </div>
+    )
+  }
+
+  if (activeRunID) {
+    return (
+      <div className="space-y-4">
+        {explicitRunIDs.length === 0 && (
+          <div className="rounded-[8px] border border-border bg-surface-2 px-3 py-2 text-[12px] text-muted">
+            这是关联字段加入前的旧审计记录，已按命令、令牌和执行时间匹配。
+          </div>
+        )}
+        {runIDs.length > 1 && (
+          <div>
+            <p className="mb-2 text-[11px] tracking-wide text-muted uppercase">
+              批量执行 · {runIDs.length} 台主机
+            </p>
+            <div className="flex flex-wrap gap-2" role="tablist" aria-label="选择命令执行记录">
+              {runIDs.map((runID, index) => (
+                <Button
+                  key={runID}
+                  size="sm"
+                  variant={runID === activeRunID ? 'primary' : 'outline'}
+                  role="tab"
+                  aria-selected={runID === activeRunID}
+                  onClick={() => setPreferredRunID(runID)}
+                >
+                  执行 {index + 1} · {runID.slice(0, 8)}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+        <CommandRunDetail id={activeRunID} audit={item} />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {needsLegacyMatch && !candidates.isError && (
+        <div className="flex items-start gap-2 rounded-[8px] border border-warning/30 bg-warning/8 px-3 py-2.5 text-[13px] text-warning">
+          <WarningCircle className="mt-0.5 shrink-0" size={15} />
+          <span>这条旧审计记录没有找到可关联的完整输出，仍可查看当时记录的调用参数。</span>
+        </div>
+      )}
+      <AuditDetail item={item} />
+    </div>
+  )
+}
 
 export function ActivityPage() {
   const { events, status } = useEventStream()
@@ -98,6 +386,8 @@ export function ActivityPage() {
   const [token, setToken] = useState<number[]>([])
   const [host, setHost] = useState<string[]>([])
   const [result, setResult] = useState(ALL)
+  const [query, setQuery] = useState('')
+  const [selected, setSelected] = useState<Audit | null>(null)
   const filter: AuditFilter = {
     tool,
     token,
@@ -108,7 +398,17 @@ export function ActivityPage() {
   const auditTools = useAuditTools()
   const hosts = useHosts()
   const tokens = useTokens()
-  const filtered = tool.length > 0 || token.length > 0 || host.length > 0 || result !== ALL
+  const needle = query.trim().toLowerCase()
+  const rows = useMemo(() => {
+    const list = audit.data ?? []
+    if (!needle) return list
+    // 只在当前页 100 条里搜命令/参数：审计接口没有全文检索，避免把「没搜到」说成「从没发生」
+    return list.filter((row) => {
+      const hay = `${row.Tool} ${auditSummary(row)} ${row.ParamsJSON} ${row.Host?.Valid ? row.Host.String : ''}`
+      return hay.toLowerCase().includes(needle)
+    })
+  }, [audit.data, needle])
+  const filtered = tool.length > 0 || token.length > 0 || host.length > 0 || result !== ALL || needle !== ''
 
   // 全量列表请求加载或失败时仍从当前审计结果回退；已选项也始终保留在选项中。
   const toolNames = new Set(auditTools.data ?? [])
@@ -126,7 +426,7 @@ export function ActivityPage() {
 
   return (
     <PageTransition>
-      <PageHeader title="活动流" subtitle="实时工具调用、输出与结构化审计" />
+      <PageHeader title="活动与审计" subtitle="实时事件、每次工具调用及关联的命令输出" />
 
       {/* 两栏在 xl 起固定为一屏高：事件与审计都是「持续刷新的流」，各自内部滚动比把页面拉成几千像素更好用 */}
       <div className="grid gap-4 xl:h-[calc(100dvh-11.5rem)] xl:min-h-[520px] xl:grid-cols-[2fr_3fr]">
@@ -176,12 +476,9 @@ export function ActivityPage() {
                       </time>
                     </div>
                     {/*
-                      载荷压成单行：这是「流」不是「详情页」，缩进 JSON 会让每条事件占掉
-                      六七行，一屏只剩四五条；限高兜住 exec_output 那种整块 stdout。
+                      tool_call 与 command_* 展示人能直接阅读的摘要和输出；未知事件才回退 JSON。
                     */}
-                    <pre className="mt-1.5 max-h-24 overflow-auto font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap text-muted">
-                      {JSON.stringify(event.data)}
-                    </pre>
+                    <EventPayload event={event} />
                   </motion.article>
                 ))}
               </AnimatePresence>
@@ -191,15 +488,28 @@ export function ActivityPage() {
 
         <Card className="flex max-h-[60dvh] min-h-0 min-w-0 flex-col xl:max-h-none">
           <CardHeader>
-            <CardTitle>审计记录</CardTitle>
+            <CardTitle>审计与命令记录</CardTitle>
             {audit.data && audit.data.length > 0 && (
               <span className="text-[12px] text-muted tabular-nums">
-                {filtered ? `筛选出 ${audit.data.length} 条` : `最近 ${audit.data.length} 条`}
+                {filtered ? `筛选出 ${rows.length} 条` : `最近 ${rows.length} 条`}
               </span>
             )}
           </CardHeader>
           {/* 工具/令牌/主机支持多选 + 搜索；结果仅两个值，保留单选下拉；改动即查，不设「查询」按钮 */}
           <div className="grid grid-cols-2 gap-2 border-b border-border p-3 lg:grid-cols-4">
+            <div className="col-span-2 lg:col-span-4">
+              <label htmlFor="audit-filter-query" className="sr-only">
+                搜索命令或参数
+              </label>
+              <Input
+                id="audit-filter-query"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="搜索命令、路径或参数…"
+                spellCheck={false}
+                prefix={<MagnifyingGlass size={14} />}
+              />
+            </div>
             <label htmlFor="audit-filter-tool" className="sr-only">
               按工具筛选
             </label>
@@ -253,6 +563,9 @@ export function ActivityPage() {
           <CardContent className="flex min-h-0 flex-1 flex-col p-0">
             <DataTable
               stickyHeader
+              // 固定布局：审计数据持续刷新，auto 布局下列宽随内容跳动、长命令会把时间/结果列挤变形；
+              // 固定后列宽稳定，超长内容只在各自单元格内截断
+              fixedLayout
               // 表格自身即滚动容器（overflow-x-auto 会让 y 轴一并变成 auto）；窄屏收紧单元格内边距，
               // 让「时间」列不用被砍掉也能塞下四列
               className={cn(
@@ -260,23 +573,28 @@ export function ActivityPage() {
                 audit.isPlaceholderData && 'opacity-60',
               )}
               columns={auditColumns}
-              rows={audit.data}
+              rows={rows}
               rowKey={(item) => item.ID}
               loading={audit.isLoading}
+              onRowClick={setSelected}
               empty={
                 filtered ? (
                   <EmptyState
                     className="[&_p]:text-balance"
                     icon={<Pulse size={22} />}
                     title="没有匹配的审计记录"
-                    description="当前筛选条件下暂无记录，调整条件再试。"
+                    description={
+                      needle
+                        ? '当前已加载的记录里没有匹配的命令或参数，调整关键词再试。'
+                        : '当前筛选条件下暂无记录，调整条件再试。'
+                    }
                   />
                 ) : (
                   <EmptyState
                     className="[&_p]:text-balance"
                     icon={<Pulse size={22} />}
                     title="暂无审计记录"
-                    description="Agent 通过 MCP 网关调用工具后，每一次调用都会记录在这里。"
+                    description="Agent 通过 MCP 网关调用工具后，每一次调用都会记录在这里。点开一行可看完整命令和参数。"
                   />
                 )
               }
@@ -284,6 +602,28 @@ export function ActivityPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Sheet
+        open={selected != null}
+        onOpenChange={(open) => {
+          if (!open) setSelected(null)
+        }}
+        title={selected?.Tool ?? '调用详情'}
+        width="min(860px, 100vw)"
+        header={
+          selected ? (
+            <div>
+              <p className="truncate text-sm font-semibold text-text">{selected.Tool}</p>
+              <p className="mt-0.5 truncate text-[12px] text-muted">
+                {clock(selected.Ts)}
+                {selected.Host?.Valid ? ` · ${selected.Host.String}` : ''}
+              </p>
+            </div>
+          ) : undefined
+        }
+      >
+        <div className="p-4 sm:p-5">{selected ? <AuditSheetContent item={selected} /> : null}</div>
+      </Sheet>
     </PageTransition>
   )
 }

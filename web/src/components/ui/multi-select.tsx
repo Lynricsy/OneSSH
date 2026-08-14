@@ -42,6 +42,7 @@ export function MultiSelect<T extends string | number>({
   maxSelected,
   onCreateOption,
   createText = (q) => `创建标签「${q}」`,
+  'aria-label': ariaLabel,
 }: {
   value: T[]
   onChange: (value: T[]) => void
@@ -56,6 +57,7 @@ export function MultiSelect<T extends string | number>({
   onCreateOption?: (label: string) => void
   /** 创建行文案，默认面向标签场景；其它场景按需覆盖 */
   createText?: (query: string) => string
+  'aria-label'?: string
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -96,6 +98,7 @@ export function MultiSelect<T extends string | number>({
     >
       <PopoverPrimitive.Trigger
         id={id}
+        aria-label={ariaLabel}
         aria-invalid={invalid || undefined}
         // chip 被截断时靠 title 补全，触发器里不再塞第二层控件
         title={value.length > 0 ? value.map(labelOf).join('、') : undefined}

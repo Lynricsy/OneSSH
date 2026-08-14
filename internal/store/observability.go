@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -13,7 +14,15 @@ import (
 const MaxAuditFilterValues = 100
 
 func (s *Store) AddAudit(ctx context.Context, a Audit) error {
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO audit(ts,token_id,token_name,tool,host,params_json,ok,exit_code,duration_ms,bytes_out) VALUES(?,?,?,?,?,?,?,?,?,?)`, a.Ts, nullInt(a.TokenID), nullString(a.TokenName), a.Tool, nullString(a.Host), a.ParamsJSON, boolInt(a.OK), nullInt(a.ExitCode), a.DurationMS, a.BytesOut)
+	var runIDs any
+	if len(a.RunIDs) > 0 {
+		encoded, err := json.Marshal(a.RunIDs)
+		if err != nil {
+			return fmt.Errorf("编码命令执行关联: %w", err)
+		}
+		runIDs = string(encoded)
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO audit(ts,token_id,token_name,tool,host,params_json,command_run_ids_json,ok,exit_code,duration_ms,bytes_out) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, a.Ts, nullInt(a.TokenID), nullString(a.TokenName), a.Tool, nullString(a.Host), a.ParamsJSON, runIDs, boolInt(a.OK), nullInt(a.ExitCode), a.DurationMS, a.BytesOut)
 	return err
 }
 
@@ -33,7 +42,7 @@ func (s *Store) ListAudit(ctx context.Context, tokenIDs []int64, hosts, tools []
 	if err := validateAuditFilterCount("工具", len(tools)); err != nil {
 		return nil, err
 	}
-	q := `SELECT id,ts,token_id,token_name,tool,host,params_json,ok,exit_code,duration_ms,bytes_out FROM audit WHERE 1=1`
+	q := `SELECT id,ts,token_id,token_name,tool,host,params_json,command_run_ids_json,ok,exit_code,duration_ms,bytes_out FROM audit WHERE 1=1`
 	args := []any{}
 	if len(tokenIDs) > 0 {
 		// 迁移前的 ID 可能已被复用；当前令牌存在时，只接受写入时已快照其名称的记录。
@@ -86,8 +95,14 @@ func (s *Store) ListAudit(ctx context.Context, tokenIDs []int64, hosts, tools []
 	for rows.Next() {
 		var a Audit
 		var ok int
-		if err := rows.Scan(&a.ID, &a.Ts, &a.TokenID, &a.TokenName, &a.Tool, &a.Host, &a.ParamsJSON, &ok, &a.ExitCode, &a.DurationMS, &a.BytesOut); err != nil {
+		var runIDs sql.NullString
+		if err := rows.Scan(&a.ID, &a.Ts, &a.TokenID, &a.TokenName, &a.Tool, &a.Host, &a.ParamsJSON, &runIDs, &ok, &a.ExitCode, &a.DurationMS, &a.BytesOut); err != nil {
 			return nil, err
+		}
+		if runIDs.Valid {
+			if err := json.Unmarshal([]byte(runIDs.String), &a.RunIDs); err != nil {
+				return nil, fmt.Errorf("解析审计命令执行关联: %w", err)
+			}
 		}
 		a.OK = ok != 0
 		out = append(out, a)
