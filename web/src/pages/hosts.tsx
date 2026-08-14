@@ -60,13 +60,35 @@ const MAX_TAGS = 16
 const MAX_TAG_LENGTH = 32
 
 /**
- * 按小写键去重、保留首次出现的拼写，与后端 hostmanager.normalizeTags 的 strings.ToLower 同一规则。
- * 候选列表与已选值共用一份规则，`Web` 与 `web` 不会同时存在。
+ * 后端 hostmanager.normalizeTags 走 Go 的 strings.ToLower：逐 rune 的 simple 小写映射。
+ * JS 的 toLowerCase 对整串按完整 Unicode 规则来，还会看上下文——`ΟΣ` 的词尾 Σ 落成 ς，
+ * `ΟΣ` 与 `οσ` 于是拿到两个不同的键，前端判重就和后端不是同一套规则了。
+ * 所以逐 code point 单独取小写切断上下文（Σ 恒为 σ），再对「单个 code point 被展开成多个」
+ * 的情况只保留首个（`İ` → `i` + U+0307，Go 只映射到 `i`），结果正好等于 simple 映射。
+ */
+const simpleLowerKey = (tag: string) => {
+  let key = ''
+  for (const ch of tag) {
+    const lower = ch.toLowerCase()
+    if (lower.length === ch.length) {
+      key += lower
+      continue
+    }
+    // 按 code point 解构，取首个映射；代理对不会被劈成半个字符
+    const [head] = lower
+    key += head
+  }
+  return key
+}
+
+/**
+ * 按上面那把小写键去重、保留首次出现的拼写，与后端 normalizeTags 判定同一批标签重复。
+ * 候选列表与已选值共用一份规则，`Web` 与 `web`、`ΟΣ` 与 `οσ` 都不会同时存在。
  */
 const dedupeTags = (tags: string[]) => {
   const seen = new Set<string>()
   return tags.filter((tag) => {
-    const key = tag.toLowerCase()
+    const key = simpleLowerKey(tag)
     if (seen.has(key)) return false
     seen.add(key)
     return true
