@@ -8,10 +8,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"onessh/internal/cryptox"
+	"onessh/internal/execx"
 	"onessh/internal/hostmanager"
 	"onessh/internal/memoryx"
 	"onessh/internal/sshpool"
@@ -50,12 +54,34 @@ func TestAdminKeyHostTokenLifecycle(t *testing.T) {
 	if strings.Contains(key.Body.String(), "PRIVATE KEY") {
 		t.Fatal("响应泄漏私钥")
 	}
-	host := call(http.MethodPost, "/hosts", `{"name":"ssh","addr":"127.0.0.1","port":2222,"username":"test","auth_type":"password","password":"pass"}`)
+	host := call(http.MethodPost, "/hosts", `{"name":"ssh","addr":"127.0.0.1","port":2222,"username":"test","auth_type":"password","password":"pass","tags":[" prod ","web","web"]}`)
 	if host.Code != http.StatusCreated {
 		t.Fatalf("创建主机 %d %s", host.Code, host.Body.String())
 	}
 	if strings.Contains(host.Body.String(), `"password":"pass"`) || strings.Contains(host.Body.String(), "password_enc") {
 		t.Fatal("响应泄漏密码")
+	}
+	var hostOut map[string]any
+	if err := json.Unmarshal(host.Body.Bytes(), &hostOut); err != nil {
+		t.Fatal(err)
+	}
+	tags, ok := hostOut["tags"].([]any)
+	if !ok || len(tags) != 2 || tags[0] != "prod" || tags[1] != "web" {
+		t.Fatalf("创建主机响应标签异常: %s", host.Body.String())
+	}
+	hostList := call(http.MethodGet, "/hosts", "")
+	if hostList.Code != http.StatusOK {
+		t.Fatalf("列出主机 %d %s", hostList.Code, hostList.Body.String())
+	}
+	var hostsOut []map[string]any
+	if err := json.Unmarshal(hostList.Body.Bytes(), &hostsOut); err != nil {
+		t.Fatal(err)
+	}
+	if len(hostsOut) != 1 {
+		t.Fatalf("主机列表数量 = %d", len(hostsOut))
+	}
+	if listedTags, ok := hostsOut[0]["tags"].([]any); !ok || len(listedTags) != 2 {
+		t.Fatalf("主机列表标签异常: %s", hostList.Body.String())
 	}
 	token := call(http.MethodPost, "/tokens", `{"name":"manager","all_hosts":false,"manage_hosts":true,"host_ids":[]}`)
 	if token.Code != http.StatusCreated {
@@ -159,5 +185,69 @@ func TestHostErrorStatus(t *testing.T) {
 		if got := hostErrorStatus(err); got != test.want {
 			t.Fatalf("错误类型 %d 状态码 = %d，期望 %d", test.kind, got, test.want)
 		}
+	}
+}
+
+func TestCommandRunListDetailAndOutput(t *testing.T) {
+	ctx := t.Context()
+	dataDir := t.TempDir()
+	st, err := store.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	runner := execx.New(dataDir)
+	id := uuid.NewString()
+	run := store.CommandRun{ID: id, Tool: "exec", Host: "web-01", Command: "printf hello", Cwd: "/srv", StartedAt: 1000}
+	if err = st.CreateCommandRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if err = st.FinishCommandRun(ctx, id, store.CommandRunFinish{
+		Status: "succeeded", ExitCode: sql.NullInt64{Int64: 0, Valid: true},
+		StdoutPreview: "hello", StdoutBytes: 5, OutputAvailable: true, FinishedAt: 1100,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	path, err := runner.CommandOutputPath(id, "stdout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(path, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stderrPath, _ := runner.CommandOutputPath(id, "stderr")
+	if err = os.WriteFile(stderrPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handler := (&API{Store: st, Exec: runner}).Handler()
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/command-runs?host=web-01&status=succeeded&q=HELLO", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"command":"printf hello"`) || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("命令列表响应 = %d %s", response.Code, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "stdout_preview") {
+		t.Fatalf("列表不应携带输出预览: %s", response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/command-runs/"+id, nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"stdout_preview":"hello"`) || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("命令详情响应 = %d %s headers=%v", response.Code, response.Body.String(), response.Header())
+	}
+
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/command-runs/"+id+"/output?stream=stdout&offset_bytes=1&limit_bytes=3", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"content":"ell"`) || !strings.Contains(response.Body.String(), `"complete":false`) {
+		t.Fatalf("命令输出响应 = %d %s", response.Code, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/command-runs/"+id+"/output?stream=combined", nil))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("非法输出流状态码 = %d %s", response.Code, response.Body.String())
 	}
 }

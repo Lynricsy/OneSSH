@@ -200,3 +200,80 @@ func TestConnectionFailureKind(t *testing.T) {
 		t.Fatalf("连接失败分类 = %v: %v", KindOf(err), err)
 	}
 }
+
+func TestTagsNormalization(t *testing.T) {
+	ctx := context.Background()
+	manager, st, _ := newTestManager(t)
+	base := Input{Name: "tagged", Addr: "127.0.0.1", Port: 22, Username: "user", AuthType: "password", Password: new("secret")}
+
+	withTags := base
+	withTags.Tags = []string{" prod ", "web", "Web", "web", "", "  ", "prod", "数据库"}
+	created, err := manager.Create(ctx, withTags)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"prod", "web", "数据库"}
+	if len(created.Tags) != len(want) {
+		t.Fatalf("标签归一化异常: %#v", created.Tags)
+	}
+	for i, tag := range want {
+		if created.Tags[i] != tag {
+			t.Fatalf("标签归一化异常: got=%#v want=%#v", created.Tags, want)
+		}
+	}
+	stored, err := st.GetHost(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Tags) != len(want) || stored.Tags[2] != "数据库" {
+		t.Fatalf("标签未持久化: %#v", stored.Tags)
+	}
+	raw, err := json.Marshal(created.View())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"tags":["prod","web","数据库"]`) {
+		t.Fatalf("视图 JSON 标签异常: %s", raw)
+	}
+
+	// 整体替换语义：省略 tags 即清空。
+	cleared := base
+	cleared.Password = nil
+	updated, err := manager.Update(ctx, created.ID, cleared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Tags == nil || len(updated.Tags) != 0 {
+		t.Fatalf("省略 tags 未清空: %#v", updated.Tags)
+	}
+	raw, err = json.Marshal(updated.View())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"tags":[]`) {
+		t.Fatalf("空标签 JSON 应为 []: %s", raw)
+	}
+
+	tooLong := base
+	tooLong.Tags = []string{strings.Repeat("长", maxTagLength+1)}
+	if _, err = manager.Update(ctx, created.ID, tooLong); KindOf(err) != ErrorInvalid {
+		t.Fatalf("超长标签分类 = %v: %v", KindOf(err), err)
+	}
+	tooMany := base
+	tooMany.Tags = make([]string, maxTagsCount+1)
+	for i := range tooMany.Tags {
+		tooMany.Tags[i] = fmt.Sprintf("tag-%d", i)
+	}
+	if _, err = manager.Update(ctx, created.ID, tooMany); KindOf(err) != ErrorInvalid {
+		t.Fatalf("超量标签分类 = %v: %v", KindOf(err), err)
+	}
+	// 去重后不超量则应通过。
+	deduped := base
+	deduped.Tags = make([]string, maxTagsCount+5)
+	for i := range deduped.Tags {
+		deduped.Tags[i] = fmt.Sprintf("tag-%d", i%maxTagsCount)
+	}
+	if _, err = manager.Update(ctx, created.ID, deduped); err != nil {
+		t.Fatalf("去重后不超量应通过: %v", err)
+	}
+}

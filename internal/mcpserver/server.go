@@ -6,7 +6,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -55,6 +57,9 @@ const serverInstructions = `OneSSH 是受主机权限控制的 SSH 运维网关�
 // 这里不再做第二次归一，避免同一份规则出现两套实现。
 func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanager.Manager, memory *memoryx.Engine, dataDir, publicURL string, pollInterval time.Duration, searchHelper bool) *Server {
 	s := &Server{Store: st, Pool: pool, Events: bus, HostManager: hosts, Memory: memory, Exec: execx.New(dataDir)}
+	if err := st.RecoverInterruptedCommandRuns(context.Background(), time.Now().UnixMilli()); err != nil {
+		log.Printf("恢复中断的命令执行记录失败: %v", err)
+	}
 	s.Jobs = jobs.New(st, pool, s.Exec, bus)
 	s.Files = files.New(pool, s.Exec)
 	s.Monitor = monitor.New(st, pool, s.Exec, pollInterval)
@@ -111,6 +116,10 @@ func register[In, Out any](s *Server, tool *mcp.Tool, handler mcp.ToolHandlerFor
 		started := time.Now()
 		result, out, err = handler(ctx, req, in)
 		ok := err == nil && (result == nil || !result.IsError)
+		var exitCode *int64
+		if outcome, found := any(out).(auditOutcome); found && ok {
+			ok, exitCode = outcome.auditOutcome()
+		}
 		params := redactedJSON(in)
 		host := hostOf(in)
 		p, _ := FromContext(ctx)
@@ -122,14 +131,33 @@ func register[In, Out any](s *Server, tool *mcp.Tool, handler mcp.ToolHandlerFor
 		if host != "" {
 			a.Host = sql.NullString{String: host, Valid: true}
 		}
+		if exitCode != nil {
+			a.ExitCode = sql.NullInt64{Int64: *exitCode, Valid: true}
+		}
+		if linked, found := any(out).(auditCommandRuns); found {
+			a.RunIDs = linked.auditCommandRunIDs()
+		}
 		if raw, e := json.Marshal(out); e == nil {
 			a.BytesOut = int64(len(raw))
 		}
 		_ = s.Store.AddAudit(context.Background(), a)
-		s.Events.Publish("tool_call", map[string]any{"tool": tool.Name, "host": host, "ok": ok, "duration_ms": a.DurationMS})
+		event := map[string]any{"tool": tool.Name, "host": host, "ok": ok, "duration_ms": a.DurationMS}
+		if summary := callSummary(in); summary != "" {
+			event["summary"] = summary
+		}
+		s.Events.Publish("tool_call", event)
 		return
 	})
 }
+
+type auditOutcome interface {
+	auditOutcome() (ok bool, exitCode *int64)
+}
+
+type auditCommandRuns interface {
+	auditCommandRunIDs() []string
+}
+
 func redactedJSON(v any) string {
 	var raw any
 	b, _ := json.Marshal(v)
@@ -172,4 +200,64 @@ func hostOf(v any) string {
 		}
 	}
 	return ""
+}
+
+// callSummary 从工具入参抽出活动流上一眼能看懂的摘要。优先 command，其次 path / 搜索式 / 传输路径。
+// 实时事件只带这段短文本，完整参数仍在审计的 params_json 里。
+func callSummary(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	var raw any
+	if err = json.Unmarshal(b, &raw); err != nil {
+		return ""
+	}
+	return truncateSummary(summarizeParams(raw))
+}
+
+func summarizeParams(v any) string {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return ""
+	}
+	if command := stringField(m, "command"); command != "" {
+		return command
+	}
+	path := stringField(m, "path")
+	pattern := stringField(m, "pattern")
+	if path != "" && pattern != "" {
+		return pattern + "  " + path
+	}
+	if path != "" {
+		return path
+	}
+	src := stringField(m, "src_path")
+	dst := stringField(m, "dst_path")
+	if src != "" && dst != "" {
+		return src + " → " + dst
+	}
+	if src != "" {
+		return src
+	}
+	for _, key := range []string{"query", "pattern", "job_id", "artifact_id"} {
+		if value := stringField(m, key); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func stringField(m map[string]any, key string) string {
+	s, _ := m[key].(string)
+	return strings.TrimSpace(s)
+}
+
+func truncateSummary(s string) string {
+	const max = 240
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "…"
 }

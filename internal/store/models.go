@@ -22,25 +22,30 @@ type Host struct {
 	HostKeyFP      sql.NullString `json:"-"`
 	JumpHostID     sql.NullInt64  `json:"-"`
 	MonitorEnabled bool           `json:"monitor_enabled"`
+	Tags           []string       `json:"tags"`
 	CreatedAt      int64          `json:"created_at"`
 }
 
 type HostView struct {
-	ID             int64   `json:"id"`
-	Name           string  `json:"name"`
-	Addr           string  `json:"addr"`
-	Port           int     `json:"port"`
-	Username       string  `json:"username"`
-	AuthType       string  `json:"auth_type"`
-	KeyID          *int64  `json:"key_id"`
-	HostKeyFP      *string `json:"hostkey_fp"`
-	JumpHostID     *int64  `json:"jump_host_id"`
-	MonitorEnabled bool    `json:"monitor_enabled"`
-	CreatedAt      int64   `json:"created_at"`
+	ID             int64    `json:"id"`
+	Name           string   `json:"name"`
+	Addr           string   `json:"addr"`
+	Port           int      `json:"port"`
+	Username       string   `json:"username"`
+	AuthType       string   `json:"auth_type"`
+	KeyID          *int64   `json:"key_id"`
+	HostKeyFP      *string  `json:"hostkey_fp"`
+	JumpHostID     *int64   `json:"jump_host_id"`
+	MonitorEnabled bool     `json:"monitor_enabled"`
+	Tags           []string `json:"tags"`
+	CreatedAt      int64    `json:"created_at"`
 }
 
 func (h Host) View() HostView {
-	v := HostView{ID: h.ID, Name: h.Name, Addr: h.Addr, Port: h.Port, Username: h.Username, AuthType: h.AuthType, MonitorEnabled: h.MonitorEnabled, CreatedAt: h.CreatedAt}
+	v := HostView{ID: h.ID, Name: h.Name, Addr: h.Addr, Port: h.Port, Username: h.Username, AuthType: h.AuthType, MonitorEnabled: h.MonitorEnabled, Tags: h.Tags, CreatedAt: h.CreatedAt}
+	if v.Tags == nil {
+		v.Tags = []string{}
+	}
 	if h.KeyID.Valid {
 		x := h.KeyID.Int64
 		v.KeyID = &x
@@ -86,6 +91,7 @@ type Job struct {
 	UsedSetsid bool          `json:"used_setsid"`
 	Status     string        `json:"status"`
 	ExitCode   sql.NullInt64 `json:"-"`
+	LogBytes   int64         `json:"log_bytes"`
 	StartedAt  int64         `json:"started_at"`
 	FinishedAt sql.NullInt64 `json:"-"`
 }
@@ -97,9 +103,61 @@ type Audit struct {
 	Tool                 string
 	Host                 sql.NullString
 	ParamsJSON           string
+	RunIDs               []string `json:"RunIDs,omitempty"`
 	OK                   bool
 	ExitCode             sql.NullInt64
 	DurationMS, BytesOut int64
+}
+
+// CommandRun 是一条用户可见的远程命令执行记录。host/token 名称与 ID 同时快照，
+// 避免主机或令牌删除、ID 复用后历史归属发生漂移。
+type CommandRun struct {
+	Seq             int64
+	ID              string
+	TokenID         sql.NullInt64
+	TokenName       sql.NullString
+	Tool            string
+	HostID          sql.NullInt64
+	Host            string
+	Command         string
+	Cwd             string
+	Session         sql.NullString
+	JobID           sql.NullString
+	Status          string
+	ExitCode        sql.NullInt64
+	StdoutPreview   string
+	StderrPreview   string
+	StdoutBytes     int64
+	StderrBytes     int64
+	OutputAvailable bool
+	OutputExpired   bool
+	OutputError     sql.NullString
+	ErrorText       sql.NullString
+	StartedAt       int64
+	FinishedAt      sql.NullInt64
+}
+
+type CommandRunFinish struct {
+	Status          string
+	ExitCode        sql.NullInt64
+	StdoutPreview   string
+	StderrPreview   string
+	StdoutBytes     int64
+	StderrBytes     int64
+	OutputAvailable bool
+	OutputError     sql.NullString
+	ErrorText       sql.NullString
+	FinishedAt      int64
+}
+
+type CommandRunFilter struct {
+	TokenIDs []int64
+	Hosts    []string
+	Tools    []string
+	Statuses []string
+	Query    string
+	Before   int64
+	Limit    int
 }
 
 type Metric struct {

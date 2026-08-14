@@ -1,6 +1,6 @@
 import * as CheckboxPrimitive from '@radix-ui/react-checkbox'
 import * as PopoverPrimitive from '@radix-ui/react-popover'
-import { CaretDown, Check, MagnifyingGlass } from '@phosphor-icons/react'
+import { CaretDown, Check, MagnifyingGlass, Plus } from '@phosphor-icons/react'
 import { useState } from 'react'
 import { cn } from '@/lib/cn'
 import { Badge } from './badge'
@@ -40,6 +40,9 @@ export function MultiSelect<T extends string | number>({
   invalid,
   id,
   maxSelected,
+  onCreateOption,
+  createText = (q) => `创建标签「${q}」`,
+  'aria-label': ariaLabel,
 }: {
   value: T[]
   onChange: (value: T[]) => void
@@ -50,6 +53,11 @@ export function MultiSelect<T extends string | number>({
   invalid?: boolean
   maxSelected?: number
   id?: string
+  /** 传入即开启「创建新选项」：搜索词与现有 label 无完全匹配（大小写不敏感）时露出创建行 */
+  onCreateOption?: (label: string) => void
+  /** 创建行文案，默认面向标签场景；其它场景按需覆盖 */
+  createText?: (query: string) => string
+  'aria-label'?: string
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -66,6 +74,17 @@ export function MultiSelect<T extends string | number>({
     .filter((o) => !q || o.label.toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => Number(value.includes(b.value)) - Number(value.includes(a.value)))
 
+  // 与现有 label 完全相同（忽略大小写）时不提供创建，避免造出肉眼难分的重复项
+  const canCreate =
+    Boolean(q) &&
+    onCreateOption != null &&
+    !options.some((o) => o.label.toLowerCase() === q.toLowerCase())
+  const create = () => {
+    if (!canCreate) return
+    onCreateOption(q)
+    setQuery('')
+  }
+
   const shown = value.slice(0, MAX_VISIBLE_CHIPS)
   const rest = value.length - shown.length
 
@@ -79,6 +98,7 @@ export function MultiSelect<T extends string | number>({
     >
       <PopoverPrimitive.Trigger
         id={id}
+        aria-label={ariaLabel}
         aria-invalid={invalid || undefined}
         // chip 被截断时靠 title 补全，触发器里不再塞第二层控件
         title={value.length > 0 ? value.map(labelOf).join('、') : undefined}
@@ -131,10 +151,15 @@ export function MultiSelect<T extends string | number>({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
+                if (e.key !== 'Enter' || !q) return
                 // 有搜索词时回车直接勾选首个匹配项，全程不需要碰鼠标
-                if (e.key === 'Enter' && q && visible.length > 0) {
+                if (visible.length > 0) {
                   e.preventDefault()
                   toggle(visible[0].value)
+                } else if (canCreate) {
+                  // 没有可勾选的匹配项时，回车退一步触发创建，与点击创建行等效
+                  e.preventDefault()
+                  create()
                 }
               }}
               placeholder={searchPlaceholder}
@@ -176,6 +201,17 @@ export function MultiSelect<T extends string | number>({
                 </label>
               )
             })}
+            {canCreate && (
+              // 创建行与选项行同款排版，只把前置的 checkbox 换成 Plus，行为差异一眼可辨
+              <button
+                type="button"
+                onClick={create}
+                className="flex w-full cursor-pointer items-center gap-2.5 rounded-[8px] px-2.5 py-1.5 text-left text-sm text-text hover:bg-surface-2"
+              >
+                <Plus size={14} className="shrink-0 text-accent" />
+                <span className="truncate">{createText(q)}</span>
+              </button>
+            )}
           </div>
           {value.length > 0 && (
             <div className="flex items-center justify-between border-t border-border px-3 py-1.5">

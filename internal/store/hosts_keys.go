@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -58,13 +59,15 @@ func (s *Store) DeleteKey(ctx context.Context, id int64) error {
 func scanHost(row interface{ Scan(...any) error }) (Host, error) {
 	var h Host
 	var enabled int
-	err := row.Scan(&h.ID, &h.Name, &h.Addr, &h.Port, &h.Username, &h.AuthType, &h.KeyID, &h.PasswordEnc, &h.HostKeyFP, &h.JumpHostID, &enabled, &h.CreatedAt)
+	var tagsRaw sql.NullString
+	err := row.Scan(&h.ID, &h.Name, &h.Addr, &h.Port, &h.Username, &h.AuthType, &h.KeyID, &h.PasswordEnc, &h.HostKeyFP, &h.JumpHostID, &enabled, &h.CreatedAt, &tagsRaw)
 	h.MonitorEnabled = enabled != 0
+	h.Tags = parseHostTags(tagsRaw)
 	return h, err
 }
 func (s *Store) CreateHost(ctx context.Context, h Host) (Host, error) {
 	now := time.Now().Unix()
-	res, err := s.DB.ExecContext(ctx, `INSERT INTO hosts(name,addr,port,username,auth_type,key_id,password_enc,jump_host_id,monitor_enabled,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, h.Name, h.Addr, h.Port, h.Username, h.AuthType, nullInt(h.KeyID), h.PasswordEnc, nullInt(h.JumpHostID), boolInt(h.MonitorEnabled), now)
+	res, err := s.DB.ExecContext(ctx, `INSERT INTO hosts(name,addr,port,username,auth_type,key_id,password_enc,jump_host_id,monitor_enabled,created_at,tags) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, h.Name, h.Addr, h.Port, h.Username, h.AuthType, nullInt(h.KeyID), h.PasswordEnc, nullInt(h.JumpHostID), boolInt(h.MonitorEnabled), now, hostTagsJSON(h.Tags))
 	if err != nil {
 		return Host{}, err
 	}
@@ -73,7 +76,7 @@ func (s *Store) CreateHost(ctx context.Context, h Host) (Host, error) {
 	return h, nil
 }
 func (s *Store) UpdateHost(ctx context.Context, h Host) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE hosts SET name=?,addr=?,port=?,username=?,auth_type=?,key_id=?,password_enc=?,jump_host_id=?,monitor_enabled=? WHERE id=?`, h.Name, h.Addr, h.Port, h.Username, h.AuthType, nullInt(h.KeyID), h.PasswordEnc, nullInt(h.JumpHostID), boolInt(h.MonitorEnabled), h.ID)
+	_, err := s.DB.ExecContext(ctx, `UPDATE hosts SET name=?,addr=?,port=?,username=?,auth_type=?,key_id=?,password_enc=?,jump_host_id=?,monitor_enabled=?,tags=? WHERE id=?`, h.Name, h.Addr, h.Port, h.Username, h.AuthType, nullInt(h.KeyID), h.PasswordEnc, nullInt(h.JumpHostID), boolInt(h.MonitorEnabled), hostTagsJSON(h.Tags), h.ID)
 	return err
 }
 func (s *Store) DeleteHost(ctx context.Context, id int64) error {
@@ -129,7 +132,7 @@ func (s *Store) DeleteHost(ctx context.Context, id int64) error {
 	return tx.Commit()
 }
 func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,jump_host_id,monitor_enabled,created_at FROM hosts ORDER BY name`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,jump_host_id,monitor_enabled,created_at,tags FROM hosts ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -145,10 +148,10 @@ func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 	return out, rows.Err()
 }
 func (s *Store) GetHostByName(ctx context.Context, name string) (Host, error) {
-	return scanHost(s.DB.QueryRowContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,jump_host_id,monitor_enabled,created_at FROM hosts WHERE name=?`, name))
+	return scanHost(s.DB.QueryRowContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,jump_host_id,monitor_enabled,created_at,tags FROM hosts WHERE name=?`, name))
 }
 func (s *Store) GetHost(ctx context.Context, id int64) (Host, error) {
-	return scanHost(s.DB.QueryRowContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,jump_host_id,monitor_enabled,created_at FROM hosts WHERE id=?`, id))
+	return scanHost(s.DB.QueryRowContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,jump_host_id,monitor_enabled,created_at,tags FROM hosts WHERE id=?`, id))
 }
 func (s *Store) JumpDependentNames(ctx context.Context, id int64) ([]string, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT name FROM hosts WHERE jump_host_id=? ORDER BY name`, id)
@@ -175,7 +178,7 @@ func (s *Store) UpdateHostFingerprint(ctx context.Context, id int64, fp *string)
 	return err
 }
 func (s *Store) MonitoredHosts(ctx context.Context) ([]Host, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,jump_host_id,monitor_enabled,created_at FROM hosts WHERE monitor_enabled=1 ORDER BY name`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,jump_host_id,monitor_enabled,created_at,tags FROM hosts WHERE monitor_enabled=1 ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -195,6 +198,29 @@ func boolInt(v bool) int {
 		return 1
 	}
 	return 0
+}
+
+// hostTagsJSON 把标签序列化为 JSON 数组字符串，空标签也存 '[]'。
+func hostTagsJSON(tags []string) string {
+	if len(tags) == 0 {
+		return "[]"
+	}
+	raw, err := json.Marshal(tags)
+	if err != nil {
+		return "[]"
+	}
+	return string(raw)
+}
+
+// parseHostTags 反序列化标签列，容忍 NULL、空串与脏数据，始终返回非 nil 切片。
+func parseHostTags(raw sql.NullString) []string {
+	tags := make([]string, 0)
+	if raw.Valid {
+		if err := json.Unmarshal([]byte(raw.String), &tags); err != nil || tags == nil {
+			tags = make([]string, 0)
+		}
+	}
+	return tags
 }
 func nullInt(v sql.NullInt64) any {
 	if v.Valid {

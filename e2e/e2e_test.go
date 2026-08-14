@@ -29,10 +29,11 @@ func (t authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 type hostView struct {
-	ID         int64   `json:"id"`
-	Name       string  `json:"name"`
-	HostKeyFP  *string `json:"hostkey_fp"`
-	JumpHostID *int64  `json:"jump_host_id"`
+	ID         int64    `json:"id"`
+	Name       string   `json:"name"`
+	HostKeyFP  *string  `json:"hostkey_fp"`
+	JumpHostID *int64   `json:"jump_host_id"`
+	Tags       []string `json:"tags"`
 }
 type managedHosts struct {
 	Hosts []hostView `json:"hosts"`

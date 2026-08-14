@@ -116,6 +116,35 @@ func TestRedactedJSONRemovesNestedPasswords(t *testing.T) {
 	}
 }
 
+func TestCallSummaryExtractsCommandAndPaths(t *testing.T) {
+	cases := []struct {
+		in   any
+		want string
+	}{
+		{ExecInput{Host: "web-01", Command: "uptime"}, "uptime"},
+		{ExecManyInput{Hosts: []string{"a", "b"}, Command: "uname -a"}, "uname -a"},
+		{JobStartInput{Host: "web-01", Command: "sleep 10"}, "sleep 10"},
+		{FileReadInput{Host: "web-01", Path: "/etc/os-release"}, "/etc/os-release"},
+		{GrepInput{Host: "web-01", Pattern: "TODO", Path: "/app"}, "TODO  /app"},
+		{FileTransferInput{SrcHost: "a", SrcPath: "/src", DstHost: "b", DstPath: "/dst"}, "/src → /dst"},
+		{MemoryRecallInput{Query: "nginx 配置"}, "nginx 配置"},
+		{MemoryRememberInput{Content: "不应进入实时事件"}, ""},
+		{map[string]any{}, ""},
+	}
+	for _, tc := range cases {
+		if got := callSummary(tc.in); got != tc.want {
+			t.Errorf("callSummary(%#v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestCallSummaryTruncatesLongCommands(t *testing.T) {
+	got := callSummary(ExecInput{Command: strings.Repeat("a", 300)})
+	if got != strings.Repeat("a", 240)+"…" {
+		t.Fatalf("截断结果 = %q", got)
+	}
+}
+
 func TestHostOfPrefersHostAndFallsBackToName(t *testing.T) {
 	if got := hostOf(HostUpdateInput{Host: "old", Name: "new"}); got != "old" {
 		t.Fatalf("更新审计主机 = %q", got)

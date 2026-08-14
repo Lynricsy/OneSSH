@@ -12,6 +12,8 @@ export type Host = {
   /** 跳板主机 id；缺省表示直连 */
   jump_host_id?: number
   monitor_enabled: boolean
+  /** 分组标签，后端保证非 null */
+  tags: string[]
   created_at: number
 }
 
@@ -40,7 +42,9 @@ export type JobStatus = {
     command: string
     cwd: string
     status: string
+    exit_code: number | null
     started_at: number
+    finished_at: number | null
   }
   log_bytes: number
 }
@@ -72,9 +76,53 @@ export type Audit = {
   Tool: string
   Host: { String: string; Valid: boolean }
   ParamsJSON: string
+  RunIDs?: string[]
   OK: boolean
   DurationMS: number
   BytesOut: number
+}
+
+export type CommandRunStatus =
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'timeout'
+  | 'cancelled'
+  | 'lost'
+
+export type CommandRun = {
+  seq: number
+  id: string
+  token_id: number | null
+  token_name: string | null
+  tool: 'exec' | 'exec_many' | 'job_start' | string
+  host_id: number | null
+  host: string
+  command: string
+  cwd: string
+  session: string | null
+  job_id: string | null
+  status: CommandRunStatus
+  exit_code: number | null
+  stdout_preview?: string
+  stderr_preview?: string
+  stdout_bytes: number
+  stderr_bytes: number
+  output_available: boolean
+  output_expired: boolean
+  output_error: string | null
+  error: string | null
+  started_at: number
+  finished_at: number | null
+  duration_ms: number
+}
+
+export type CommandOutputChunk = {
+  content: string
+  offset_bytes: number
+  next_offset_bytes: number
+  total_bytes: number
+  complete: boolean
 }
 
 /** 记忆行：host_id 为 null 即全局记忆库；host_name 由后端 LEFT JOIN 带出 */
@@ -122,6 +170,7 @@ export type HostPayload = {
   /** 跳板主机名；空/省略表示直连 */
   jump_host?: string
   monitor_enabled: boolean
+  tags?: string[]
 }
 
 export type KeyPayload = {

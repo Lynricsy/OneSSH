@@ -37,7 +37,7 @@
 - **凭据不出网关。** 私钥和密码由 32 字节主密钥经 AES-256-GCM 加密存储，只在建立 SSH 连接时解密，Agent 永远拿不到明文。
 - **权限可收敛。** 每个令牌绑定一组主机；执行权限与主机配置管理权限彼此独立，默认关闭后者。
 - **随时可撤销。** 令牌是网关侧的一行记录，删掉即失效，不需要登录每台机器轮换 `authorized_keys`。
-- **全程留痕。** 每次调用、每次权限拒绝都写审计；文件正文和编辑内容只记长度摘要，不落盘敏感数据。
+- **全程留痕。** 每次调用、每次权限拒绝都写审计；`exec`、`exec_many` 与 `job_start` 另有逐次命令记录，可查看真实退出码和 stdout / stderr。文件正文和编辑内容只记长度摘要。
 
 对 Agent 侧则是一个标准 MCP 服务：`exec`、`file_read`、`file_edit`、`grep`、`find`、`memory_remember`、`memory_recall` 等工具开箱即用；运维事实按主机跨会话持久保存。
 
@@ -86,7 +86,7 @@ flowchart LR
     subgraph state["本地状态"]
         direction TB
         DB[("SQLite<br/>/data/onessh.db")]
-        Art["artifacts<br/>/data/artifacts"]
+        Art["命令输出与 artifacts<br/>/data/command-runs · /data/artifacts"]
     end
 
     subgraph remote["远端主机"]
@@ -224,6 +224,8 @@ Authorization: Bearer osh_...
 `file_edit` 支持 `expected_sha256` 乐观锁，冲突时应重新读取。大输出会返回 `artifact_id`，再用 `output_read` 分段读取或正则过滤。
 主机配置支持可选的 `jump_host`（REST/MCP 输入使用跳板主机名，列表输出仍以稳定 ID 关联）。连接会复用连接池中的跳板并通过 SSH TCP 隧道到达目标，对命令、文件、任务、终端和监控工具透明；最多串联 5 级且禁止成环。被其他主机依赖的跳板不能直接删除，需先把依赖者改回直连或切换到其他跳板。
 
+WebUI 的「活动」页会为每次 `exec`、`job_start`，以及 `exec_many` 中的每台目标主机生成独立 `run_id`。点击对应审计记录即可从右侧查看真实退出码和输出。记录先进入 `running`，再按真实退出码落为成功、失败、超时、取消或失联；同步命令的 stdout / stderr 分开保存并支持分段读取，后台任务页可增量查看合并日志。网关异常重启时，无法确认结果的同步命令会明确标为失联，远端仍可能继续运行的后台任务则由后续状态刷新收敛。
+
 
 记忆按 `host_id` 绑定到主机 bank；主机改名不会丢失，删除主机时对应记忆一并清理。不带 `host` 写入或召回全局 bank；指定主机召回时会同时合并该主机与全局记忆。`memory_sleep` 不调用 LLM，只执行确定性去重、长期未使用记忆衰减和低分旧记忆清理。正文参数在审计中只记录长度。
 
@@ -360,6 +362,7 @@ docker pull ghcr.io/lynricsy/onessh:latest
 
 - `/data/onessh.db` — 容器内的主机、加密凭据、令牌哈希、记忆、任务、审计与指标数据库；原生部署使用 `ONESSH_DATA_DIR/onessh.db`。记忆正文和可选 embedding 向量同库存储。
 - `/data/artifacts/` — 容器内被截断的命令输出；原生部署使用 `ONESSH_DATA_DIR/artifacts/`。启动时以及每小时清理超过 7 天的文件，指标数据同样保留 7 天。该清理独立于监控轮询，`ONESSH_POLL_INTERVAL=0` 也照常执行。
+- `/data/command-runs/` — `exec` / `exec_many` 的完整 stdout 与 stderr，文件权限为 `0600`，保留 7 天；到期后数据库仍保留命令、状态、退出码和耗时，但清除输出预览并标记为已过期。命令输出可能包含敏感数据，应像数据库与主密钥一样保护整个数据目录。
 - 升级既有数据目录会自动执行数据库迁移；迁移失败时不会跳过，也不会部分登记版本号。
 
 **凭据与令牌**
