@@ -165,7 +165,7 @@ func applyMigration(db *sql.DB, m migration) error {
 		if _, err = tx.Exec(m.sql); err != nil {
 			return err
 		}
-	case 10:
+	case 11:
 		hasColumn, err := tableHasColumn(tx, "jobs", "log_bytes")
 		if err != nil {
 			return err
@@ -178,7 +178,7 @@ func applyMigration(db *sql.DB, m migration) error {
 		if _, err = tx.Exec(m.sql); err != nil {
 			return err
 		}
-	case 11:
+	case 12:
 		hasColumn, err := tableHasColumn(tx, "audit", "command_run_ids_json")
 		if err != nil {
 			return err
