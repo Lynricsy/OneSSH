@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/crypto/ssh"
 	"onessh/internal/events"
 	"onessh/internal/execx"
 	"onessh/internal/sshpool"
@@ -110,14 +111,7 @@ func (m *Manager) start(ctx context.Context, h store.Host, tokenID int64, comman
 		// 仍须先核验 job 标记；短命任务退出并发生 PID 复用时绝不能误伤新进程。
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		cleanupScript := jobProcessIdentityScript(j) + `
-if alive && owned; then
-  kill -TERM "$target" 2>/dev/null || :
-  i=0
-  while alive && [ "$i" -lt 10 ]; do sleep 0.1; i=$((i+1)); done
-  if alive && owned; then kill -KILL "$target" 2>/dev/null || :; fi
-fi`
-		_, _ = m.Exec.Run(cleanupCtx, client, cleanupScript, "~", nil, execx.Options{Timeout: 5 * time.Second, MaxLines: 5})
+		_ = m.cleanupStartedJob(cleanupCtx, client, j)
 		return store.Job{}, err
 	}
 	m.Events.Publish("job_status", map[string]any{"job_id": id, "status": "running"})
@@ -125,6 +119,18 @@ fi`
 		m.Events.Publish("command_job_linked", map[string]any{"run_id": runID, "job_id": id})
 	}
 	return j, nil
+}
+
+func (m *Manager) cleanupStartedJob(ctx context.Context, client *ssh.Client, j store.Job) error {
+	cleanupScript := jobProcessIdentityScript(j) + `
+if alive && owned; then
+  kill -TERM "$target" 2>/dev/null || :
+  i=0
+  while alive && [ "$i" -lt 10 ]; do sleep 0.1; i=$((i+1)); done
+  if alive && owned; then kill -KILL "$target" 2>/dev/null || :; fi
+fi`
+	_, err := m.Exec.Run(ctx, client, cleanupScript, "~", nil, execx.Options{Timeout: 5 * time.Second, MaxLines: 5})
+	return err
 }
 
 func trackedJobCommand(command string) string {

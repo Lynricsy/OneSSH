@@ -170,6 +170,25 @@ func TestRealJobDefaultCwd(t *testing.T) {
 		t.Fatalf("leader 退出后的残留进程组未被 KILL: %#v", killed)
 	}
 
+	cleanupOwned, err := m.Start(ctx, h, 1, `trap '' TERM; printf cleanup-ready; while :; do sleep 1; done`, "~", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cleanupOwned.UsedSetsid {
+		t.Fatal("集成夹具缺少 setsid，无法验证启动失败进程组清理")
+	}
+	defer func() {
+		_, _ = m.Exec.Run(context.Background(), client, `kill -KILL -`+strconv.FormatInt(cleanupOwned.PID.Int64, 10), "~", nil, execx.Options{Timeout: 2 * time.Second, MaxLines: 2})
+	}()
+	waitForLog(cleanupOwned.ID, "cleanup-ready")
+	if err = m.cleanupStartedJob(ctx, client, cleanupOwned); err != nil {
+		t.Fatal(err)
+	}
+	cleanupProbe, err := m.Exec.Run(ctx, client, `kill -0 -`+strconv.FormatInt(cleanupOwned.PID.Int64, 10), "~", nil, execx.Options{Timeout: 2 * time.Second, MaxLines: 2})
+	if err != nil || cleanupProbe.ExitCode == 0 {
+		t.Fatalf("身份匹配的启动失败任务组未被清理: result=%#v err=%v", cleanupProbe, err)
+	}
+
 	foreignResult, err := m.Exec.Run(ctx, client, `nohup sleep 30 >/dev/null 2>&1 & echo "$!"`, "~", nil, execx.Options{Timeout: 2 * time.Second, MaxLines: 2})
 	if err != nil {
 		t.Fatal(err)
@@ -188,12 +207,15 @@ func TestRealJobDefaultCwd(t *testing.T) {
 	if err = st.CreateJob(ctx, stale); err != nil {
 		t.Fatal(err)
 	}
-	if err = m.Kill(ctx, stale, "TERM"); err != nil {
+	if err = m.cleanupStartedJob(ctx, client, stale); err != nil {
 		t.Fatal(err)
 	}
 	probe, err := m.Exec.Run(ctx, client, `kill -0 `+strconv.FormatInt(foreignPID, 10), "~", nil, execx.Options{Timeout: 2 * time.Second, MaxLines: 2})
 	if err != nil || probe.ExitCode != 0 {
-		t.Fatalf("PID 归属不匹配时误杀了无关进程: result=%#v err=%v", probe, err)
+		t.Fatalf("身份不匹配的启动失败清理误杀了无关进程: result=%#v err=%v", probe, err)
+	}
+	if err = m.Kill(ctx, stale, "TERM"); err != nil {
+		t.Fatal(err)
 	}
 	storedStale, err := st.GetJob(ctx, stale.ID)
 	if err != nil {
