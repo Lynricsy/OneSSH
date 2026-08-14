@@ -170,75 +170,84 @@ export function CommandRunDetail({ id, audit }: { id: string; audit?: Audit }) {
   }
   const run = detail.data
   const outputBytes = run.stdout_bytes + run.stderr_bytes
-  const auditEntries = audit ? auditParamEntries(audit) : []
+  // 与顶部字段同义的参数（host/cwd）不再重复列出，其余参数直接并入字段网格
+  const auditEntries = audit
+    ? auditParamEntries(audit).filter(
+        ([key, value]) =>
+          !((key === 'host' || key === 'cwd') && typeof value === 'string' && value === run[key]),
+      )
+    : []
   return (
     <div className="space-y-4">
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[13px] sm:grid-cols-4">
-        <div>
-          <dt className="text-[11px] tracking-wide text-muted uppercase">状态</dt>
-          <dd className="mt-1">
-            <RunStatus status={run.status} />
-          </dd>
-        </div>
-        {audit && (
+      <section className="rounded-[8px] border border-border px-3 py-3">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[13px] sm:grid-cols-4">
           <div>
-            <dt className="text-[11px] tracking-wide text-muted uppercase">调用结果</dt>
+            <dt className="text-[11px] tracking-wide text-muted uppercase">状态</dt>
             <dd className="mt-1">
-              {audit.OK ? (
-                <span className="inline-flex items-center gap-1.5 text-muted">
-                  <Dot className="text-success" />
-                  成功
-                </span>
-              ) : (
-                <Badge variant="danger">失败</Badge>
-              )}
+              <RunStatus status={run.status} />
             </dd>
           </div>
-        )}
-        <div>
-          <dt className="text-[11px] tracking-wide text-muted uppercase">退出码</dt>
-          <dd className="mt-1 font-mono tabular-nums">{run.exit_code ?? '—'}</dd>
-        </div>
-        <div>
-          <dt className="text-[11px] tracking-wide text-muted uppercase">耗时</dt>
-          <dd className="mt-1 tabular-nums">{formatDuration(run.duration_ms)}</dd>
-        </div>
-        <div>
-          <dt className="text-[11px] tracking-wide text-muted uppercase">输出</dt>
-          <dd className="mt-1 tabular-nums">{formatBytes(outputBytes)}</dd>
-        </div>
-        <div>
-          <dt className="text-[11px] tracking-wide text-muted uppercase">主机</dt>
-          <dd className="mt-1 truncate" title={run.host}>
-            {run.host}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-[11px] tracking-wide text-muted uppercase">工具</dt>
-          <dd className="mt-1 font-mono">{run.tool}</dd>
-        </div>
-        <div>
-          <dt className="text-[11px] tracking-wide text-muted uppercase">工作目录</dt>
-          <dd className="mt-1 truncate font-mono" title={run.cwd}>
-            {run.cwd}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-[11px] tracking-wide text-muted uppercase">调用令牌</dt>
-          <dd className="mt-1 truncate" title={run.token_name ?? '系统'}>
-            {run.token_name ?? '系统'}
-          </dd>
-        </div>
-      </dl>
+          {audit && (
+            <div>
+              <dt className="text-[11px] tracking-wide text-muted uppercase">调用结果</dt>
+              <dd className="mt-1">
+                {audit.OK ? (
+                  <span className="inline-flex items-center gap-1.5 text-muted">
+                    <Dot className="text-success" />
+                    成功
+                  </span>
+                ) : (
+                  <Badge variant="danger">失败</Badge>
+                )}
+              </dd>
+            </div>
+          )}
+          <div>
+            <dt className="text-[11px] tracking-wide text-muted uppercase">退出码</dt>
+            <dd className="mt-1 font-mono tabular-nums">{run.exit_code ?? '—'}</dd>
+          </div>
+          <div>
+            <dt className="text-[11px] tracking-wide text-muted uppercase">耗时</dt>
+            <dd className="mt-1 tabular-nums">{formatDuration(run.duration_ms)}</dd>
+          </div>
+          <div>
+            <dt className="text-[11px] tracking-wide text-muted uppercase">输出</dt>
+            <dd className="mt-1 tabular-nums">{formatBytes(outputBytes)}</dd>
+          </div>
+          <div>
+            <dt className="text-[11px] tracking-wide text-muted uppercase">主机</dt>
+            <dd className="mt-1 truncate" title={run.host}>
+              {run.host}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[11px] tracking-wide text-muted uppercase">工具</dt>
+            <dd className="mt-1 font-mono">{run.tool}</dd>
+          </div>
+          <div>
+            <dt className="text-[11px] tracking-wide text-muted uppercase">工作目录</dt>
+            <dd className="mt-1 truncate font-mono" title={run.cwd}>
+              {run.cwd}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[11px] tracking-wide text-muted uppercase">调用令牌</dt>
+            <dd className="mt-1 truncate" title={run.token_name ?? '系统'}>
+              {run.token_name ?? '系统'}
+            </dd>
+          </div>
+          {auditEntries.map(([key, value]) => (
+            <div key={key}>
+              <dt className="text-[11px] tracking-wide text-muted uppercase">{key}</dt>
+              <dd className="mt-1 font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap">
+                {formatAuditParam(value)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </section>
 
       <CopyableBlock label="命令" value={run.command} />
-
-      {auditEntries.length > 0 && (
-        <div>
-          <p className="mb-1.5 text-[11px] tracking-wide text-muted uppercase">调用参数</p>
-          <ParamsList entries={auditEntries} />
-        </div>
-      )}
 
       {run.error && (
         <div className="rounded-[8px] border border-danger/30 bg-danger/8 px-3 py-2.5 text-[13px] text-danger">
