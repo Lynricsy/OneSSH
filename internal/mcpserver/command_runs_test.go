@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -78,6 +79,50 @@ func TestFinishCommandRunOmitsUnknownExitCode(t *testing.T) {
 	}
 }
 
+func TestFinishCommandRunKeepsStatusAndExitCodeConsistent(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	tests := []struct {
+		name      string
+		ctx       context.Context
+		result    execx.Result
+		runErr    error
+		want      string
+		wantCode  int64
+		codeValid bool
+	}{
+		{name: "完成后请求才取消", ctx: cancelled, result: execx.Result{ExitCode: 0}, want: "succeeded", wantCode: 0, codeValid: true},
+		{name: "执行中取消", ctx: cancelled, result: execx.Result{Timeout: true, ExitCode: -1}, want: "cancelled"},
+		{name: "非零退出后存储失败", ctx: context.Background(), result: execx.Result{ExitCode: 7, ExitCodeKnown: true}, runErr: errors.New("输出落盘失败"), want: "failed", wantCode: 7, codeValid: true},
+		{name: "零退出后存储失败", ctx: context.Background(), result: execx.Result{ExitCode: 0, ExitCodeKnown: true}, runErr: errors.New("artifact 创建失败"), want: "failed", wantCode: 0, codeValid: true},
+		{name: "连接阶段取消", ctx: cancelled, result: execx.Result{}, runErr: context.Canceled, want: "cancelled"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			st, err := store.Open(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer st.Close()
+			server := &Server{Store: st, Events: events.New()}
+			run, err := server.startCommandRun(context.Background(), "exec", store.Host{ID: 1, Name: "web"}, "command", "~", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = server.finishCommandRun(test.ctx, run, test.result, test.runErr); err != nil {
+				t.Fatal(err)
+			}
+			stored, err := st.GetCommandRun(context.Background(), run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Status != test.want || stored.ExitCode.Valid != test.codeValid || (test.codeValid && stored.ExitCode.Int64 != test.wantCode) {
+				t.Fatalf("最终记录不一致: %#v", stored)
+			}
+		})
+	}
+}
+
 func TestCommandPreviewPreservesUTF8(t *testing.T) {
 	input := strings.Repeat("你", commandPreviewLimit)
 	preview := commandPreview(input)
@@ -131,6 +176,10 @@ func TestCommandRunStatus(t *testing.T) {
 		{name: "超时", ctx: context.Background(), result: execx.Result{Timeout: true}, want: "timeout"},
 		{name: "取消", ctx: cancelled, result: execx.Result{Timeout: true}, want: "cancelled"},
 		{name: "连接阶段取消", ctx: cancelled, err: context.Canceled, want: "cancelled"},
+		{name: "完成后请求才取消", ctx: cancelled, result: execx.Result{ExitCode: 0}, want: "succeeded"},
+		{name: "非零退出后请求才取消", ctx: cancelled, result: execx.Result{ExitCode: 7}, want: "failed"},
+		{name: "非零退出后存储失败", ctx: cancelled, result: execx.Result{ExitCode: 7, ExitCodeKnown: true}, err: errors.New("输出落盘失败"), want: "failed"},
+		{name: "零退出后存储失败", ctx: cancelled, result: execx.Result{ExitCode: 0, ExitCodeKnown: true}, err: errors.New("artifact 创建失败"), want: "failed"},
 	}
 	for _, test := range tests {
 		if got := commandRunStatus(test.ctx, test.result, test.err); got != test.want {

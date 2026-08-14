@@ -96,7 +96,7 @@ func TestCommandRunRecoveryExpiryAndJobLink(t *testing.T) {
 	}
 	for id, finish := range map[string]CommandRunFinish{
 		"expired-run":     {Status: "succeeded", OutputAvailable: true, FinishedAt: 1000},
-		"unavailable-run": {Status: "failed", OutputAvailable: false, OutputError: sql.NullString{String: "磁盘写入失败", Valid: true}, FinishedAt: 1000},
+		"unavailable-run": {Status: "failed", StdoutPreview: "secret stdout", StderrPreview: "secret stderr", OutputAvailable: false, OutputError: sql.NullString{String: "磁盘写入失败", Valid: true}, FinishedAt: 1000},
 		"fresh-run":       {Status: "succeeded", OutputAvailable: true, FinishedAt: 8000},
 	} {
 		if err = st.FinishCommandRun(ctx, id, finish); err != nil {
@@ -143,6 +143,9 @@ func TestCommandRunRecoveryExpiryAndJobLink(t *testing.T) {
 	fresh, _ := st.GetCommandRun(ctx, "fresh-run")
 	if !expired.OutputExpired || unavailable.OutputExpired || fresh.OutputExpired || syncRun.OutputExpired || linked.OutputExpired {
 		t.Fatalf("输出过期范围异常: expired=%#v unavailable=%#v fresh=%#v sync=%#v job=%#v", expired, unavailable, fresh, syncRun, linked)
+	}
+	if unavailable.StdoutPreview != "" || unavailable.StderrPreview != "" {
+		t.Fatalf("捕获失败记录的敏感预览未过期清理: %#v", unavailable)
 	}
 	deletable, err := st.DeletableCommandRunOutputIDs(ctx)
 	if err != nil {

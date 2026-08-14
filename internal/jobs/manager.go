@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/crypto/ssh"
 	"onessh/internal/events"
 	"onessh/internal/execx"
 	"onessh/internal/sshpool"
@@ -78,7 +79,7 @@ func (m *Manager) start(ctx context.Context, h store.Host, tokenID int64, comman
 		cwdShell = `"$HOME"`
 	}
 	inner := trackedJobCommand(command)
-	script := `d="$HOME/.onessh/jobs/` + id + `"; export d; mkdir -p "$d"; cd ` + cwdShell + ` || exit 97; if command -v setsid >/dev/null 2>&1; then S=setsid; else S=; fi; $S nohup sh -c ` + execx.SHQ(inner) + ` >"$d/out.log" 2>&1 </dev/null & echo "$!:$S"`
+	script := `d="$HOME/.onessh/jobs/` + id + `"; export d; ONESSH_JOB_MARKER=` + execx.SHQ("onessh-job-"+id) + `; export ONESSH_JOB_MARKER; mkdir -p "$d"; cd ` + cwdShell + ` || exit 97; if command -v setsid >/dev/null 2>&1; then S=setsid; else S=; fi; $S nohup sh -c ` + execx.SHQ(inner) + ` ` + execx.SHQ("onessh-job-"+id) + ` >"$d/out.log" 2>&1 </dev/null & echo "$!:$S"`
 	client, err := m.Pool.Get(ctx, h.Name)
 	if err != nil {
 		return store.Job{}, err
@@ -107,13 +108,10 @@ func (m *Manager) start(ctx context.Context, h store.Host, tokenID int64, comman
 	}
 	if err != nil {
 		// 远端进程已经启动，但本地事务没有落成时不能把它变成无人可见、无法终止的孤儿。
+		// 仍须先核验 job 标记；短命任务退出并发生 PID 复用时绝不能误伤新进程。
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		target := strconv.FormatInt(pid, 10)
-		if j.UsedSetsid {
-			target = "-" + target
-		}
-		_, _ = m.Exec.Run(cleanupCtx, client, `kill -TERM -- `+target, "~", nil, execx.Options{Timeout: 5 * time.Second, MaxLines: 5})
+		_ = m.cleanupStartedJob(cleanupCtx, client, j)
 		return store.Job{}, err
 	}
 	m.Events.Publish("job_status", map[string]any{"job_id": id, "status": "running"})
@@ -123,11 +121,54 @@ func (m *Manager) start(ctx context.Context, h store.Host, tokenID int64, comman
 	return j, nil
 }
 
+func (m *Manager) cleanupStartedJob(ctx context.Context, client *ssh.Client, j store.Job) error {
+	cleanupScript := jobProcessIdentityScript(j) + `
+if alive && owned; then
+  kill -TERM "$target" 2>/dev/null || :
+  i=0
+  while alive && [ "$i" -lt 10 ]; do sleep 0.1; i=$((i+1)); done
+  if alive && owned; then kill -KILL "$target" 2>/dev/null || :; fi
+fi`
+	_, err := m.Exec.Run(ctx, client, cleanupScript, "~", nil, execx.Options{Timeout: 5 * time.Second, MaxLines: 5})
+	return err
+}
+
 func trackedJobCommand(command string) string {
 	// 在子 shell 中执行用户命令，确保 command 自己调用 exit 或启用 set -e 时，
 	// 外层仍能写入真实退出码。
 	return `( ` + command + `
 ); __ec=$?; echo "$__ec" > "$d/exit"`
+}
+
+// jobProcessIdentityScript 以 argv 标记验证进程组 leader；leader 已退出时，再用继承的
+// 环境标记核验同 PGID 的存活成员。宁可把无法证明归属的任务记为 lost，也绝不向未知 PID 发信号。
+func jobProcessIdentityScript(j store.Job) string {
+	pid := strconv.FormatInt(j.PID.Int64, 10)
+	target := pid
+	group := "0"
+	if j.UsedSetsid {
+		target = "-" + target
+		group = "1"
+	}
+	return `pid=` + execx.SHQ(pid) + `; target=` + execx.SHQ(target) + `; marker=` + execx.SHQ("onessh-job-"+j.ID) + `; group=` + group + `;
+owned() {
+  args=$(ps -p "$pid" -o args= 2>/dev/null) || args=
+  if [ -z "$args" ] && [ -r "/proc/$pid/cmdline" ]; then
+    args=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null) || args=
+  fi
+  case "$args" in *"$marker"*) return 0;; esac
+  [ "$group" = 1 ] || return 1
+  for proc in /proc/[0-9]*; do
+    [ -r "$proc/stat" ] && [ -r "$proc/environ" ] || continue
+    stat=$(cat "$proc/stat" 2>/dev/null) || continue
+    stat=${stat##*) }
+    set -- $stat
+    [ "$3" = "$pid" ] || continue
+    if tr '\0' '\n' < "$proc/environ" 2>/dev/null | grep -Fqx "ONESSH_JOB_MARKER=$marker"; then return 0; fi
+  done
+  return 1
+}
+alive() { kill -0 "$target" 2>/dev/null; }`
 }
 func (m *Manager) Refresh(ctx context.Context, j store.Job) (Status, error) {
 	if j.Status != "running" {
@@ -142,7 +183,10 @@ func (m *Manager) Refresh(ctx context.Context, j store.Job) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	script := `d="$HOME/.onessh/jobs/` + j.ID + `"; if [ -f "$d/exit" ]; then printf 'exited:'; tr -d '\n' < "$d/exit"; printf ':'; wc -c < "$d/out.log"; elif kill -0 ` + strconv.FormatInt(j.PID.Int64, 10) + ` 2>/dev/null; then printf 'running::'; wc -c < "$d/out.log"; else printf 'lost::'; wc -c < "$d/out.log" 2>/dev/null || echo 0; fi`
+	script := `d="$HOME/.onessh/jobs/` + j.ID + `"; ` + jobProcessIdentityScript(j) + `
+if [ -f "$d/exit" ]; then printf 'exited:'; tr -d '\n' < "$d/exit"; printf ':'; wc -c < "$d/out.log";
+elif alive && owned; then printf 'running::'; wc -c < "$d/out.log";
+else printf 'lost::'; wc -c 2>/dev/null < "$d/out.log" || echo 0; fi`
 	res, err := m.Exec.Run(ctx, client, script, "~", nil, execx.Options{Timeout: 15 * time.Second, MaxLines: 5})
 	if err != nil {
 		return Status{}, err
@@ -246,14 +290,18 @@ func (m *Manager) LogChunk(ctx context.Context, j store.Job, offset int64, limit
 	if err != nil {
 		return LogChunk{}, fmt.Errorf("无法解析任务日志大小: %w", err)
 	}
-	content := result.Stdout[lineEnd+1:]
-	content = string(execx.UTF8Page([]byte(content), limit, offset+int64(len(content)) < total))
-	next := offset + int64(len(content))
+	rawContent := execx.UTF8Page([]byte(result.Stdout[lineEnd+1:]), limit, offset+int64(len(result.Stdout)-lineEnd-1) < total)
+	next := offset + int64(len(rawContent))
+	content := strings.ToValidUTF8(string(rawContent), "�")
 	_ = m.Store.UpdateJobLogBytes(context.Background(), j.ID, total)
 	_ = m.Store.UpdateCommandRunJobBytes(context.Background(), j.ID, total)
 	return LogChunk{Content: content, Offset: offset, NextOffset: next, TotalBytes: total, Complete: next >= total}, nil
 }
 func (m *Manager) Kill(ctx context.Context, j store.Job, signal string) error {
+	// 已结束任务必须先直接返回：不能再使用持久化 PID，避免 PID 复用后误伤无关进程。
+	if j.Status != "running" {
+		return nil
+	}
 	if signal != "TERM" && signal != "KILL" {
 		return fmt.Errorf("signal 仅支持 TERM 或 KILL")
 	}
@@ -265,30 +313,78 @@ func (m *Manager) Kill(ctx context.Context, j store.Job, signal string) error {
 	if err != nil {
 		return err
 	}
-	target := strconv.FormatInt(j.PID.Int64, 10)
-	if j.UsedSetsid {
-		target = "-" + target
-	}
-	res, err := m.Exec.Run(ctx, client, `kill -`+signal+` -- `+target, "~", nil, execx.Options{Timeout: 15 * time.Second, MaxLines: 20})
+	// 发信号前再次在远端核验 job 身份；setsid leader 消失时，仍可通过组员继承的环境标记
+	// 验证 PGID。信号成功后等待整个目标退出，再读取最终日志大小。
+	script := `d="$HOME/.onessh/jobs/` + j.ID + `"; ` + jobProcessIdentityScript(j) + `
+bytes() { wc -c 2>/dev/null < "$d/out.log" || printf '0\n'; }
+exited() { printf 'exited:'; tr -d '\n' < "$d/exit"; printf ':'; bytes; }
+signal_target() { kill -` + signal + ` "$target" 2>/dev/null; }
+if [ -f "$d/exit" ]; then
+  exited
+elif ! alive || ! owned; then
+  printf 'lost::'; bytes
+elif ! signal_target; then
+  if [ -f "$d/exit" ]; then exited
+  elif ! alive || ! owned; then printf 'lost::'; bytes
+  else printf 'signal_failed::'; bytes; exit 45
+  fi
+else
+  i=0
+  while alive && [ "$i" -lt 30 ]; do
+    sleep 0.1
+    i=$((i+1))
+  done
+  if alive; then
+    printf 'running::'; bytes
+    exit 46
+  fi
+  printf 'killed::'; bytes
+fi`
+	res, err := m.Exec.Run(ctx, client, script, "~", nil, execx.Options{Timeout: 6 * time.Second, MaxLines: 5})
 	if err != nil {
 		return err
 	}
+	parts := strings.SplitN(strings.TrimSpace(res.Output), ":", 3)
 	if res.ExitCode != 0 {
-		return fmt.Errorf("kill 失败: %s", res.Output)
+		return fmt.Errorf("kill 失败: %s", strings.TrimSpace(res.Output))
 	}
-	logResult, logErr := m.Exec.Run(ctx, client, `d="$HOME/.onessh/jobs/`+j.ID+`"; wc -c < "$d/out.log"`, "~", nil, execx.Options{Timeout: 15 * time.Second, MaxLines: 5})
-	if logErr == nil && logResult.ExitCode == 0 {
-		if size, parseErr := strconv.ParseInt(strings.TrimSpace(logResult.Output), 10, 64); parseErr == nil {
-			j.LogBytes = size
-			_ = m.Store.UpdateJobLogBytes(context.Background(), j.ID, size)
-			_ = m.Store.UpdateCommandRunJobBytes(context.Background(), j.ID, size)
+	if len(parts) != 3 {
+		return fmt.Errorf("无法解析任务终止结果: %q", res.Output)
+	}
+	status := parts[0]
+	if status != "exited" && status != "killed" && status != "lost" {
+		return fmt.Errorf("未知任务终止状态: %q", status)
+	}
+	size, err := strconv.ParseInt(strings.TrimSpace(parts[2]), 10, 64)
+	if err != nil {
+		return fmt.Errorf("无法解析任务日志大小: %w", err)
+	}
+	var code *int
+	if status == "exited" {
+		value, parseErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if parseErr != nil {
+			return fmt.Errorf("无法解析任务退出码: %w", parseErr)
 		}
+		code = &value
+		j.ExitCode = sql.NullInt64{Int64: int64(value), Valid: true}
+	} else {
+		j.ExitCode = sql.NullInt64{}
 	}
-	_ = m.Store.UpdateJobState(ctx, j.ID, "killed", nil)
-	j.Status = "killed"
+	persistCtx := context.Background()
+	if err = m.Store.UpdateJobLogBytes(persistCtx, j.ID, size); err != nil {
+		return err
+	}
+	if err = m.Store.UpdateCommandRunJobBytes(persistCtx, j.ID, size); err != nil {
+		return err
+	}
+	if err = m.Store.UpdateJobState(persistCtx, j.ID, status, code); err != nil {
+		return err
+	}
+	j.Status = status
+	j.LogBytes = size
 	j.FinishedAt = sql.NullInt64{Int64: time.Now().Unix(), Valid: true}
-	m.syncCommandRun(j, nil)
-	m.Events.Publish("job_status", map[string]any{"job_id": j.ID, "status": "killed"})
+	m.syncCommandRun(j, code)
+	m.Events.Publish("job_status", map[string]any{"job_id": j.ID, "status": status})
 	return nil
 }
 

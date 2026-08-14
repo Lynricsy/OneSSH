@@ -60,6 +60,42 @@ const MAX_TAGS = 16
 const MAX_TAG_LENGTH = 32
 
 /**
+ * 后端 hostmanager.normalizeTags 走 Go 的 strings.ToLower：逐 rune 的 simple 小写映射。
+ * JS 的 toLowerCase 对整串按完整 Unicode 规则来，还会看上下文——`ΟΣ` 的词尾 Σ 落成 ς，
+ * `ΟΣ` 与 `οσ` 于是拿到两个不同的键，前端判重就和后端不是同一套规则了。
+ * 所以逐 code point 单独取小写切断上下文（Σ 恒为 σ），再对「单个 code point 被展开成多个」
+ * 的情况只保留首个（`İ` → `i` + U+0307，Go 只映射到 `i`），结果正好等于 simple 映射。
+ */
+const simpleLowerKey = (tag: string) => {
+  let key = ''
+  for (const ch of tag) {
+    const lower = ch.toLowerCase()
+    if (lower.length === ch.length) {
+      key += lower
+      continue
+    }
+    // 按 code point 解构，取首个映射；代理对不会被劈成半个字符
+    const [head] = lower
+    key += head
+  }
+  return key
+}
+
+/**
+ * 按上面那把小写键去重、保留首次出现的拼写，与后端 normalizeTags 判定同一批标签重复。
+ * 候选列表与已选值共用一份规则，`Web` 与 `web`、`ΟΣ` 与 `οσ` 都不会同时存在。
+ */
+const dedupeTags = (tags: string[]) => {
+  const seen = new Set<string>()
+  return tags.filter((tag) => {
+    const key = simpleLowerKey(tag)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+/**
  * TOFU 未完成是全新主机的正常初始状态，不是故障。
  * 用一个警告色小圆点点到为止，避免整列黄色 badge 把视线从主机名上抢走。
  */
@@ -660,38 +696,41 @@ export function HostsPage() {
               <Controller
                 name="tags"
                 control={control}
-                render={({ field }) => (
-                  <MultiSelect
-                    id={id}
-                    value={field.value ?? []}
-                    onChange={field.onChange}
-                    placeholder="选择或创建标签"
-                    searchPlaceholder="搜索或输入新标签…"
-                    // 候选 = 已有标签 ∪ 当前值：刚创建、还没保存到任何主机的标签也要能回显 label
-                    options={[...new Set([...allTags, ...(field.value ?? [])])].map((tag) => ({
-                      value: tag,
-                      label: tag,
-                    }))}
-                    maxSelected={MAX_TAGS}
-                    onCreateOption={(label) => {
-                      const tag = label.trim()
-                      if (!tag) return
-                      const current = field.value ?? []
-                      // 限制与后端一致，拦在输入这一刻，而不是等提交才回一句报错
-                      if ([...tag].length > MAX_TAG_LENGTH) {
-                        toast.error(`标签「${tag}」超过 ${MAX_TAG_LENGTH} 字符`)
-                        return
-                      }
-                      if (current.length >= MAX_TAGS) {
-                        toast.error(`标签最多 ${MAX_TAGS} 个`)
-                        return
-                      }
-                      // 后端按小写去重，这里放行只会造出肉眼难分的重复标签
-                      if (current.some((item) => item.toLowerCase() === tag.toLowerCase())) return
-                      field.onChange([...current, tag])
-                    }}
-                  />
-                )}
+                render={({ field }) => {
+                  // 已选值先归一，勾选/回车/创建三条路径就都从同一份干净数组出发
+                  const current = dedupeTags(field.value ?? [])
+                  return (
+                    <MultiSelect
+                      id={id}
+                      value={current}
+                      // 所有选择入口都收敛到这里：勾选与回车同样要按小写键去重，不只是创建路径
+                      onChange={(next) => field.onChange(dedupeTags(next))}
+                      placeholder="选择或创建标签"
+                      searchPlaceholder="搜索或输入新标签…"
+                      // 候选 = 已有标签 ∪ 当前值：刚创建、还没保存到任何主机的标签也要能回显 label；
+                      // 同一份去重让下拉里不会并列出现 `Web` 与 `web`
+                      options={dedupeTags([...current, ...allTags]).map((tag) => ({
+                        value: tag,
+                        label: tag,
+                      }))}
+                      maxSelected={MAX_TAGS}
+                      onCreateOption={(label) => {
+                        const tag = label.trim()
+                        if (!tag) return
+                        // 限制与后端一致，拦在输入这一刻，而不是等提交才回一句报错
+                        if ([...tag].length > MAX_TAG_LENGTH) {
+                          toast.error(`标签「${tag}」超过 ${MAX_TAG_LENGTH} 字符`)
+                          return
+                        }
+                        if (current.length >= MAX_TAGS) {
+                          toast.error(`标签最多 ${MAX_TAGS} 个`)
+                          return
+                        }
+                        field.onChange(dedupeTags([...current, tag]))
+                      }}
+                    />
+                  )
+                }}
               />
             )}
           </Field>
