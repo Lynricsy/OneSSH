@@ -365,6 +365,13 @@ func TestOpenAddsMissingCommandRunOutputCleanedColumn(t *testing.T) {
 		t.Fatalf("已有命令记录表缺少 output_cleaned 时升级失败: %v", err)
 	}
 	defer st.Close()
+	var versions int
+	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
+		t.Fatal(err)
+	}
+	if versions != 12 {
+		t.Fatalf("迁移登记数 = %d", versions)
+	}
 	var cleanedColumns int
 	if err = st.DB.QueryRow(`SELECT count(*) FROM pragma_table_info('command_runs') WHERE name='output_cleaned'`).Scan(&cleanedColumns); err != nil {
 		t.Fatal(err)

@@ -93,7 +93,8 @@ func TestFinishCommandRunKeepsStatusAndExitCodeConsistent(t *testing.T) {
 	}{
 		{name: "完成后请求才取消", ctx: cancelled, result: execx.Result{ExitCode: 0}, want: "succeeded", wantCode: 0, codeValid: true},
 		{name: "执行中取消", ctx: cancelled, result: execx.Result{Timeout: true, ExitCode: -1}, want: "cancelled"},
-		{name: "非零退出后存储失败", ctx: context.Background(), result: execx.Result{ExitCode: 7}, runErr: errors.New("输出落盘失败"), want: "failed", wantCode: 7, codeValid: true},
+		{name: "非零退出后存储失败", ctx: context.Background(), result: execx.Result{ExitCode: 7, ExitCodeKnown: true}, runErr: errors.New("输出落盘失败"), want: "failed", wantCode: 7, codeValid: true},
+		{name: "零退出后存储失败", ctx: context.Background(), result: execx.Result{ExitCode: 0, ExitCodeKnown: true}, runErr: errors.New("artifact 创建失败"), want: "failed", wantCode: 0, codeValid: true},
 		{name: "连接阶段取消", ctx: cancelled, result: execx.Result{}, runErr: context.Canceled, want: "cancelled"},
 	}
 	for _, test := range tests {
@@ -177,7 +178,8 @@ func TestCommandRunStatus(t *testing.T) {
 		{name: "连接阶段取消", ctx: cancelled, err: context.Canceled, want: "cancelled"},
 		{name: "完成后请求才取消", ctx: cancelled, result: execx.Result{ExitCode: 0}, want: "succeeded"},
 		{name: "非零退出后请求才取消", ctx: cancelled, result: execx.Result{ExitCode: 7}, want: "failed"},
-		{name: "非零退出后存储失败", ctx: cancelled, result: execx.Result{ExitCode: 7}, err: errors.New("输出落盘失败"), want: "failed"},
+		{name: "非零退出后存储失败", ctx: cancelled, result: execx.Result{ExitCode: 7, ExitCodeKnown: true}, err: errors.New("输出落盘失败"), want: "failed"},
+		{name: "零退出后存储失败", ctx: cancelled, result: execx.Result{ExitCode: 0, ExitCodeKnown: true}, err: errors.New("artifact 创建失败"), want: "failed"},
 	}
 	for _, test := range tests {
 		if got := commandRunStatus(test.ctx, test.result, test.err); got != test.want {

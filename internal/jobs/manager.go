@@ -113,7 +113,7 @@ func (m *Manager) start(ctx context.Context, h store.Host, tokenID int64, comman
 		if j.UsedSetsid {
 			target = "-" + target
 		}
-		_, _ = m.Exec.Run(cleanupCtx, client, `kill -TERM -- `+target, "~", nil, execx.Options{Timeout: 5 * time.Second, MaxLines: 5})
+		_, _ = m.Exec.Run(cleanupCtx, client, `kill -TERM `+target, "~", nil, execx.Options{Timeout: 5 * time.Second, MaxLines: 5})
 		return store.Job{}, err
 	}
 	m.Events.Publish("job_status", map[string]any{"job_id": id, "status": "running"})
@@ -143,6 +143,9 @@ func jobProcessIdentityScript(j store.Job) string {
 	return `pid=` + execx.SHQ(pid) + `; target=` + execx.SHQ(target) + `; marker=` + execx.SHQ("onessh-job-"+j.ID) + `; group=` + group + `;
 owned() {
   args=$(ps -p "$pid" -o args= 2>/dev/null) || args=
+  if [ -z "$args" ] && [ -r "/proc/$pid/cmdline" ]; then
+    args=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null) || args=
+  fi
   case "$args" in *"$marker"*) return 0;; esac
   [ "$group" = 1 ] || return 1
   for proc in /proc/[0-9]*; do
@@ -154,7 +157,8 @@ owned() {
     if tr '\0' '\n' < "$proc/environ" 2>/dev/null | grep -Fqx "ONESSH_JOB_MARKER=$marker"; then return 0; fi
   done
   return 1
-}`
+}
+alive() { kill -0 "$target" 2>/dev/null; }`
 }
 func (m *Manager) Refresh(ctx context.Context, j store.Job) (Status, error) {
 	if j.Status != "running" {
@@ -171,7 +175,7 @@ func (m *Manager) Refresh(ctx context.Context, j store.Job) (Status, error) {
 	}
 	script := `d="$HOME/.onessh/jobs/` + j.ID + `"; ` + jobProcessIdentityScript(j) + `
 if [ -f "$d/exit" ]; then printf 'exited:'; tr -d '\n' < "$d/exit"; printf ':'; wc -c < "$d/out.log";
-elif kill -0 -- "$target" 2>/dev/null && owned; then printf 'running::'; wc -c < "$d/out.log";
+elif alive && owned; then printf 'running::'; wc -c < "$d/out.log";
 else printf 'lost::'; wc -c 2>/dev/null < "$d/out.log" || echo 0; fi`
 	res, err := m.Exec.Run(ctx, client, script, "~", nil, execx.Options{Timeout: 15 * time.Second, MaxLines: 5})
 	if err != nil {
@@ -304,22 +308,23 @@ func (m *Manager) Kill(ctx context.Context, j store.Job, signal string) error {
 	script := `d="$HOME/.onessh/jobs/` + j.ID + `"; ` + jobProcessIdentityScript(j) + `
 bytes() { wc -c 2>/dev/null < "$d/out.log" || printf '0\n'; }
 exited() { printf 'exited:'; tr -d '\n' < "$d/exit"; printf ':'; bytes; }
+signal_target() { kill -` + signal + ` "$target" 2>/dev/null; }
 if [ -f "$d/exit" ]; then
   exited
-elif ! kill -0 -- "$target" 2>/dev/null || ! owned; then
+elif ! alive || ! owned; then
   printf 'lost::'; bytes
-elif ! kill -` + signal + ` -- "$target" 2>/dev/null; then
+elif ! signal_target; then
   if [ -f "$d/exit" ]; then exited
-  elif ! kill -0 -- "$target" 2>/dev/null || ! owned; then printf 'lost::'; bytes
+  elif ! alive || ! owned; then printf 'lost::'; bytes
   else printf 'signal_failed::'; bytes; exit 45
   fi
 else
   i=0
-  while kill -0 -- "$target" 2>/dev/null && [ "$i" -lt 30 ]; do
+  while alive && [ "$i" -lt 30 ]; do
     sleep 0.1
     i=$((i+1))
   done
-  if kill -0 -- "$target" 2>/dev/null; then
+  if alive; then
     printf 'running::'; bytes
     exit 46
   fi

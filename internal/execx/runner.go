@@ -33,6 +33,7 @@ type Result struct {
 	Stderr             string `json:"stderr"`
 	Output             string `json:"output"`
 	ExitCode           int    `json:"exit_code"`
+	ExitCodeKnown      bool   `json:"-"`
 	Cwd                string `json:"cwd"`
 	Timeout            bool   `json:"timeout"`
 	Truncated          bool   `json:"truncated"`
@@ -309,6 +310,11 @@ func (r *Runner) Run(ctx context.Context, client *ssh.Client, command, cwd strin
 		exitCode = exitCodeFromError(waitErr)
 		newCwd = cwd
 	}
+	exitCodeKnown := parsed
+	if !parsed {
+		var exitErr *ssh.ExitError
+		exitCodeKnown = errors.As(waitErr, &exitErr)
+	}
 	stderrBytes := stderr.captured()
 	stdout.finishCallback()
 	stderr.finishCallback()
@@ -329,7 +335,7 @@ func (r *Runner) Run(ctx context.Context, client *ssh.Client, command, cwd strin
 		}
 	}
 	stdoutTotal := max(0, stdout.written-trailerBytes)
-	res := Result{Stdout: string(stdoutBytes), Stderr: string(stderrBytes), Output: string(selected), ExitCode: exitCode, Cwd: newCwd, Timeout: timedOut, Truncated: stdout.truncated || stderr.truncated || lineCut, TotalLines: totalLines, TotalBytes: stdoutTotal + stderr.written, StdoutBytes: stdoutTotal, StderrBytes: stderr.written, OutputRecorded: opt.CaptureID != "" && capture != nil && captureErr == nil}
+	res := Result{Stdout: string(stdoutBytes), Stderr: string(stderrBytes), Output: string(selected), ExitCode: exitCode, ExitCodeKnown: exitCodeKnown, Cwd: newCwd, Timeout: timedOut, Truncated: stdout.truncated || stderr.truncated || lineCut, TotalLines: totalLines, TotalBytes: stdoutTotal + stderr.written, StdoutBytes: stdoutTotal, StderrBytes: stderr.written, OutputRecorded: opt.CaptureID != "" && capture != nil && captureErr == nil}
 	if captureErr != nil {
 		res.OutputCaptureError = captureErr.Error()
 	}

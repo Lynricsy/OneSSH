@@ -50,8 +50,9 @@ func commandRunStatus(ctx context.Context, result execx.Result, runErr error) st
 		return "timeout"
 	}
 	if runErr != nil {
-		// Runner 可能在远端已退出后才因 artifact/输出落盘失败返回错误；正退出码仍是可信结果。
-		if result.ExitCode > 0 {
+		// Runner 可能在远端已退出后才因 artifact/输出落盘失败返回错误；
+		// ExitCodeKnown 独立表达 0 在内的真实退出码，不能靠数值正负猜测。
+		if result.ExitCodeKnown {
 			return "failed"
 		}
 		if ctx.Err() != nil {
@@ -69,7 +70,7 @@ func (s *Server) finishCommandRun(ctx context.Context, run store.CommandRun, res
 	status := commandRunStatus(ctx, result, runErr)
 	finish := store.CommandRunFinish{
 		Status:          status,
-		ExitCode:        sql.NullInt64{Int64: int64(result.ExitCode), Valid: status != "cancelled" && status != "timeout" && result.ExitCode >= 0 && (runErr == nil || result.ExitCode > 0)},
+		ExitCode:        sql.NullInt64{Int64: int64(result.ExitCode), Valid: status != "cancelled" && status != "timeout" && result.ExitCode >= 0 && (runErr == nil || result.ExitCodeKnown)},
 		StdoutPreview:   commandPreview(result.Stdout),
 		StderrPreview:   commandPreview(result.Stderr),
 		StdoutBytes:     int64(result.StdoutBytes),

@@ -80,6 +80,19 @@ func TestRealJobDefaultCwd(t *testing.T) {
 		}
 		t.Fatalf("任务 %s 未写入退出标记", id)
 	}
+	waitForLog := func(id, marker string) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			command := `grep -Fq ` + execx.SHQ(marker) + ` "$HOME/.onessh/jobs/` + id + `/out.log"`
+			result, runErr := m.Exec.Run(ctx, client, command, "~", nil, execx.Options{Timeout: 2 * time.Second, MaxLines: 2})
+			if runErr == nil && result.ExitCode == 0 {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Fatalf("任务 %s 日志未出现就绪标记 %q", id, marker)
+	}
 
 	alreadyDone, err := m.Start(ctx, h, 1, "printf already", "~", nil)
 	if err != nil {
@@ -101,7 +114,11 @@ func TestRealJobDefaultCwd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(200 * time.Millisecond)
+	identityResult, err := m.Exec.Run(ctx, client, `ps() { return 127; }; `+jobProcessIdentityScript(graceful)+`; owned`, "~", nil, execx.Options{Timeout: 2 * time.Second, MaxLines: 2})
+	if err != nil || identityResult.ExitCode != 0 {
+		t.Fatalf("缺少 ps 时未通过 /proc 验证任务身份: result=%#v err=%v", identityResult, err)
+	}
+	waitForLog(graceful.ID, "start")
 	if err = m.Kill(ctx, graceful, "TERM"); err != nil {
 		t.Fatal(err)
 	}
@@ -129,9 +146,9 @@ func TestRealJobDefaultCwd(t *testing.T) {
 		t.Fatal("集成夹具缺少 setsid，无法验证进程组二次强杀")
 	}
 	defer func() {
-		_, _ = m.Exec.Run(context.Background(), client, `kill -KILL -- -`+strconv.FormatInt(stubborn.PID.Int64, 10), "~", nil, execx.Options{Timeout: 2 * time.Second, MaxLines: 2})
+		_, _ = m.Exec.Run(context.Background(), client, `kill -KILL -`+strconv.FormatInt(stubborn.PID.Int64, 10), "~", nil, execx.Options{Timeout: 2 * time.Second, MaxLines: 2})
 	}()
-	time.Sleep(200 * time.Millisecond)
+	waitForLog(stubborn.ID, "stubborn")
 	if err = m.Kill(ctx, stubborn, "TERM"); err == nil {
 		t.Fatal("忽略 TERM 的任务不应被提前标记为结束")
 	}
@@ -162,7 +179,7 @@ func TestRealJobDefaultCwd(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		_, _ = m.Exec.Run(context.Background(), client, `kill -KILL -- `+strconv.FormatInt(foreignPID, 10), "~", nil, execx.Options{Timeout: 2 * time.Second, MaxLines: 2})
+		_, _ = m.Exec.Run(context.Background(), client, `kill -KILL `+strconv.FormatInt(foreignPID, 10), "~", nil, execx.Options{Timeout: 2 * time.Second, MaxLines: 2})
 	}()
 	stale := store.Job{
 		ID: "stale-reused-pid", HostID: h.ID, Command: "old", Cwd: "~",
@@ -174,7 +191,7 @@ func TestRealJobDefaultCwd(t *testing.T) {
 	if err = m.Kill(ctx, stale, "TERM"); err != nil {
 		t.Fatal(err)
 	}
-	probe, err := m.Exec.Run(ctx, client, `kill -0 -- `+strconv.FormatInt(foreignPID, 10), "~", nil, execx.Options{Timeout: 2 * time.Second, MaxLines: 2})
+	probe, err := m.Exec.Run(ctx, client, `kill -0 `+strconv.FormatInt(foreignPID, 10), "~", nil, execx.Options{Timeout: 2 * time.Second, MaxLines: 2})
 	if err != nil || probe.ExitCode != 0 {
 		t.Fatalf("PID 归属不匹配时误杀了无关进程: result=%#v err=%v", probe, err)
 	}
