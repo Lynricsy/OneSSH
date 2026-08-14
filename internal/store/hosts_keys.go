@@ -216,7 +216,9 @@ func hostTagsJSON(tags []string) string {
 func parseHostTags(raw sql.NullString) []string {
 	tags := make([]string, 0)
 	if raw.Valid {
-		_ = json.Unmarshal([]byte(raw.String), &tags)
+		if err := json.Unmarshal([]byte(raw.String), &tags); err != nil || tags == nil {
+			tags = make([]string, 0)
+		}
 	}
 	return tags
 }

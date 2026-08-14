@@ -78,27 +78,31 @@ func TestCommandOutputReadAndCleanup(t *testing.T) {
 	if chunk.Content != "cd" || chunk.Offset != 2 || chunk.NextOffset != 4 || chunk.TotalBytes != 6 || chunk.Complete {
 		t.Fatalf("分段读取异常: %#v", chunk)
 	}
-	old := time.Now().Add(-8 * 24 * time.Hour)
-	if err = os.Chtimes(stdoutPath, old, old); err != nil {
-		t.Fatal(err)
-	}
 	unmanaged := filepath.Join(filepath.Dir(stdoutPath), "manual.stdout.log")
 	if err = os.WriteFile(unmanaged, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err = os.Chtimes(unmanaged, old, old); err != nil {
+	newID := uuid.NewString()
+	newPath, err := runner.CommandOutputPath(newID, "stdout")
+	if err != nil {
 		t.Fatal(err)
 	}
-	removed, err := runner.CleanupCommandOutputs(time.Now().Add(-7*24*time.Hour), map[string]struct{}{id: {}})
-	if err != nil || removed != 0 {
-		t.Fatalf("运行中的命令输出被清理 removed=%d err=%v", removed, err)
+	if err = os.WriteFile(newPath, []byte("running"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	removed, err = runner.CleanupCommandOutputs(time.Now().Add(-7*24*time.Hour), nil)
+	removed, err := runner.CleanupCommandOutputs(nil)
+	if err != nil || removed != 0 {
+		t.Fatalf("空删除白名单清理了文件 removed=%d err=%v", removed, err)
+	}
+	removed, err = runner.CleanupCommandOutputs(map[string]struct{}{id: {}})
 	if err != nil || removed != 1 {
 		t.Fatalf("命令输出清理结果 removed=%d err=%v", removed, err)
 	}
 	if _, err = os.Stat(stdoutPath); !os.IsNotExist(err) {
 		t.Fatalf("过期输出仍存在: %v", err)
+	}
+	if _, err = os.Stat(newPath); err != nil {
+		t.Fatalf("快照后新建的运行中输出被误删: %v", err)
 	}
 	if _, err = os.Stat(unmanaged); err != nil {
 		t.Fatalf("非托管文件被误删: %v", err)
@@ -182,6 +186,9 @@ func TestReadCommandOutputPreservesUTF8AcrossPages(t *testing.T) {
 	}
 	if err = os.WriteFile(path, []byte("abcd你b"), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	if _, err = runner.ReadCommandOutput(id, "stdout", 5, 4); err == nil {
+		t.Fatal("位于 UTF-8 字符内部的 offset 未被拒绝")
 	}
 	first, err := runner.ReadCommandOutput(id, "stdout", 0, 5)
 	if err != nil {

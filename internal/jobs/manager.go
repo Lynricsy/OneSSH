@@ -228,9 +228,9 @@ func (m *Manager) LogChunk(ctx context.Context, j store.Job, offset int64, limit
 	if limit > 128<<10 {
 		limit = 128 << 10
 	}
-	start := offset + 1    // tail -c 的位置从 1 开始。
-	readLimit := limit + 3 // 多读至多 3 字节，用于补齐分页边界上的 UTF-8 字符。
-	command := `d="$HOME/.onessh/jobs/` + j.ID + `"; test -f "$d/out.log" || exit 44; wc -c < "$d/out.log"; tail -c +` + strconv.FormatInt(start, 10) + ` "$d/out.log" | head -c ` + strconv.Itoa(readLimit)
+	start := offset + 1
+	readLimit := limit + 3
+	command := `d="$HOME/.onessh/jobs/` + j.ID + `"; f="$d/out.log"; test -f "$f" || exit 44; size=$(wc -c < "$f") || exit; printf '%s\n' "$size"; if [ "$size" -gt ` + strconv.FormatInt(offset, 10) + ` ]; then count=$((size-` + strconv.FormatInt(offset, 10) + `)); if [ "$count" -gt ` + strconv.Itoa(readLimit) + ` ]; then count=` + strconv.Itoa(readLimit) + `; fi; tail -c +` + strconv.FormatInt(start, 10) + ` "$f" | head -c "$count"; fi`
 	result, err := m.Exec.Run(ctx, client, command, "~", nil, execx.Options{Timeout: 30 * time.Second, MaxLines: 10000})
 	if err != nil {
 		return LogChunk{}, err
@@ -276,6 +276,14 @@ func (m *Manager) Kill(ctx context.Context, j store.Job, signal string) error {
 	if res.ExitCode != 0 {
 		return fmt.Errorf("kill 失败: %s", res.Output)
 	}
+	logResult, logErr := m.Exec.Run(ctx, client, `d="$HOME/.onessh/jobs/`+j.ID+`"; wc -c < "$d/out.log"`, "~", nil, execx.Options{Timeout: 15 * time.Second, MaxLines: 5})
+	if logErr == nil && logResult.ExitCode == 0 {
+		if size, parseErr := strconv.ParseInt(strings.TrimSpace(logResult.Output), 10, 64); parseErr == nil {
+			j.LogBytes = size
+			_ = m.Store.UpdateJobLogBytes(context.Background(), j.ID, size)
+			_ = m.Store.UpdateCommandRunJobBytes(context.Background(), j.ID, size)
+		}
+	}
 	_ = m.Store.UpdateJobState(ctx, j.ID, "killed", nil)
 	j.Status = "killed"
 	j.FinishedAt = sql.NullInt64{Int64: time.Now().Unix(), Valid: true}
@@ -313,7 +321,8 @@ func (m *Manager) syncCommandRun(j store.Job, exitCode *int) {
 	if j.FinishedAt.Valid {
 		finishedAt = j.FinishedAt.Int64 * 1000
 	}
-	if err = m.Store.FinishCommandRunByJob(context.Background(), j.ID, status, exitCode, finishedAt); err != nil {
+	changed, err := m.Store.FinishCommandRunByJob(context.Background(), j.ID, status, exitCode, finishedAt)
+	if err != nil || !changed {
 		return
 	}
 	var code any

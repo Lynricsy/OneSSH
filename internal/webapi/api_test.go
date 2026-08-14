@@ -226,7 +226,7 @@ func TestCommandRunListDetailAndOutput(t *testing.T) {
 
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/command-runs?host=web-01&status=succeeded&q=HELLO", nil))
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"command":"printf hello"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"command":"printf hello"`) || response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("命令列表响应 = %d %s", response.Code, response.Body.String())
 	}
 	if strings.Contains(response.Body.String(), "stdout_preview") {

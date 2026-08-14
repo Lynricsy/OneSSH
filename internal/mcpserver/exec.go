@@ -32,8 +32,11 @@ func (out ExecOutput) auditCommandRunIDs() []string {
 }
 
 func (out ExecOutput) auditOutcome() (bool, *int64) {
+	if out.Timeout || out.ExitCode < 0 {
+		return false, nil
+	}
 	code := int64(out.ExitCode)
-	return !out.Timeout && out.ExitCode == 0, &code
+	return out.ExitCode == 0, &code
 }
 
 type SessionEnvInput struct {

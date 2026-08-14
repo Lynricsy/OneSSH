@@ -43,10 +43,10 @@ func (s *Server) startCommandRun(ctx context.Context, tool string, host store.Ho
 }
 
 func commandRunStatus(ctx context.Context, result execx.Result, runErr error) string {
+	if ctx.Err() != nil {
+		return "cancelled"
+	}
 	if result.Timeout {
-		if ctx.Err() != nil {
-			return "cancelled"
-		}
 		return "timeout"
 	}
 	if runErr != nil || result.ExitCode != 0 {
@@ -59,7 +59,7 @@ func (s *Server) finishCommandRun(ctx context.Context, run store.CommandRun, res
 	status := commandRunStatus(ctx, result, runErr)
 	finish := store.CommandRunFinish{
 		Status:          status,
-		ExitCode:        sql.NullInt64{Int64: int64(result.ExitCode), Valid: runErr == nil || result.ExitCode != 0},
+		ExitCode:        sql.NullInt64{Int64: int64(result.ExitCode), Valid: runErr == nil && !result.Timeout && result.ExitCode >= 0},
 		StdoutPreview:   commandPreview(result.Stdout),
 		StderrPreview:   commandPreview(result.Stderr),
 		StdoutBytes:     int64(result.StdoutBytes),

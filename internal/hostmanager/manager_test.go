@@ -207,7 +207,7 @@ func TestTagsNormalization(t *testing.T) {
 	base := Input{Name: "tagged", Addr: "127.0.0.1", Port: 22, Username: "user", AuthType: "password", Password: new("secret")}
 
 	withTags := base
-	withTags.Tags = []string{" prod ", "web", "web", "", "  ", "prod", "数据库"}
+	withTags.Tags = []string{" prod ", "web", "Web", "web", "", "  ", "prod", "数据库"}
 	created, err := manager.Create(ctx, withTags)
 	if err != nil {
 		t.Fatal(err)

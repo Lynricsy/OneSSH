@@ -178,6 +178,15 @@ func applyMigration(db *sql.DB, m migration) error {
 		if _, err = tx.Exec(m.sql); err != nil {
 			return err
 		}
+		hasColumn, err = tableHasColumn(tx, "command_runs", "output_cleaned")
+		if err != nil {
+			return err
+		}
+		if !hasColumn {
+			if _, err = tx.Exec(`ALTER TABLE command_runs ADD COLUMN output_cleaned INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return err
+			}
+		}
 	case 12:
 		hasColumn, err := tableHasColumn(tx, "audit", "command_run_ids_json")
 		if err != nil {

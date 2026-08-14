@@ -125,6 +125,7 @@ func (a *API) commandRuns(w http.ResponseWriter, r *http.Request) {
 	for _, run := range runs {
 		out = append(out, viewCommandRun(run, false))
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	jsonOut(w, http.StatusOK, out)
 }
 
@@ -171,7 +172,9 @@ func (a *API) commandRunOutput(w http.ResponseWriter, r *http.Request) {
 		}
 		if job.Status == "running" {
 			if _, refreshErr := a.Jobs.Refresh(r.Context(), job); refreshErr == nil {
-				job, _ = a.Store.GetJob(r.Context(), job.ID)
+				if refreshed, getErr := a.Store.GetJob(r.Context(), job.ID); getErr == nil {
+					job = refreshed
+				}
 			}
 		}
 		chunk, readErr := a.Jobs.LogChunk(r.Context(), job, offset, limit)

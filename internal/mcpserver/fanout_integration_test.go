@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"onessh/internal/cryptox"
+	"onessh/internal/events"
 	"onessh/internal/execx"
 	"onessh/internal/sshpool"
 	"onessh/internal/store"
@@ -42,7 +43,7 @@ func TestRealExecManyRunsConcurrently(t *testing.T) {
 	}
 	pool := sshpool.New(st, box)
 	defer pool.Close()
-	s := &Server{Pool: pool, Exec: execx.New(data)}
+	s := &Server{Store: st, Pool: pool, Exec: execx.New(data), Events: events.New()}
 	ctx := context.WithValue(base, principalKey{}, Principal{Token: store.Token{ID: 1}, Hosts: allowed})
 	started := time.Now()
 	out := s.execMany(ctx, ExecManyInput{Hosts: []string{"ssh1", "ssh2"}, Command: "sleep 1; echo ok", TimeoutS: 10})

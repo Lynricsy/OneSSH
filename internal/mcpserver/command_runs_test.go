@@ -55,6 +55,29 @@ func TestCommandRunRecorderPersistsOutcomeAndEvents(t *testing.T) {
 	}
 }
 
+func TestFinishCommandRunOmitsUnknownExitCode(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	server := &Server{Store: st, Events: events.New()}
+	run, err := server.startCommandRun(context.Background(), "exec", store.Host{ID: 1, Name: "web"}, "sleep 10", "~", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = server.finishCommandRun(context.Background(), run, execx.Result{Timeout: true, ExitCode: -1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := st.GetCommandRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != "timeout" || stored.ExitCode.Valid {
+		t.Fatalf("超时记录不应伪造退出码: %#v", stored)
+	}
+}
+
 func TestCommandPreviewPreservesUTF8(t *testing.T) {
 	input := strings.Repeat("你", commandPreviewLimit)
 	preview := commandPreview(input)
@@ -107,6 +130,7 @@ func TestCommandRunStatus(t *testing.T) {
 		{name: "非零退出", ctx: context.Background(), result: execx.Result{ExitCode: 2}, want: "failed"},
 		{name: "超时", ctx: context.Background(), result: execx.Result{Timeout: true}, want: "timeout"},
 		{name: "取消", ctx: cancelled, result: execx.Result{Timeout: true}, want: "cancelled"},
+		{name: "连接阶段取消", ctx: cancelled, err: context.Canceled, want: "cancelled"},
 	}
 	for _, test := range tests {
 		if got := commandRunStatus(test.ctx, test.result, test.err); got != test.want {
@@ -116,6 +140,9 @@ func TestCommandRunStatus(t *testing.T) {
 }
 
 func TestAuditCommandRunIDs(t *testing.T) {
+	if ok, code := (ExecOutput{Result: execx.Result{Timeout: true, ExitCode: -1}}).auditOutcome(); ok || code != nil {
+		t.Fatalf("超时审计不应携带退出码: ok=%v code=%v", ok, code)
+	}
 	if ids := (ExecOutput{RunID: "run-1"}).auditCommandRunIDs(); len(ids) != 1 || ids[0] != "run-1" {
 		t.Fatalf("exec 审计关联 = %#v", ids)
 	}

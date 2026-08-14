@@ -86,8 +86,20 @@ func TestCommandRunRecoveryExpiryAndJobLink(t *testing.T) {
 	for _, run := range []CommandRun{
 		{ID: "sync-run", Tool: "exec", Host: "web", Command: "sleep 10", Cwd: "~", StartedAt: 1},
 		{ID: "job-run", Tool: "job_start", Host: "web", Command: "sleep 10", Cwd: "~", StartedAt: 2},
+		{ID: "expired-run", Tool: "exec", Host: "web", Command: "old", Cwd: "~", StartedAt: 3},
+		{ID: "unavailable-run", Tool: "exec", Host: "web", Command: "broken capture", Cwd: "~", StartedAt: 4},
+		{ID: "fresh-run", Tool: "exec", Host: "web", Command: "fresh", Cwd: "~", StartedAt: 5},
 	} {
 		if err = st.CreateCommandRun(ctx, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for id, finish := range map[string]CommandRunFinish{
+		"expired-run":     {Status: "succeeded", OutputAvailable: true, FinishedAt: 1000},
+		"unavailable-run": {Status: "failed", OutputAvailable: false, OutputError: sql.NullString{String: "磁盘写入失败", Valid: true}, FinishedAt: 1000},
+		"fresh-run":       {Status: "succeeded", OutputAvailable: true, FinishedAt: 8000},
+	} {
+		if err = st.FinishCommandRun(ctx, id, finish); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -111,8 +123,13 @@ func TestCommandRunRecoveryExpiryAndJobLink(t *testing.T) {
 	if err = st.UpdateCommandRunJobBytes(ctx, job.ID, 42); err != nil {
 		t.Fatal(err)
 	}
-	if err = st.FinishCommandRunByJob(ctx, job.ID, "succeeded", &code, 6000); err != nil {
-		t.Fatal(err)
+	changed, err := st.FinishCommandRunByJob(ctx, job.ID, "succeeded", &code, 6000)
+	if err != nil || !changed {
+		t.Fatalf("首次完成后台命令 changed=%v err=%v", changed, err)
+	}
+	changed, err = st.FinishCommandRunByJob(ctx, job.ID, "succeeded", &code, 6000)
+	if err != nil || changed {
+		t.Fatalf("重复完成后台命令 changed=%v err=%v", changed, err)
 	}
 	linked, _ = st.GetCommandRun(ctx, "job-run")
 	if linked.Status != "succeeded" || linked.StdoutBytes != 42 || linked.ExitCode.Int64 != 0 {
@@ -121,10 +138,30 @@ func TestCommandRunRecoveryExpiryAndJobLink(t *testing.T) {
 	if err = st.ExpireCommandRunOutputs(ctx, 7000); err != nil {
 		t.Fatal(err)
 	}
-	syncRun, _ = st.GetCommandRun(ctx, "sync-run")
-	linked, _ = st.GetCommandRun(ctx, "job-run")
-	if !syncRun.OutputExpired || linked.OutputExpired {
-		t.Fatalf("输出过期范围异常: sync=%#v job=%#v", syncRun, linked)
+	expired, _ := st.GetCommandRun(ctx, "expired-run")
+	unavailable, _ := st.GetCommandRun(ctx, "unavailable-run")
+	fresh, _ := st.GetCommandRun(ctx, "fresh-run")
+	if !expired.OutputExpired || unavailable.OutputExpired || fresh.OutputExpired || syncRun.OutputExpired || linked.OutputExpired {
+		t.Fatalf("输出过期范围异常: expired=%#v unavailable=%#v fresh=%#v sync=%#v job=%#v", expired, unavailable, fresh, syncRun, linked)
+	}
+	deletable, err := st.DeletableCommandRunOutputIDs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"expired-run", "unavailable-run", "sync-run"} {
+		if _, ok := deletable[id]; !ok {
+			t.Fatalf("待删除集合缺少 %s: %#v", id, deletable)
+		}
+	}
+	if len(deletable) != 3 {
+		t.Fatalf("待删除集合包含仍应保留的记录: %#v", deletable)
+	}
+	if err = st.MarkCommandRunOutputsCleaned(ctx, deletable); err != nil {
+		t.Fatal(err)
+	}
+	deletable, err = st.DeletableCommandRunOutputIDs(ctx)
+	if err != nil || len(deletable) != 0 {
+		t.Fatalf("清理状态未收敛: %#v err=%v", deletable, err)
 	}
 }
 

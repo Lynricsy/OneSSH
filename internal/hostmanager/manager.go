@@ -268,13 +268,14 @@ func normalizeTags(raw []string) ([]string, error) {
 	seen := make(map[string]bool, len(raw))
 	for _, tag := range raw {
 		tag = strings.TrimSpace(tag)
-		if tag == "" || seen[tag] {
+		key := strings.ToLower(tag)
+		if tag == "" || seen[key] {
 			continue
 		}
 		if len([]rune(tag)) > maxTagLength {
 			return nil, invalid(fmt.Sprintf("标签 %q 超过 %d 字符", tag, maxTagLength))
 		}
-		seen[tag] = true
+		seen[key] = true
 		tags = append(tags, tag)
 	}
 	if len(tags) > maxTagsCount {

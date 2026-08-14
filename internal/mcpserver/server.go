@@ -240,7 +240,7 @@ func summarizeParams(v any) string {
 	if src != "" {
 		return src
 	}
-	for _, key := range []string{"query", "pattern", "content", "job_id", "artifact_id"} {
+	for _, key := range []string{"query", "pattern", "job_id", "artifact_id"} {
 		if value := stringField(m, key); value != "" {
 			return value
 		}

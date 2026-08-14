@@ -38,30 +38,20 @@ func (s *Store) FinishCommandRun(ctx context.Context, id string, finish CommandR
 	return nil
 }
 
-func (s *Store) LinkCommandRunJob(ctx context.Context, id, jobID string) error {
-	result, err := s.DB.ExecContext(ctx, `UPDATE command_runs SET job_id=?,output_available=1 WHERE id=? AND status='running'`, jobID, id)
-	if err != nil {
-		return err
-	}
-	updated, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if updated == 0 {
-		return fmt.Errorf("命令执行记录不存在或已经结束: %s", id)
-	}
-	return nil
-}
-
-// FinishCommandRunByJob 同步后台任务的最终状态；重复刷新已结束任务时保持幂等。
-func (s *Store) FinishCommandRunByJob(ctx context.Context, jobID, status string, exitCode *int, finishedAt int64) error {
+// FinishCommandRunByJob 同步后台任务的最终状态，并返回本次是否完成了仍在运行的记录。
+// 调用方只在 changed=true 时发布完成事件，避免并发刷新产生重复事件。
+func (s *Store) FinishCommandRunByJob(ctx context.Context, jobID, status string, exitCode *int, finishedAt int64) (bool, error) {
 	var code any
 	if exitCode != nil {
 		code = *exitCode
 	}
-	_, err := s.DB.ExecContext(ctx, `UPDATE command_runs SET status=?,exit_code=?,finished_at=?
+	result, err := s.DB.ExecContext(ctx, `UPDATE command_runs SET status=?,exit_code=?,finished_at=?
 		WHERE job_id=? AND status='running'`, status, code, finishedAt, jobID)
-	return err
+	if err != nil {
+		return false, err
+	}
+	updated, err := result.RowsAffected()
+	return updated > 0, err
 }
 
 func (s *Store) UpdateCommandRunJobBytes(ctx context.Context, jobID string, bytes int64) error {
@@ -176,12 +166,15 @@ func (s *Store) RecoverInterruptedCommandRuns(ctx context.Context, now int64) er
 func (s *Store) ExpireCommandRunOutputs(ctx context.Context, cutoff int64) error {
 	_, err := s.DB.ExecContext(ctx, `UPDATE command_runs SET stdout_preview='',stderr_preview='',
 		output_available=0,output_expired=1
-		WHERE job_id IS NULL AND status<>'running' AND finished_at<? AND output_expired=0`, cutoff)
+		WHERE job_id IS NULL AND status<>'running' AND finished_at<? AND output_available=1 AND output_expired=0`, cutoff)
 	return err
 }
 
-func (s *Store) RunningCommandRunIDs(ctx context.Context) (map[string]struct{}, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id FROM command_runs WHERE status='running' AND job_id IS NULL`)
+// DeletableCommandRunOutputIDs 返回数据库明确判定不再需要本地文件的同步命令。
+// 除已过期记录外，也包含捕获失败或重启失联后从未标记为可用的残留文件。
+func (s *Store) DeletableCommandRunOutputIDs(ctx context.Context) (map[string]struct{}, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id FROM command_runs
+		WHERE job_id IS NULL AND status<>'running' AND output_cleaned=0 AND (output_expired=1 OR output_available=0)`)
 	if err != nil {
 		return nil, err
 	}
@@ -195,6 +188,35 @@ func (s *Store) RunningCommandRunIDs(ctx context.Context) (map[string]struct{}, 
 		ids[id] = struct{}{}
 	}
 	return ids, rows.Err()
+}
+
+// MarkCommandRunOutputsCleaned 在文件删除成功或确认文件不存在后收敛清理状态，避免
+// 每小时把全部历史过期记录重新装入内存。
+func (s *Store) MarkCommandRunOutputsCleaned(ctx context.Context, ids map[string]struct{}) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	values := make([]string, 0, len(ids))
+	for id := range ids {
+		values = append(values, id)
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	const batchSize = 500
+	for start := 0; start < len(values); start += batchSize {
+		end := min(start+batchSize, len(values))
+		args := make([]any, end-start)
+		for i, id := range values[start:end] {
+			args[i] = id
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE command_runs SET output_cleaned=1 WHERE id IN (`+placeholders(len(args))+`)`, args...); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // Compile-time check: *sql.Rows and *sql.Row both satisfy rowScanner.

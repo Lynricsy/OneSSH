@@ -83,9 +83,9 @@ func (r *Runner) CleanupArtifacts(cutoff time.Time) (int, error) {
 	return removed, cleanupErr
 }
 
-// CleanupCommandOutputs 只处理由 Runner 管理的 UUID.stdout/stderr.log 文件，避免误删
-// command-runs 目录中人工放入的其他文件。
-func (r *Runner) CleanupCommandOutputs(cutoff time.Time, keepIDs map[string]struct{}) (int, error) {
+// CleanupCommandOutputs 只删除数据库明确允许清理的托管 UUID.stdout/stderr.log
+// 文件。使用删除白名单，避免数据库快照之后新启动的命令文件被误当成垃圾。
+func (r *Runner) CleanupCommandOutputs(deleteIDs map[string]struct{}) (int, error) {
 	dir := filepath.Join(r.dataDir, "command-runs")
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
@@ -107,15 +107,7 @@ func (r *Runner) CleanupCommandOutputs(cutoff time.Time, keepIDs map[string]stru
 		if _, err := uuid.Parse(parts[0]); err != nil {
 			continue
 		}
-		if _, keep := keepIDs[parts[0]]; keep {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("读取命令输出 %s: %w", entry.Name(), err))
-			continue
-		}
-		if !info.ModTime().Before(cutoff) {
+		if _, remove := deleteIDs[parts[0]]; !remove {
 			continue
 		}
 		if err = os.Remove(filepath.Join(dir, entry.Name())); err != nil {
@@ -429,16 +421,18 @@ func stripCaptureTrailer(path string, marker []byte) error {
 	return file.Truncate(start + int64(index))
 }
 
-func concatenateFiles(destination string, sources ...string) error {
+func concatenateFiles(destination string, sources ...string) (err error) {
 	out, err := os.OpenFile(destination, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() {
+		err = errors.Join(err, out.Close())
+	}()
 	for _, source := range sources {
-		in, err := os.Open(source)
-		if err != nil {
-			return err
+		in, openErr := os.Open(source)
+		if openErr != nil {
+			return openErr
 		}
 		_, copyErr := io.Copy(out, in)
 		closeErr := in.Close()
@@ -581,6 +575,15 @@ func (r *Runner) ReadCommandOutput(id, stream string, offset int64, limit int) (
 	}
 	if offset > info.Size() {
 		offset = info.Size()
+	}
+	if offset > 0 && offset < info.Size() {
+		var first [1]byte
+		if _, err = file.ReadAt(first[:], offset); err != nil {
+			return OutputChunk{}, err
+		}
+		if !utf8.RuneStart(first[0]) {
+			return OutputChunk{}, fmt.Errorf("offset_bytes 必须位于 UTF-8 字符边界")
+		}
 	}
 	if limit <= 0 {
 		limit = 256 << 10

@@ -128,6 +128,7 @@ func TestCallSummaryExtractsCommandAndPaths(t *testing.T) {
 		{GrepInput{Host: "web-01", Pattern: "TODO", Path: "/app"}, "TODO  /app"},
 		{FileTransferInput{SrcHost: "a", SrcPath: "/src", DstHost: "b", DstPath: "/dst"}, "/src → /dst"},
 		{MemoryRecallInput{Query: "nginx 配置"}, "nginx 配置"},
+		{MemoryRememberInput{Content: "不应进入实时事件"}, ""},
 		{map[string]any{}, ""},
 	}
 	for _, tc := range cases {

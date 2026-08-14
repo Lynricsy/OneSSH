@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -303,6 +304,10 @@ func TestOpenRecordsPreexistingJobLogBytesColumn(t *testing.T) {
 	if _, err = db.Exec(`ALTER TABLE jobs ADD COLUMN log_bytes INTEGER NOT NULL DEFAULT 0`); err != nil {
 		t.Fatal(err)
 	}
+	legacyCommandRuns := strings.Replace(migration0011, "  output_cleaned INTEGER NOT NULL DEFAULT 0,\n", "", 1)
+	if _, err = db.Exec(legacyCommandRuns); err != nil {
+		t.Fatal(err)
+	}
 	if err = db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -321,6 +326,13 @@ func TestOpenRecordsPreexistingJobLogBytesColumn(t *testing.T) {
 	var commandRuns string
 	if err = st.DB.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='command_runs'`).Scan(&commandRuns); err != nil {
 		t.Fatalf("命令记录表未创建: %v", err)
+	}
+	var cleanedColumns int
+	if err = st.DB.QueryRow(`SELECT count(*) FROM pragma_table_info('command_runs') WHERE name='output_cleaned'`).Scan(&cleanedColumns); err != nil {
+		t.Fatal(err)
+	}
+	if cleanedColumns != 1 {
+		t.Fatalf("已有命令记录表未补 output_cleaned 列: %d", cleanedColumns)
 	}
 }
 
@@ -764,5 +776,16 @@ func TestHostTagsRoundTrip(t *testing.T) {
 	}
 	if dirty.Tags == nil || len(dirty.Tags) != 0 {
 		t.Fatalf("脏数据标签容忍异常: %#v", dirty.Tags)
+	}
+
+	if _, err = st.DB.ExecContext(ctx, `UPDATE hosts SET tags='null' WHERE id=?`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	nullTags, err := st.GetHost(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nullTags.Tags == nil || len(nullTags.Tags) != 0 {
+		t.Fatalf("JSON null 标签容忍异常: %#v", nullTags.Tags)
 	}
 }
