@@ -1,19 +1,29 @@
-import { Broadcast, Check, Copy, MagnifyingGlass, Pulse } from '@phosphor-icons/react'
+import { Broadcast, Check, Copy, MagnifyingGlass, Pulse, WarningCircle } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useMemo, useState } from 'react'
-import { useAudit, useAuditTools, useHosts, useTokens, type AuditFilter } from '@/api/queries'
+import {
+  useAudit,
+  useAuditTools,
+  useCommandRuns,
+  useHosts,
+  useTokens,
+  type AuditFilter,
+} from '@/api/queries'
 import type { Audit, StreamEvent } from '@/api/types'
 import { Badge, Dot } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { CommandRunDetail } from '@/components/command-run-detail'
 import { DataTable, type Column } from '@/components/ui/data-table'
-import { Dialog } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { MultiSelect } from '@/components/ui/multi-select'
 import { PageHeader } from '@/components/ui/page-header'
 import { PageTransition } from '@/components/ui/page-transition'
 import { Select } from '@/components/ui/select'
+import { Sheet } from '@/components/ui/sheet'
+import { Spinner } from '@/components/ui/spinner'
 import { useEventStream } from '@/hooks/use-event-stream'
 import { auditSummary, formatAuditParam, parseAuditParams } from '@/lib/audit'
 import { cn } from '@/lib/cn'
@@ -87,7 +97,7 @@ const auditColumns: Column<Audit>[] = [
   },
   {
     key: 'OK',
-    title: '结果',
+    title: '调用结果',
     className: 'w-[80px]',
     // 一屏几十行里全是绿 badge 会淹没真正需要注意的失败，成功态降级为中性文字 + 状态点
     render: (item) =>
@@ -294,6 +304,104 @@ function AuditDetail({ item }: { item: Audit }) {
   )
 }
 
+const commandTools = new Set(['exec', 'exec_many', 'job_start'])
+
+function AuditSheetContent({ item }: { item: Audit }) {
+  const params = parseAuditParams(item.ParamsJSON)
+  const command = params && typeof params.command === 'string' ? params.command.trim() : ''
+  const explicitRunIDs = item.RunIDs ?? []
+  const needsLegacyMatch = commandTools.has(item.Tool) && explicitRunIDs.length === 0 && command !== ''
+  const candidates = useCommandRuns(
+    {
+      tool: [item.Tool],
+      token: item.TokenID?.Valid ? [item.TokenID.Int64] : undefined,
+      host: item.Host?.Valid ? [item.Host.String] : undefined,
+      query: command,
+    },
+    needsLegacyMatch,
+  )
+  const inferredRunIDs = useMemo(() => {
+    if (!needsLegacyMatch) return []
+    const earliest = item.Ts - Math.max(0, item.DurationMS) - 5_000
+    const latest = item.Ts + 2_000
+    return (candidates.data?.pages.flat() ?? [])
+      .filter(
+        (run) =>
+          run.command.trim() === command &&
+          run.started_at >= earliest &&
+          run.started_at <= latest,
+      )
+      .sort((left, right) => left.started_at - right.started_at)
+      .map((run) => run.id)
+  }, [candidates.data, command, item.DurationMS, item.Ts, needsLegacyMatch])
+  const runIDs = explicitRunIDs.length > 0 ? explicitRunIDs : inferredRunIDs
+  const [preferredRunID, setPreferredRunID] = useState('')
+  const activeRunID = runIDs.includes(preferredRunID) ? preferredRunID : runIDs[0]
+
+  if (needsLegacyMatch && candidates.isLoading) {
+    return (
+      <div className="flex min-h-56 items-center justify-center gap-2 text-[13px] text-muted">
+        <Spinner className="size-4" />
+        正在关联命令执行记录…
+      </div>
+    )
+  }
+
+  if (activeRunID) {
+    return (
+      <div className="space-y-4">
+        {explicitRunIDs.length === 0 && (
+          <div className="rounded-[8px] border border-border bg-surface-2 px-3 py-2 text-[12px] text-muted">
+            这是关联字段加入前的旧审计记录，已按命令、令牌和执行时间匹配。
+          </div>
+        )}
+        {runIDs.length > 1 && (
+          <div>
+            <p className="mb-2 text-[11px] tracking-wide text-muted uppercase">
+              批量执行 · {runIDs.length} 台主机
+            </p>
+            <div className="flex flex-wrap gap-2" role="tablist" aria-label="选择命令执行记录">
+              {runIDs.map((runID, index) => (
+                <Button
+                  key={runID}
+                  size="sm"
+                  variant={runID === activeRunID ? 'primary' : 'outline'}
+                  role="tab"
+                  aria-selected={runID === activeRunID}
+                  onClick={() => setPreferredRunID(runID)}
+                >
+                  执行 {index + 1} · {runID.slice(0, 8)}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+        <CommandRunDetail id={activeRunID} />
+        <details className="rounded-[8px] border border-border px-3 py-2.5">
+          <summary className="cursor-pointer text-[13px] font-medium text-muted hover:text-text">
+            查看原始审计信息
+          </summary>
+          <div className="mt-4 border-t border-border pt-4">
+            <AuditDetail item={item} />
+          </div>
+        </details>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {needsLegacyMatch && !candidates.isError && (
+        <div className="flex items-start gap-2 rounded-[8px] border border-warning/30 bg-warning/8 px-3 py-2.5 text-[13px] text-warning">
+          <WarningCircle className="mt-0.5 shrink-0" size={15} />
+          <span>这条旧审计记录没有找到可关联的完整输出，仍可查看当时记录的调用参数。</span>
+        </div>
+      )}
+      <AuditDetail item={item} />
+    </div>
+  )
+}
+
 export function ActivityPage() {
   const { events, status } = useEventStream()
   const [tool, setTool] = useState<string[]>([])
@@ -340,7 +448,7 @@ export function ActivityPage() {
 
   return (
     <PageTransition>
-      <PageHeader title="活动流" subtitle="每次工具调用的命令、参数与结果" />
+      <PageHeader title="活动与审计" subtitle="实时事件、每次工具调用及关联的命令输出" />
 
       {/* 两栏在 xl 起固定为一屏高：事件与审计都是「持续刷新的流」，各自内部滚动比把页面拉成几千像素更好用 */}
       <div className="grid gap-4 xl:h-[calc(100dvh-11.5rem)] xl:min-h-[520px] xl:grid-cols-[2fr_3fr]">
@@ -402,7 +510,7 @@ export function ActivityPage() {
 
         <Card className="flex max-h-[60dvh] min-h-0 min-w-0 flex-col xl:max-h-none">
           <CardHeader>
-            <CardTitle>审计记录</CardTitle>
+            <CardTitle>审计与命令记录</CardTitle>
             {audit.data && audit.data.length > 0 && (
               <span className="text-[12px] text-muted tabular-nums">
                 {filtered ? `筛选出 ${rows.length} 条` : `最近 ${rows.length} 条`}
@@ -517,21 +625,27 @@ export function ActivityPage() {
         </Card>
       </div>
 
-      <Dialog
+      <Sheet
         open={selected != null}
         onOpenChange={(open) => {
           if (!open) setSelected(null)
         }}
         title={selected?.Tool ?? '调用详情'}
-        description={
-          selected
-            ? `${clock(selected.Ts)}${selected.Host?.Valid ? ` · ${selected.Host.String}` : ''}`
-            : undefined
+        width="min(860px, 100vw)"
+        header={
+          selected ? (
+            <div>
+              <p className="truncate text-sm font-semibold text-text">{selected.Tool}</p>
+              <p className="mt-0.5 truncate text-[12px] text-muted">
+                {clock(selected.Ts)}
+                {selected.Host?.Valid ? ` · ${selected.Host.String}` : ''}
+              </p>
+            </div>
+          ) : undefined
         }
-        size="lg"
       >
-        {selected ? <AuditDetail item={selected} /> : null}
-      </Dialog>
+        <div className="p-4 sm:p-5">{selected ? <AuditSheetContent item={selected} /> : null}</div>
+      </Sheet>
     </PageTransition>
   )
 }

@@ -114,3 +114,20 @@ func TestCommandRunStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditCommandRunIDs(t *testing.T) {
+	if ids := (ExecOutput{RunID: "run-1"}).auditCommandRunIDs(); len(ids) != 1 || ids[0] != "run-1" {
+		t.Fatalf("exec 审计关联 = %#v", ids)
+	}
+	if ids := (JobStartOutput{RunID: "run-2"}).auditCommandRunIDs(); len(ids) != 1 || ids[0] != "run-2" {
+		t.Fatalf("job_start 审计关联 = %#v", ids)
+	}
+	ids := (ExecManyOutput{Results: []ExecManyItem{
+		{Host: "web-1", RunID: "run-3"},
+		{Host: "forbidden"},
+		{Host: "web-2", RunID: "run-4"},
+	}}).auditCommandRunIDs()
+	if len(ids) != 2 || ids[0] != "run-3" || ids[1] != "run-4" {
+		t.Fatalf("exec_many 审计关联 = %#v", ids)
+	}
+}

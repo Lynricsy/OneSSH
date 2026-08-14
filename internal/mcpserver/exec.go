@@ -24,6 +24,13 @@ type ExecOutput struct {
 	execx.Result
 }
 
+func (out ExecOutput) auditCommandRunIDs() []string {
+	if out.RunID == "" {
+		return nil
+	}
+	return []string{out.RunID}
+}
+
 func (out ExecOutput) auditOutcome() (bool, *int64) {
 	code := int64(out.ExitCode)
 	return !out.Timeout && out.ExitCode == 0, &code

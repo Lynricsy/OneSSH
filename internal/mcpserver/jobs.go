@@ -22,6 +22,14 @@ type JobStartOutput struct {
 	RunID string `json:"run_id"`
 	PID   int64  `json:"pid"`
 }
+
+func (out JobStartOutput) auditCommandRunIDs() []string {
+	if out.RunID == "" {
+		return nil
+	}
+	return []string{out.RunID}
+}
+
 type JobIDInput struct {
 	JobID string `json:"job_id" jsonschema:"job_start 返回的任务 ID"`
 }

@@ -27,6 +27,16 @@ type ExecManyOutput struct {
 	Results []ExecManyItem `json:"results"`
 }
 
+func (out ExecManyOutput) auditCommandRunIDs() []string {
+	ids := make([]string, 0, len(out.Results))
+	for _, item := range out.Results {
+		if item.RunID != "" {
+			ids = append(ids, item.RunID)
+		}
+	}
+	return ids
+}
+
 func (out ExecManyOutput) auditOutcome() (bool, *int64) {
 	for _, item := range out.Results {
 		if item.Error != "" || item.Timeout || item.ExitCode != 0 {

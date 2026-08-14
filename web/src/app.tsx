@@ -8,7 +8,6 @@ import { AppShell } from '@/components/layout/app-shell'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ThemeProvider, useTheme } from '@/lib/theme'
 import { ActivityPage } from '@/pages/activity'
-import { CommandRunsPage } from '@/pages/command-runs'
 import { DashboardPage } from '@/pages/dashboard'
 import { FilesPage } from '@/pages/files'
 import { HostsPage } from '@/pages/hosts'
@@ -86,7 +85,6 @@ export default function App() {
                   <Route path="files" element={<FilesPage />} />
                   <Route path="jobs" element={<JobsPage />} />
                   <Route path="activity" element={<ActivityPage />} />
-                  <Route path="commands" element={<CommandRunsPage />} />
                   <Route path="metrics" element={<MetricsPage />} />
                   <Route path="memories" element={<MemoriesPage />} />
                   {/* 未知路径仍留在 AppShell 内，用户可直接从侧边栏跳走 */}

@@ -103,6 +103,7 @@ type Audit struct {
 	Tool                 string
 	Host                 sql.NullString
 	ParamsJSON           string
+	RunIDs               []string `json:"RunIDs,omitempty"`
 	OK                   bool
 	ExitCode             sql.NullInt64
 	DurationMS, BytesOut int64

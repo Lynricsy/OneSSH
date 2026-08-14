@@ -175,7 +175,7 @@ export type CommandRunFilter = {
   query?: string
 }
 
-export const useCommandRuns = (filter: CommandRunFilter = {}) =>
+export const useCommandRuns = (filter: CommandRunFilter = {}, enabled = true) =>
   useInfiniteQuery({
     queryKey: queryKeys.commandRuns(filter),
     queryFn: ({ pageParam }) => {
@@ -189,6 +189,7 @@ export const useCommandRuns = (filter: CommandRunFilter = {}) =>
       return api<CommandRun[]>(`/command-runs?${params}`)
     },
     initialPageParam: 0,
+    enabled,
     getNextPageParam: (last) => (last.length < 100 ? undefined : last[last.length - 1]?.seq),
     placeholderData: keepPreviousData,
     refetchInterval: 3000,

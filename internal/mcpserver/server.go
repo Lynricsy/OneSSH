@@ -134,6 +134,9 @@ func register[In, Out any](s *Server, tool *mcp.Tool, handler mcp.ToolHandlerFor
 		if exitCode != nil {
 			a.ExitCode = sql.NullInt64{Int64: *exitCode, Valid: true}
 		}
+		if linked, found := any(out).(auditCommandRuns); found {
+			a.RunIDs = linked.auditCommandRunIDs()
+		}
 		if raw, e := json.Marshal(out); e == nil {
 			a.BytesOut = int64(len(raw))
 		}
@@ -149,6 +152,10 @@ func register[In, Out any](s *Server, tool *mcp.Tool, handler mcp.ToolHandlerFor
 
 type auditOutcome interface {
 	auditOutcome() (ok bool, exitCode *int64)
+}
+
+type auditCommandRuns interface {
+	auditCommandRunIDs() []string
 }
 
 func redactedJSON(v any) string {

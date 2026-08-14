@@ -1,51 +1,13 @@
-import {
-  ArrowDown,
-  Check,
-  Copy,
-  MagnifyingGlass,
-  Terminal,
-  WarningCircle,
-} from '@phosphor-icons/react'
-import { useDeferredValue, useMemo, useState } from 'react'
+import { ArrowDown, Check, Copy, WarningCircle } from '@phosphor-icons/react'
+import { useState } from 'react'
 import { toast } from 'sonner'
-import {
-  useCommandOutput,
-  useCommandRun,
-  useCommandRuns,
-  useHosts,
-  useTokens,
-  type CommandRunFilter,
-} from '@/api/queries'
+import { useCommandOutput, useCommandRun } from '@/api/queries'
 import type { CommandRun, CommandRunStatus } from '@/api/types'
 import { Badge, Dot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { DataTable, type Column } from '@/components/ui/data-table'
-import { Dialog } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
-import { MultiSelect } from '@/components/ui/multi-select'
-import { PageHeader } from '@/components/ui/page-header'
-import { PageTransition } from '@/components/ui/page-transition'
 import { Spinner } from '@/components/ui/spinner'
 import { formatBytes } from '@/lib/format'
-
-const MAX_FILTER_VALUES = 100
-
-const statusOptions: Array<{ value: CommandRunStatus; label: string }> = [
-  { value: 'running', label: '运行中' },
-  { value: 'succeeded', label: '成功' },
-  { value: 'failed', label: '失败' },
-  { value: 'timeout', label: '已超时' },
-  { value: 'cancelled', label: '已取消' },
-  { value: 'lost', label: '已失联' },
-]
-
-const toolOptions = [
-  { value: 'exec', label: 'exec' },
-  { value: 'exec_many', label: 'exec_many' },
-  { value: 'job_start', label: 'job_start' },
-]
 
 function formatTime(ms: number) {
   return new Date(ms).toLocaleString('zh-CN', { hour12: false })
@@ -172,7 +134,7 @@ function OutputBlock({
   )
 }
 
-function CommandRunDetail({ id }: { id: string }) {
+export function CommandRunDetail({ id }: { id: string }) {
   const detail = useCommandRun(id)
   if (detail.isLoading) {
     return (
@@ -266,179 +228,5 @@ function CommandRunDetail({ id }: { id: string }) {
         {run.finished_at && <span>结束: {formatTime(run.finished_at)}</span>}
       </div>
     </div>
-  )
-}
-
-const columns: Column<CommandRun>[] = [
-  {
-    key: 'started_at',
-    title: '时间',
-    className: 'w-[150px] text-[12px] text-muted tabular-nums',
-    render: (run) => formatTime(run.started_at),
-  },
-  {
-    key: 'command',
-    title: '命令',
-    render: (run) => (
-      <div className="min-w-0">
-        <p className="truncate font-mono text-[12px]" title={run.command}>
-          {run.command}
-        </p>
-        <p className="mt-0.5 truncate text-[11px] text-muted">
-          {run.tool} · {run.host}
-        </p>
-      </div>
-    ),
-  },
-  {
-    key: 'status',
-    title: '状态',
-    className: 'w-[94px]',
-    render: (run) => <RunStatus status={run.status} />,
-  },
-  {
-    key: 'exit_code',
-    title: '退出码',
-    className: 'hidden w-[72px] text-right font-mono tabular-nums lg:table-cell',
-    render: (run) => run.exit_code ?? '—',
-  },
-  {
-    key: 'output',
-    title: '输出',
-    className: 'hidden w-[92px] text-right text-muted tabular-nums lg:table-cell',
-    render: (run) => formatBytes(run.stdout_bytes + run.stderr_bytes),
-  },
-  {
-    key: 'duration',
-    title: '耗时',
-    className: 'w-[88px] text-right text-muted tabular-nums',
-    render: (run) => formatDuration(run.duration_ms),
-  },
-]
-
-export function CommandRunsPage() {
-  const [tool, setTool] = useState<string[]>([])
-  const [token, setToken] = useState<number[]>([])
-  const [host, setHost] = useState<string[]>([])
-  const [status, setStatus] = useState<string[]>([])
-  const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState<string | null>(null)
-  const deferredQuery = useDeferredValue(query.trim())
-  const filter: CommandRunFilter = { tool, token, host, status, query: deferredQuery }
-  const runs = useCommandRuns(filter)
-  const hosts = useHosts()
-  const tokens = useTokens()
-  const loadedRuns = useMemo(() => runs.data?.pages.flat() ?? [], [runs.data])
-  const filtered =
-    tool.length + token.length + host.length + status.length > 0 || deferredQuery !== ''
-
-  return (
-    <PageTransition>
-      <PageHeader title="命令记录" subtitle="查看每次远程命令、真实退出状态与 stdout / stderr 输出" />
-
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle>执行历史</CardTitle>
-          {runs.data && (
-            <span className="text-[12px] text-muted tabular-nums">
-              {filtered ? `已加载 ${loadedRuns.length} 条匹配记录` : `最近 ${loadedRuns.length} 条`}
-            </span>
-          )}
-        </CardHeader>
-        <div className="grid grid-cols-2 gap-2 border-b border-border p-3 lg:grid-cols-4">
-          <div className="col-span-2 lg:col-span-4">
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索命令、主机、run_id 或调用令牌…"
-              spellCheck={false}
-              prefix={<MagnifyingGlass size={14} />}
-              aria-label="搜索命令记录"
-            />
-          </div>
-          <MultiSelect
-            value={tool}
-            onChange={setTool}
-            placeholder="全部工具"
-            searchPlaceholder="搜索工具…"
-            options={toolOptions}
-            maxSelected={MAX_FILTER_VALUES}
-            aria-label="按工具筛选"
-          />
-          <MultiSelect
-            value={status}
-            onChange={setStatus}
-            placeholder="全部状态"
-            searchPlaceholder="搜索状态…"
-            options={statusOptions}
-            maxSelected={MAX_FILTER_VALUES}
-            aria-label="按状态筛选"
-          />
-          <MultiSelect
-            value={host}
-            onChange={setHost}
-            placeholder="全部主机"
-            searchPlaceholder="搜索主机…"
-            options={(hosts.data ?? []).map((item) => ({ value: item.name, label: item.name }))}
-            maxSelected={MAX_FILTER_VALUES}
-            aria-label="按主机筛选"
-          />
-          <MultiSelect
-            value={token}
-            onChange={setToken}
-            placeholder="全部令牌"
-            searchPlaceholder="搜索令牌…"
-            options={(tokens.data ?? []).map((item) => ({ value: item.id, label: item.name }))}
-            maxSelected={MAX_FILTER_VALUES}
-            aria-label="按令牌筛选"
-          />
-        </div>
-        <CardContent className="p-0">
-          <DataTable
-            columns={columns}
-            rows={loadedRuns}
-            rowKey={(run) => run.id}
-            loading={runs.isLoading}
-            onRowClick={(run) => setSelected(run.id)}
-            empty={
-              <EmptyState
-                icon={<Terminal size={23} />}
-                title={filtered ? '没有匹配的命令记录' : '暂无命令记录'}
-                description={
-                  filtered
-                    ? '调整筛选条件或关键词再试。'
-                    : 'Agent 调用 exec、exec_many 或 job_start 后，命令与输出会出现在这里。'
-                }
-              />
-            }
-          />
-          {runs.hasNextPage && (
-            <div className="flex justify-center border-t border-border p-3">
-              <Button
-                size="sm"
-                variant="outline"
-                loading={runs.isFetchingNextPage}
-                onClick={() => void runs.fetchNextPage()}
-              >
-                <ArrowDown size={14} />
-                加载更早记录
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Dialog
-        open={selected != null}
-        onOpenChange={(open) => {
-          if (!open) setSelected(null)
-        }}
-        title="命令执行详情"
-        description={selected ? `run_id · ${selected}` : undefined}
-        size="lg"
-      >
-        {selected && <CommandRunDetail id={selected} />}
-      </Dialog>
-    </PageTransition>
   )
 }

@@ -76,6 +76,7 @@ export type Audit = {
   Tool: string
   Host: { String: string; Valid: boolean }
   ParamsJSON: string
+  RunIDs?: string[]
   OK: boolean
   DurationMS: number
   BytesOut: number

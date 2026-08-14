@@ -45,6 +45,9 @@ var migration0010 string
 //go:embed migrations/0011_command_runs.sql
 var migration0011 string
 
+//go:embed migrations/0012_audit_command_runs.sql
+var migration0012 string
+
 type Store struct{ DB *sql.DB }
 
 func sqliteDSN(dbPath string) (string, error) {
@@ -115,6 +118,7 @@ func migrate(db *sql.DB) error {
 		{version: 9, sql: migration0009},
 		{version: 10, sql: migration0010},
 		{version: 11, sql: migration0011},
+		{version: 12, sql: migration0012},
 	} {
 		if err := applyMigration(db, m); err != nil {
 			return fmt.Errorf("版本 %d: %w", m.version, err)
@@ -173,6 +177,16 @@ func applyMigration(db *sql.DB, m migration) error {
 		}
 		if _, err = tx.Exec(m.sql); err != nil {
 			return err
+		}
+	case 11:
+		hasColumn, err := tableHasColumn(tx, "audit", "command_run_ids_json")
+		if err != nil {
+			return err
+		}
+		if !hasColumn {
+			if _, err = tx.Exec(m.sql); err != nil {
+				return err
+			}
 		}
 	default:
 		if _, err = tx.Exec(m.sql); err != nil {
