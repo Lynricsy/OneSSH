@@ -39,6 +39,9 @@ var migration0008 string
 //go:embed migrations/0009_audit_tool_index.sql
 var migration0009 string
 
+//go:embed migrations/0010_host_tags.sql
+var migration0010 string
+
 type Store struct{ DB *sql.DB }
 
 func sqliteDSN(dbPath string) (string, error) {
@@ -101,6 +104,7 @@ func migrate(db *sql.DB) error {
 		{version: 7, sql: migration0007},
 		{version: 8, sql: migration0008},
 		{version: 9, sql: migration0009},
+		{version: 10, sql: migration0010},
 	} {
 		if err := applyMigration(db, m); err != nil {
 			return fmt.Errorf("版本 %d: %w", m.version, err)

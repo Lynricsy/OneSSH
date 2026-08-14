@@ -50,12 +50,34 @@ func TestAdminKeyHostTokenLifecycle(t *testing.T) {
 	if strings.Contains(key.Body.String(), "PRIVATE KEY") {
 		t.Fatal("响应泄漏私钥")
 	}
-	host := call(http.MethodPost, "/hosts", `{"name":"ssh","addr":"127.0.0.1","port":2222,"username":"test","auth_type":"password","password":"pass"}`)
+	host := call(http.MethodPost, "/hosts", `{"name":"ssh","addr":"127.0.0.1","port":2222,"username":"test","auth_type":"password","password":"pass","tags":[" prod ","web","web"]}`)
 	if host.Code != http.StatusCreated {
 		t.Fatalf("创建主机 %d %s", host.Code, host.Body.String())
 	}
 	if strings.Contains(host.Body.String(), `"password":"pass"`) || strings.Contains(host.Body.String(), "password_enc") {
 		t.Fatal("响应泄漏密码")
+	}
+	var hostOut map[string]any
+	if err := json.Unmarshal(host.Body.Bytes(), &hostOut); err != nil {
+		t.Fatal(err)
+	}
+	tags, ok := hostOut["tags"].([]any)
+	if !ok || len(tags) != 2 || tags[0] != "prod" || tags[1] != "web" {
+		t.Fatalf("创建主机响应标签异常: %s", host.Body.String())
+	}
+	hostList := call(http.MethodGet, "/hosts", "")
+	if hostList.Code != http.StatusOK {
+		t.Fatalf("列出主机 %d %s", hostList.Code, hostList.Body.String())
+	}
+	var hostsOut []map[string]any
+	if err := json.Unmarshal(hostList.Body.Bytes(), &hostsOut); err != nil {
+		t.Fatal(err)
+	}
+	if len(hostsOut) != 1 {
+		t.Fatalf("主机列表数量 = %d", len(hostsOut))
+	}
+	if listedTags, ok := hostsOut[0]["tags"].([]any); !ok || len(listedTags) != 2 {
+		t.Fatalf("主机列表标签异常: %s", hostList.Body.String())
 	}
 	token := call(http.MethodPost, "/tokens", `{"name":"manager","all_hosts":false,"manage_hosts":true,"host_ids":[]}`)
 	if token.Code != http.StatusCreated {

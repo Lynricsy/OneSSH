@@ -12,6 +12,8 @@ export type Host = {
   /** 跳板主机 id；缺省表示直连 */
   jump_host_id?: number
   monitor_enabled: boolean
+  /** 分组标签，后端保证非 null */
+  tags: string[]
   created_at: number
 }
 
@@ -122,6 +124,7 @@ export type HostPayload = {
   /** 跳板主机名；空/省略表示直连 */
   jump_host?: string
   monitor_enabled: boolean
+  tags?: string[]
 }
 
 export type KeyPayload = {
