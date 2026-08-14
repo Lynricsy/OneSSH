@@ -107,13 +107,17 @@ func (m *Manager) start(ctx context.Context, h store.Host, tokenID int64, comman
 	}
 	if err != nil {
 		// 远端进程已经启动，但本地事务没有落成时不能把它变成无人可见、无法终止的孤儿。
+		// 仍须先核验 job 标记；短命任务退出并发生 PID 复用时绝不能误伤新进程。
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		target := strconv.FormatInt(pid, 10)
-		if j.UsedSetsid {
-			target = "-" + target
-		}
-		_, _ = m.Exec.Run(cleanupCtx, client, `kill -TERM `+target, "~", nil, execx.Options{Timeout: 5 * time.Second, MaxLines: 5})
+		cleanupScript := jobProcessIdentityScript(j) + `
+if alive && owned; then
+  kill -TERM "$target" 2>/dev/null || :
+  i=0
+  while alive && [ "$i" -lt 10 ]; do sleep 0.1; i=$((i+1)); done
+  if alive && owned; then kill -KILL "$target" 2>/dev/null || :; fi
+fi`
+		_, _ = m.Exec.Run(cleanupCtx, client, cleanupScript, "~", nil, execx.Options{Timeout: 5 * time.Second, MaxLines: 5})
 		return store.Job{}, err
 	}
 	m.Events.Publish("job_status", map[string]any{"job_id": id, "status": "running"})
