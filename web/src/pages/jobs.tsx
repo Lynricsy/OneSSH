@@ -323,10 +323,24 @@ export function JobsPage() {
         size="lg"
       >
         {logsJobId && jobs.data ? (
-          <JobLogs job={jobs.data.find((item) => item.job.id === logsJobId) ?? {
-            job: { id: logsJobId, host_id: 0, command: '', cwd: '', status: 'exited', started_at: 0 },
-            log_bytes: 0,
-          }} />
+          <JobLogs
+            job={
+              // 列表可能已刷新掉这条任务，用只带 id 的占位记录兜底：日志按 job_id 拉取，与它是否还在列表里无关
+              jobs.data.find((item) => item.job.id === logsJobId) ?? {
+                job: {
+                  id: logsJobId,
+                  host_id: 0,
+                  command: '',
+                  cwd: '',
+                  status: 'exited',
+                  exit_code: null,
+                  started_at: 0,
+                  finished_at: null,
+                },
+                log_bytes: 0,
+              }
+            }
+          />
         ) : null}
       </Dialog>
 

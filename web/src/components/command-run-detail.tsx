@@ -1,8 +1,7 @@
-import { ArrowDown, Check, Copy, WarningCircle } from '@phosphor-icons/react'
-import { useState } from 'react'
-import { toast } from 'sonner'
+import { ArrowDown, WarningCircle } from '@phosphor-icons/react'
 import { useCommandOutput, useCommandRun } from '@/api/queries'
 import type { Audit, CommandRun, CommandRunStatus } from '@/api/types'
+import { CopyableBlock } from '@/components/copyable-block'
 import { Badge, Dot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -40,38 +39,6 @@ function RunStatus({ status }: { status: CommandRunStatus }) {
     case 'lost':
       return <Badge variant="warning">已失联</Badge>
   }
-}
-
-function CopyableBlock({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false)
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopied(true)
-      toast.success('已复制')
-      window.setTimeout(() => setCopied(false), 1600)
-    } catch {
-      toast.error('复制失败，请手动选择文本')
-    }
-  }
-  return (
-    <div>
-      <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="text-[11px] tracking-wide text-muted uppercase">{label}</p>
-        <button
-          type="button"
-          onClick={() => void copy()}
-          className="rounded-[4px] p-0.5 text-muted transition-colors hover:bg-surface-2 hover:text-text"
-          aria-label={`复制${label}`}
-        >
-          {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
-        </button>
-      </div>
-      <pre className="max-h-56 overflow-auto rounded-[8px] bg-surface-2 px-3 py-2.5 font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap text-text">
-        {value}
-      </pre>
-    </div>
-  )
 }
 
 function OutputBlock({
@@ -247,7 +214,7 @@ export function CommandRunDetail({ id, audit }: { id: string; audit?: Audit }) {
         </dl>
       </section>
 
-      <CopyableBlock label="命令" value={run.command} />
+      <CopyableBlock label="命令" value={run.command} clamp />
 
       {run.error && (
         <div className="rounded-[8px] border border-danger/30 bg-danger/8 px-3 py-2.5 text-[13px] text-danger">

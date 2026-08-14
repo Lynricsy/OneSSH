@@ -32,7 +32,6 @@ export const queryKeys = {
   jobLogs: (id: string) => ['jobs', id, 'logs'] as const,
   audit: (filter: AuditFilter) => ['audit', filter] as const,
   auditTools: ['audit', 'tools'] as const,
-  commandRuns: (filter: CommandRunFilter) => ['command-runs', 'list', filter] as const,
   commandRun: (id: string) => ['command-runs', 'detail', id] as const,
   commandOutput: (id: string, stream: string) => ['command-runs', 'output', id, stream] as const,
   metrics: (hostId: number, hours: number) => ['metrics', hostId, hours] as const,
@@ -165,34 +164,6 @@ export const useAuditTools = () =>
     queryKey: queryKeys.auditTools,
     queryFn: () => api<string[]>('/audit/tools'),
     staleTime: 5 * 60_000,
-  })
-
-export type CommandRunFilter = {
-  tool?: string[]
-  token?: number[]
-  host?: string[]
-  status?: string[]
-  query?: string
-}
-
-export const useCommandRuns = (filter: CommandRunFilter = {}, enabled = true) =>
-  useInfiniteQuery({
-    queryKey: queryKeys.commandRuns(filter),
-    queryFn: ({ pageParam }) => {
-      const params = new URLSearchParams({ limit: '100' })
-      for (const tool of filter.tool ?? []) params.append('tool', tool)
-      for (const token of filter.token ?? []) params.append('token', String(token))
-      for (const host of filter.host ?? []) params.append('host', host)
-      for (const status of filter.status ?? []) params.append('status', status)
-      if (filter.query) params.set('q', filter.query)
-      if (pageParam > 0) params.set('before', String(pageParam))
-      return api<CommandRun[]>(`/command-runs?${params}`)
-    },
-    initialPageParam: 0,
-    enabled,
-    getNextPageParam: (last) => (last.length < 100 ? undefined : last[last.length - 1]?.seq),
-    placeholderData: keepPreviousData,
-    refetchInterval: 3000,
   })
 
 export const useCommandRun = (id: string | null) =>

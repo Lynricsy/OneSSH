@@ -42,9 +42,9 @@ export type JobStatus = {
     command: string
     cwd: string
     status: string
-    exit_code?: number
+    exit_code: number | null
     started_at: number
-    finished_at?: number
+    finished_at: number | null
   }
   log_bytes: number
 }

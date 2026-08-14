@@ -136,6 +136,8 @@ export function DataTable<T, K extends string | number = string | number>({
                 onKeyDown={
                   onRowClick
                     ? (event) => {
+                        // 单元格里的按钮、勾选框自己就消费 Enter/Space，冒泡到行上会再触发一次行点击
+                        if (event.target !== event.currentTarget) return
                         if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault()
                           onRowClick(row)

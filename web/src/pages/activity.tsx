@@ -1,11 +1,9 @@
-import { Broadcast, Check, Copy, MagnifyingGlass, Pulse, WarningCircle } from '@phosphor-icons/react'
-import { toast } from 'sonner'
+import { Broadcast, MagnifyingGlass, Pulse } from '@phosphor-icons/react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useMemo, useState } from 'react'
 import {
   useAudit,
   useAuditTools,
-  useCommandRuns,
   useHosts,
   useTokens,
   type AuditFilter,
@@ -15,6 +13,7 @@ import { Badge, Dot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { CommandRunDetail, ParamsList } from '@/components/command-run-detail'
+import { CopyableBlock } from '@/components/copyable-block'
 import { DataTable, type Column } from '@/components/ui/data-table'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
@@ -23,7 +22,6 @@ import { PageHeader } from '@/components/ui/page-header'
 import { PageTransition } from '@/components/ui/page-transition'
 import { Select } from '@/components/ui/select'
 import { Sheet } from '@/components/ui/sheet'
-import { Spinner } from '@/components/ui/spinner'
 import { useEventStream } from '@/hooks/use-event-stream'
 import { auditParamEntries, auditSummary, parseAuditParams } from '@/lib/audit'
 import { cn } from '@/lib/cn'
@@ -200,38 +198,6 @@ function EventPayload({ event }: { event: StreamEvent }) {
   )
 }
 
-function CopyableBlock({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false)
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopied(true)
-      toast.success('已复制')
-      window.setTimeout(() => setCopied(false), 1600)
-    } catch {
-      toast.error('复制失败，请手动选择文本')
-    }
-  }
-  return (
-    <div>
-      <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="text-[11px] tracking-wide text-muted uppercase">{label}</p>
-        <button
-          type="button"
-          onClick={() => void copy()}
-          aria-label={`复制${label}`}
-          className="rounded-[4px] p-0.5 text-muted transition-colors hover:bg-surface-2 hover:text-text"
-        >
-          {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
-        </button>
-      </div>
-      <pre className="rounded-[8px] bg-surface-2 px-3 py-2.5 font-mono text-[12px] leading-[1.6] break-words whitespace-pre-wrap text-text">
-        {value}
-      </pre>
-    </div>
-  )
-}
-
 function AuditDetail({ item }: { item: Audit }) {
   const params = parseAuditParams(item.ParamsJSON)
   const command = params && typeof params.command === 'string' ? params.command.trim() : ''
@@ -290,92 +256,38 @@ function AuditDetail({ item }: { item: Audit }) {
   )
 }
 
-const commandTools = new Set(['exec', 'exec_many', 'job_start'])
-
 function AuditSheetContent({ item }: { item: Audit }) {
-  const params = parseAuditParams(item.ParamsJSON)
-  const command = params && typeof params.command === 'string' ? params.command.trim() : ''
-  const explicitRunIDs = item.RunIDs ?? []
-  const needsLegacyMatch = commandTools.has(item.Tool) && explicitRunIDs.length === 0 && command !== ''
-  const candidates = useCommandRuns(
-    {
-      tool: [item.Tool],
-      token: item.TokenID?.Valid ? [item.TokenID.Int64] : undefined,
-      host: item.Host?.Valid ? [item.Host.String] : undefined,
-      query: command,
-    },
-    needsLegacyMatch,
-  )
-  const inferredRunIDs = useMemo(() => {
-    if (!needsLegacyMatch) return []
-    const earliest = item.Ts - Math.max(0, item.DurationMS) - 5_000
-    const latest = item.Ts + 2_000
-    return (candidates.data?.pages.flat() ?? [])
-      .filter(
-        (run) =>
-          run.command.trim() === command &&
-          run.started_at >= earliest &&
-          run.started_at <= latest,
-      )
-      .sort((left, right) => left.started_at - right.started_at)
-      .map((run) => run.id)
-  }, [candidates.data, command, item.DurationMS, item.Ts, needsLegacyMatch])
-  const runIDs = explicitRunIDs.length > 0 ? explicitRunIDs : inferredRunIDs
+  const runIDs = item.RunIDs ?? []
   const [preferredRunID, setPreferredRunID] = useState('')
   const activeRunID = runIDs.includes(preferredRunID) ? preferredRunID : runIDs[0]
 
-  if (needsLegacyMatch && candidates.isLoading) {
-    return (
-      <div className="flex min-h-56 items-center justify-center gap-2 text-[13px] text-muted">
-        <Spinner className="size-4" />
-        正在关联命令执行记录…
-      </div>
-    )
-  }
-
-  if (activeRunID) {
-    return (
-      <div className="space-y-4">
-        {explicitRunIDs.length === 0 && (
-          <div className="rounded-[8px] border border-border bg-surface-2 px-3 py-2 text-[12px] text-muted">
-            这是关联字段加入前的旧审计记录，已按命令、令牌和执行时间匹配。
-          </div>
-        )}
-        {runIDs.length > 1 && (
-          <div>
-            <p className="mb-2 text-[11px] tracking-wide text-muted uppercase">
-              批量执行 · {runIDs.length} 台主机
-            </p>
-            <div className="flex flex-wrap gap-2" role="tablist" aria-label="选择命令执行记录">
-              {runIDs.map((runID, index) => (
-                <Button
-                  key={runID}
-                  size="sm"
-                  variant={runID === activeRunID ? 'primary' : 'outline'}
-                  role="tab"
-                  aria-selected={runID === activeRunID}
-                  onClick={() => setPreferredRunID(runID)}
-                >
-                  执行 {index + 1} · {runID.slice(0, 8)}
-                </Button>
-              ))}
-            </div>
-          </div>
-        )}
-        <CommandRunDetail id={activeRunID} audit={item} />
-      </div>
-    )
-  }
+  // 没有关联执行记录的调用（读文件、查主机等）只展示当时记录的参数
+  if (!activeRunID) return <AuditDetail item={item} />
 
   return (
     <div className="space-y-4">
-      {needsLegacyMatch && !candidates.isError && (
-        <div className="flex items-start gap-2 rounded-[8px] border border-warning/30 bg-warning/8 px-3 py-2.5 text-[13px] text-warning">
-          <WarningCircle className="mt-0.5 shrink-0" size={15} />
-          <span>这条旧审计记录没有找到可关联的完整输出，仍可查看当时记录的调用参数。</span>
+      {runIDs.length > 1 && (
+        <div>
+          <p className="mb-2 text-[11px] tracking-wide text-muted uppercase">
+            批量执行 · {runIDs.length} 台主机
+          </p>
+          <div className="flex flex-wrap gap-2" role="tablist" aria-label="选择命令执行记录">
+            {runIDs.map((runID, index) => (
+              <Button
+                key={runID}
+                size="sm"
+                variant={runID === activeRunID ? 'primary' : 'outline'}
+                role="tab"
+                aria-selected={runID === activeRunID}
+                onClick={() => setPreferredRunID(runID)}
+              >
+                执行 {index + 1} · {runID.slice(0, 8)}
+              </Button>
+            ))}
+          </div>
         </div>
       )}
-      <AuditDetail item={item} />
+      <CommandRunDetail id={activeRunID} audit={item} />
     </div>
   )
 }

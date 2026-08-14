@@ -1,6 +1,6 @@
 import { DotsThree, HardDrives, MagnifyingGlass, Plus } from '@phosphor-icons/react'
 import { Controller, useForm } from 'react-hook-form'
-import { useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
   useDeleteHost,
@@ -54,6 +54,10 @@ const emptyForm: HostPayload = {
   monitor_enabled: true,
   tags: [],
 }
+
+/** 与后端 hostmanager.normalizeTags 对齐：最多 16 个标签，每个至多 32 个 Unicode 字符 */
+const MAX_TAGS = 16
+const MAX_TAG_LENGTH = 32
 
 /**
  * TOFU 未完成是全新主机的正常初始状态，不是故障。
@@ -148,6 +152,19 @@ export function HostsPage() {
       return true
     })
   }, [hosts.data, query, filterTags, filterAuth, filterMonitor])
+
+  /**
+   * 过滤条把主机移出视野后，它就不该继续留在选中态里：批量删除只作用于当前看得见的选择，
+   * 否则改一次筛选就可能删掉一台根本不在列表里的主机。
+   */
+  useEffect(() => {
+    setSelected((prev) => {
+      if (prev.size === 0) return prev
+      const visible = new Set(filtered.map((host) => host.id))
+      const next = new Set([...prev].filter((id) => visible.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [filtered])
 
   /** 列表本身非空、只是被过滤条件清空时，换一套空态文案引导清除条件 */
   const narrowedToNothing = (hosts.data?.length ?? 0) > 0 && filtered.length === 0
@@ -636,7 +653,7 @@ export function HostsPage() {
 
           <Field
             label="标签"
-            hint="用于按用途或环境分组，可输入新标签回车创建"
+            hint={`用于按用途或环境分组，可输入新标签回车创建；最多 ${MAX_TAGS} 个、每个 ${MAX_TAG_LENGTH} 字符`}
             className="sm:col-span-6"
           >
             {(id) => (
@@ -655,11 +672,23 @@ export function HostsPage() {
                       value: tag,
                       label: tag,
                     }))}
+                    maxSelected={MAX_TAGS}
                     onCreateOption={(label) => {
                       const tag = label.trim()
-                      if (tag && !(field.value ?? []).includes(tag)) {
-                        field.onChange([...(field.value ?? []), tag])
+                      if (!tag) return
+                      const current = field.value ?? []
+                      // 限制与后端一致，拦在输入这一刻，而不是等提交才回一句报错
+                      if ([...tag].length > MAX_TAG_LENGTH) {
+                        toast.error(`标签「${tag}」超过 ${MAX_TAG_LENGTH} 字符`)
+                        return
                       }
+                      if (current.length >= MAX_TAGS) {
+                        toast.error(`标签最多 ${MAX_TAGS} 个`)
+                        return
+                      }
+                      // 后端按小写去重，这里放行只会造出肉眼难分的重复标签
+                      if (current.some((item) => item.toLowerCase() === tag.toLowerCase())) return
+                      field.onChange([...current, tag])
                     }}
                   />
                 )}
