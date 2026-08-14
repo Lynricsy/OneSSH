@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -187,8 +188,12 @@ func TestReadCommandOutputPreservesUTF8AcrossPages(t *testing.T) {
 	if err = os.WriteFile(path, []byte("abcd你b"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = runner.ReadCommandOutput(id, "stdout", 5, 4); err == nil {
-		t.Fatal("位于 UTF-8 字符内部的 offset 未被拒绝")
+	inside, err := runner.ReadCommandOutput(id, "stdout", 5, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !utf8.ValidString(inside.Content) || inside.NextOffset != 8 || !inside.Complete {
+		t.Fatalf("任意字节偏移读取异常: %#v", inside)
 	}
 	first, err := runner.ReadCommandOutput(id, "stdout", 0, 5)
 	if err != nil {
@@ -203,5 +208,26 @@ func TestReadCommandOutputPreservesUTF8AcrossPages(t *testing.T) {
 	}
 	if second.Content != "你b" || second.NextOffset != 8 || !second.Complete {
 		t.Fatalf("第二页切分异常: %#v", second)
+	}
+
+	binary := []byte{0xff, 0x80, 'A', 0xe4, 0xbd, 0xa0}
+	if err = os.WriteFile(path, binary, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output strings.Builder
+	offset := int64(0)
+	for offset < int64(len(binary)) {
+		page, readErr := runner.ReadCommandOutput(id, "stdout", offset, 2)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if page.NextOffset <= offset {
+			t.Fatalf("二进制分页没有推进: %#v", page)
+		}
+		output.WriteString(page.Content)
+		offset = page.NextOffset
+	}
+	if offset != int64(len(binary)) || !utf8.ValidString(output.String()) || !strings.Contains(output.String(), "A你") {
+		t.Fatalf("二进制分页结果异常: offset=%d output=%q", offset, output.String())
 	}
 }

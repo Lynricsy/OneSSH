@@ -576,15 +576,6 @@ func (r *Runner) ReadCommandOutput(id, stream string, offset int64, limit int) (
 	if offset > info.Size() {
 		offset = info.Size()
 	}
-	if offset > 0 && offset < info.Size() {
-		var first [1]byte
-		if _, err = file.ReadAt(first[:], offset); err != nil {
-			return OutputChunk{}, err
-		}
-		if !utf8.RuneStart(first[0]) {
-			return OutputChunk{}, fmt.Errorf("offset_bytes 必须位于 UTF-8 字符边界")
-		}
-	}
 	if limit <= 0 {
 		limit = 256 << 10
 	}
@@ -599,8 +590,11 @@ func (r *Runner) ReadCommandOutput(id, stream string, offset int64, limit int) (
 	}
 	data = data[:read]
 	data = UTF8Page(data, limit, offset+int64(read) < info.Size())
-	next := offset + int64(len(data))
-	return OutputChunk{Content: string(data), Offset: offset, NextOffset: next, TotalBytes: info.Size(), Complete: next >= info.Size()}, nil
+	rawBytes := len(data)
+	next := offset + int64(rawBytes)
+	// 游标始终按原始字节推进；非法 UTF-8 只在文本响应里替换，不能改变下一页偏移。
+	content := strings.ToValidUTF8(string(data), "�")
+	return OutputChunk{Content: content, Offset: offset, NextOffset: next, TotalBytes: info.Size(), Complete: next >= info.Size()}, nil
 }
 func ReadArtifact(path string, offset, limit int, pattern string) (string, int, error) {
 	f, err := os.Open(path)

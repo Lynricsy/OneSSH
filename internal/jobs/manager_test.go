@@ -60,3 +60,12 @@ func TestTrackedJobCommandRecordsExplicitExit(t *testing.T) {
 		t.Fatalf("记录的退出码=%q，期望 7", code)
 	}
 }
+
+func TestKillFinishedJobIsNoOp(t *testing.T) {
+	manager := &Manager{}
+	for _, status := range []string{"exited", "killed", "lost"} {
+		if err := manager.Kill(context.Background(), store.Job{Status: status}, "INVALID"); err != nil {
+			t.Fatalf("已结束任务 %s 再次终止应直接成功: %v", status, err)
+		}
+	}
+}

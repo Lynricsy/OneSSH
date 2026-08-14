@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -304,10 +303,6 @@ func TestOpenRecordsPreexistingJobLogBytesColumn(t *testing.T) {
 	if _, err = db.Exec(`ALTER TABLE jobs ADD COLUMN log_bytes INTEGER NOT NULL DEFAULT 0`); err != nil {
 		t.Fatal(err)
 	}
-	legacyCommandRuns := strings.Replace(migration0011, "  output_cleaned INTEGER NOT NULL DEFAULT 0,\n", "", 1)
-	if _, err = db.Exec(legacyCommandRuns); err != nil {
-		t.Fatal(err)
-	}
 	if err = db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -323,10 +318,53 @@ func TestOpenRecordsPreexistingJobLogBytesColumn(t *testing.T) {
 	if versions != 12 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
-	var commandRuns string
-	if err = st.DB.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='command_runs'`).Scan(&commandRuns); err != nil {
-		t.Fatalf("命令记录表未创建: %v", err)
+}
+
+func TestOpenAddsMissingCommandRunOutputCleanedColumn(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "onessh.db"))
+	if err != nil {
+		t.Fatal(err)
 	}
+	if _, err = db.Exec(migration0001); err != nil {
+		t.Fatal(err)
+	}
+	const legacyCommandRuns = `CREATE TABLE command_runs (
+		seq INTEGER PRIMARY KEY AUTOINCREMENT,
+		id TEXT NOT NULL UNIQUE,
+		token_id INTEGER,
+		token_name TEXT,
+		tool TEXT NOT NULL,
+		host_id INTEGER,
+		host TEXT NOT NULL,
+		command TEXT NOT NULL,
+		cwd TEXT NOT NULL,
+		session TEXT,
+		job_id TEXT UNIQUE,
+		status TEXT NOT NULL CHECK(status IN ('running','succeeded','failed','timeout','cancelled','lost')),
+		exit_code INTEGER,
+		stdout_preview TEXT NOT NULL DEFAULT '',
+		stderr_preview TEXT NOT NULL DEFAULT '',
+		stdout_bytes INTEGER NOT NULL DEFAULT 0,
+		stderr_bytes INTEGER NOT NULL DEFAULT 0,
+		output_available INTEGER NOT NULL DEFAULT 0,
+		output_expired INTEGER NOT NULL DEFAULT 0,
+		output_error TEXT,
+		error_text TEXT,
+		started_at INTEGER NOT NULL,
+		finished_at INTEGER
+	)`
+	if _, err = db.Exec(legacyCommandRuns); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatalf("已有命令记录表缺少 output_cleaned 时升级失败: %v", err)
+	}
+	defer st.Close()
 	var cleanedColumns int
 	if err = st.DB.QueryRow(`SELECT count(*) FROM pragma_table_info('command_runs') WHERE name='output_cleaned'`).Scan(&cleanedColumns); err != nil {
 		t.Fatal(err)

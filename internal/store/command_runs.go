@@ -165,8 +165,10 @@ func (s *Store) RecoverInterruptedCommandRuns(ctx context.Context, now int64) er
 
 func (s *Store) ExpireCommandRunOutputs(ctx context.Context, cutoff int64) error {
 	_, err := s.DB.ExecContext(ctx, `UPDATE command_runs SET stdout_preview='',stderr_preview='',
-		output_available=0,output_expired=1
-		WHERE job_id IS NULL AND status<>'running' AND finished_at<? AND output_available=1 AND output_expired=0`, cutoff)
+		output_expired=CASE WHEN output_available=1 THEN 1 ELSE output_expired END,
+		output_available=0
+		WHERE job_id IS NULL AND status<>'running' AND finished_at<?
+		AND (output_available=1 OR stdout_preview<>'' OR stderr_preview<>'')`, cutoff)
 	return err
 }
 
