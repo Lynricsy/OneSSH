@@ -19,16 +19,22 @@ import (
 // maxJumpChain 须与 sshpool 中的同名常量保持一致。
 const maxJumpChain = 5
 
+const (
+	maxTagLength = 32
+	maxTagsCount = 16
+)
+
 type Input struct {
-	Name           string  `json:"name" jsonschema:"主机名，网关内唯一，后续所有工具用它引用这台主机"`
-	Addr           string  `json:"addr" jsonschema:"主机地址或 IP"`
-	Port           int     `json:"port" jsonschema:"SSH 端口，省略或 0 表示 22"`
-	Username       string  `json:"username" jsonschema:"SSH 登录用户名"`
-	AuthType       string  `json:"auth_type" jsonschema:"认证方式：key 或 password"`
-	KeyID          *int64  `json:"key_id,omitempty" jsonschema:"key 认证使用的密钥 ID，auth_type=key 时必填"`
-	Password       *string `json:"password,omitempty" jsonschema:"登录密码；auth_type 为 password 时必填，只写不可读，审计中固定脱敏"`
-	JumpHost       string  `json:"jump_host,omitempty" jsonschema:"跳板主机名（可选）：连接时先经该主机建立隧道再连目标，留空表示直连。跳板主机必须已存在；链路最多 5 级且不能成环"`
-	MonitorEnabled *bool   `json:"monitor_enabled,omitempty" jsonschema:"是否纳入后台资源监控轮询，新建时默认开启"`
+	Name           string   `json:"name" jsonschema:"主机名，网关内唯一，后续所有工具用它引用这台主机"`
+	Addr           string   `json:"addr" jsonschema:"主机地址或 IP"`
+	Port           int      `json:"port" jsonschema:"SSH 端口，省略或 0 表示 22"`
+	Username       string   `json:"username" jsonschema:"SSH 登录用户名"`
+	AuthType       string   `json:"auth_type" jsonschema:"认证方式：key 或 password"`
+	KeyID          *int64   `json:"key_id,omitempty" jsonschema:"key 认证使用的密钥 ID，auth_type=key 时必填"`
+	Password       *string  `json:"password,omitempty" jsonschema:"登录密码；auth_type 为 password 时必填，只写不可读，审计中固定脱敏"`
+	JumpHost       string   `json:"jump_host,omitempty" jsonschema:"跳板主机名（可选）：连接时先经该主机建立隧道再连目标，留空表示直连。跳板主机必须已存在；链路最多 5 级且不能成环"`
+	MonitorEnabled *bool    `json:"monitor_enabled,omitempty" jsonschema:"是否纳入后台资源监控轮询，新建时默认开启"`
+	Tags           []string `json:"tags,omitempty" jsonschema:"主机标签，用于分组与筛选；自动去空白去重，单个最长 32 字符，最多 16 个"`
 }
 
 type ErrorKind uint8
@@ -248,7 +254,33 @@ func (m *Manager) hostFromInput(ctx context.Context, old store.Host, in Input, u
 		}
 		host.JumpHostID = sql.NullInt64{Int64: jump.ID, Valid: true}
 	}
+	tags, err := normalizeTags(in.Tags)
+	if err != nil {
+		return store.Host{}, err
+	}
+	host.Tags = tags
 	return host, nil
+}
+
+// normalizeTags 归一化标签：去首尾空白、丢弃空串、按首次出现顺序去重，并限制长度与数量。
+func normalizeTags(raw []string) ([]string, error) {
+	tags := make([]string, 0, len(raw))
+	seen := make(map[string]bool, len(raw))
+	for _, tag := range raw {
+		tag = strings.TrimSpace(tag)
+		if tag == "" || seen[tag] {
+			continue
+		}
+		if len([]rune(tag)) > maxTagLength {
+			return nil, invalid(fmt.Sprintf("标签 %q 超过 %d 字符", tag, maxTagLength))
+		}
+		seen[tag] = true
+		tags = append(tags, tag)
+	}
+	if len(tags) > maxTagsCount {
+		return nil, invalid(fmt.Sprintf("标签最多 %d 个", maxTagsCount))
+	}
+	return tags, nil
 }
 
 func invalid(message string) error {

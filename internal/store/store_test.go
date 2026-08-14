@@ -211,7 +211,7 @@ func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 9 {
+	if versions != 10 {
 		t.Fatalf("二次迁移版本数 = %d", versions)
 	}
 }
@@ -240,7 +240,7 @@ func TestOpenRecordsPreexistingManageHostsColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 9 {
+	if versions != 10 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 }
@@ -286,7 +286,7 @@ func TestOpenRecordsPreexistingAuditTokenNameColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 9 {
+	if versions != 10 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 }
@@ -599,5 +599,100 @@ func TestDeleteHostRevokesRestrictedOAuthRefreshToken(t *testing.T) {
 	}
 	if _, err = st.UseOAuthRefreshToken(ctx, "refresh-hash", client.ClientID, "http://localhost/mcp", time.Now().Unix()); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("删除主机后受限刷新授权仍存在: %v", err)
+	}
+}
+
+func TestHostTagsRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	created, err := st.CreateHost(ctx, Host{Name: "tagged", Addr: "127.0.0.1", Port: 22, Username: "user", AuthType: "password", Tags: []string{"prod", "web"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetHost(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Tags) != 2 || got.Tags[0] != "prod" || got.Tags[1] != "web" {
+		t.Fatalf("读取标签异常: %#v", got.Tags)
+	}
+	byName, err := st.GetHostByName(ctx, "tagged")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byName.Tags) != 2 || byName.Tags[0] != "prod" {
+		t.Fatalf("按名读取标签异常: %#v", byName.Tags)
+	}
+
+	got.Tags = []string{"staging"}
+	if err = st.UpdateHost(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := st.GetHost(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Tags) != 1 || updated.Tags[0] != "staging" {
+		t.Fatalf("更新标签异常: %#v", updated.Tags)
+	}
+
+	updated.Tags = nil
+	if err = st.UpdateHost(ctx, updated); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := st.GetHost(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.Tags == nil || len(cleared.Tags) != 0 {
+		t.Fatalf("清空标签异常: %#v", cleared.Tags)
+	}
+	var raw string
+	if err = st.DB.QueryRowContext(ctx, `SELECT tags FROM hosts WHERE id=?`, created.ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw != "[]" {
+		t.Fatalf("空标签落库 = %q", raw)
+	}
+
+	plain, err := st.CreateHost(ctx, Host{Name: "plain", Addr: "127.0.0.2", Port: 22, Username: "user", AuthType: "password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := st.ListHosts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("主机数量 = %d", len(list))
+	}
+	for _, h := range list {
+		if h.Tags == nil {
+			t.Fatalf("列表中 %s 的标签为 nil", h.Name)
+		}
+	}
+	gotPlain, err := st.GetHost(ctx, plain.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPlain.Tags == nil || len(gotPlain.Tags) != 0 {
+		t.Fatalf("未传标签读取异常: %#v", gotPlain.Tags)
+	}
+
+	// 历史脏数据：非法 JSON 应读出空切片而非报错。
+	if _, err = st.DB.ExecContext(ctx, `UPDATE hosts SET tags='not-json' WHERE id=?`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	dirty, err := st.GetHost(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dirty.Tags == nil || len(dirty.Tags) != 0 {
+		t.Fatalf("脏数据标签容忍异常: %#v", dirty.Tags)
 	}
 }

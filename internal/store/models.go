@@ -22,25 +22,30 @@ type Host struct {
 	HostKeyFP      sql.NullString `json:"-"`
 	JumpHostID     sql.NullInt64  `json:"-"`
 	MonitorEnabled bool           `json:"monitor_enabled"`
+	Tags           []string       `json:"tags"`
 	CreatedAt      int64          `json:"created_at"`
 }
 
 type HostView struct {
-	ID             int64   `json:"id"`
-	Name           string  `json:"name"`
-	Addr           string  `json:"addr"`
-	Port           int     `json:"port"`
-	Username       string  `json:"username"`
-	AuthType       string  `json:"auth_type"`
-	KeyID          *int64  `json:"key_id"`
-	HostKeyFP      *string `json:"hostkey_fp"`
-	JumpHostID     *int64  `json:"jump_host_id"`
-	MonitorEnabled bool    `json:"monitor_enabled"`
-	CreatedAt      int64   `json:"created_at"`
+	ID             int64    `json:"id"`
+	Name           string   `json:"name"`
+	Addr           string   `json:"addr"`
+	Port           int      `json:"port"`
+	Username       string   `json:"username"`
+	AuthType       string   `json:"auth_type"`
+	KeyID          *int64   `json:"key_id"`
+	HostKeyFP      *string  `json:"hostkey_fp"`
+	JumpHostID     *int64   `json:"jump_host_id"`
+	MonitorEnabled bool     `json:"monitor_enabled"`
+	Tags           []string `json:"tags"`
+	CreatedAt      int64    `json:"created_at"`
 }
 
 func (h Host) View() HostView {
-	v := HostView{ID: h.ID, Name: h.Name, Addr: h.Addr, Port: h.Port, Username: h.Username, AuthType: h.AuthType, MonitorEnabled: h.MonitorEnabled, CreatedAt: h.CreatedAt}
+	v := HostView{ID: h.ID, Name: h.Name, Addr: h.Addr, Port: h.Port, Username: h.Username, AuthType: h.AuthType, MonitorEnabled: h.MonitorEnabled, Tags: h.Tags, CreatedAt: h.CreatedAt}
+	if v.Tags == nil {
+		v.Tags = []string{}
+	}
 	if h.KeyID.Valid {
 		x := h.KeyID.Int64
 		v.KeyID = &x

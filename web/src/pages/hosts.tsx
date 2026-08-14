@@ -1,6 +1,6 @@
-import { DotsThree, HardDrives, Plus } from '@phosphor-icons/react'
+import { DotsThree, HardDrives, MagnifyingGlass, Plus } from '@phosphor-icons/react'
 import { Controller, useForm } from 'react-hook-form'
-import { useId, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
   useDeleteHost,
@@ -14,7 +14,7 @@ import {
 import type { Host, HostPayload } from '@/api/types'
 import { HostConnection } from '@/components/host-connection'
 import { ConfirmDialog } from '@/components/ui/alert-dialog'
-import { Dot } from '@/components/ui/badge'
+import { Badge, Dot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -31,6 +31,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { MultiSelect } from '@/components/ui/multi-select'
 import { PageHeader } from '@/components/ui/page-header'
 import { PageTransition } from '@/components/ui/page-transition'
 import { Select } from '@/components/ui/select'
@@ -51,6 +52,7 @@ const emptyForm: HostPayload = {
   key_id: undefined,
   jump_host: undefined,
   monitor_enabled: true,
+  tags: [],
 }
 
 /**
@@ -77,6 +79,20 @@ const MonitorCell = ({ host }: { host: Host }) => (
   </span>
 )
 
+/** 标签是分组属性而非状态：平铺徽章、允许换行，没有标签时用破折号留白 */
+const TagsCell = ({ host }: { host: Host }) =>
+  host.tags.length > 0 ? (
+    <span className="flex flex-wrap items-center gap-1">
+      {host.tags.map((tag) => (
+        <Badge key={tag} variant="accent">
+          {tag}
+        </Badge>
+      ))}
+    </span>
+  ) : (
+    <span className="text-muted">—</span>
+  )
+
 
 export function HostsPage() {
   const hosts = useHosts()
@@ -101,6 +117,40 @@ export function HostsPage() {
     formState: { errors },
   } = useForm<HostPayload>({ defaultValues: emptyForm, shouldUnregister: true })
   const authType = watch('auth_type')
+
+  // 列表一次拉全量且无服务端分页，过滤全部在前端本地做，改动即生效、不发请求
+  const [query, setQuery] = useState('')
+  const [filterTags, setFilterTags] = useState<string[]>([])
+  const [filterAuth, setFilterAuth] = useState<'all' | 'password' | 'key'>('all')
+  const [filterMonitor, setFilterMonitor] = useState<'all' | 'on' | 'off'>('all')
+  const tagFilterId = useId()
+  const authFilterId = useId()
+  const monitorFilterId = useId()
+
+  /** 全部主机已有标签的去重集合，同时喂给过滤条与表单的可选项 */
+  const allTags = useMemo(
+    () => [...new Set((hosts.data ?? []).flatMap((host) => host.tags))].sort(),
+    [hosts.data],
+  )
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return (hosts.data ?? []).filter((host) => {
+      if (
+        q &&
+        ![host.name, host.addr, host.username].some((text) => text.toLowerCase().includes(q))
+      )
+        return false
+      // 标签取「任一交集即命中」：多选是扩面而不是收窄
+      if (filterTags.length > 0 && !host.tags.some((tag) => filterTags.includes(tag))) return false
+      if (filterAuth !== 'all' && host.auth_type !== filterAuth) return false
+      if (filterMonitor !== 'all' && host.monitor_enabled !== (filterMonitor === 'on')) return false
+      return true
+    })
+  }, [hosts.data, query, filterTags, filterAuth, filterMonitor])
+
+  /** 列表本身非空、只是被过滤条件清空时，换一套空态文案引导清除条件 */
+  const narrowedToNothing = (hosts.data?.length ?? 0) > 0 && filtered.length === 0
 
   const openCreate = () => {
     setEditing(undefined)
@@ -191,6 +241,12 @@ export function HostsPage() {
       ),
     },
     {
+      key: 'tags',
+      title: '标签',
+      className: 'w-[168px]',
+      render: (host) => <TagsCell host={host} />,
+    },
+    {
       key: 'hostkey_fp',
       title: '指纹',
       className: 'w-[320px]',
@@ -238,6 +294,27 @@ export function HostsPage() {
     />
   )
 
+  const noMatchState = (
+    <EmptyState
+      icon={<MagnifyingGlass size={22} />}
+      title="没有匹配过滤条件的主机"
+      description="换个关键词，或放宽标签、认证与监控筛选。"
+      action={
+        <Button
+          variant="outline"
+          onClick={() => {
+            setQuery('')
+            setFilterTags([])
+            setFilterAuth('all')
+            setFilterMonitor('all')
+          }}
+        >
+          清除筛选
+        </Button>
+      }
+    />
+  )
+
   return (
     <PageTransition>
       <PageHeader
@@ -251,13 +328,68 @@ export function HostsPage() {
         }
       />
 
+      {/* 一份过滤条同时驱动桌面表格与移动端卡片；窄屏下各项整行堆叠 */}
+      <Card className="mb-4 flex flex-wrap items-center gap-2 p-2.5">
+        <div className="min-w-0 flex-1 sm:min-w-[200px]">
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索名称、地址或用户名"
+            aria-label="搜索名称、地址或用户名"
+            spellCheck={false}
+            prefix={<MagnifyingGlass size={14} />}
+          />
+        </div>
+        <label htmlFor={tagFilterId} className="sr-only">
+          按标签筛选
+        </label>
+        <div className="w-full sm:w-44">
+          <MultiSelect
+            id={tagFilterId}
+            value={filterTags}
+            onChange={setFilterTags}
+            placeholder="全部标签"
+            searchPlaceholder="搜索标签…"
+            options={allTags.map((tag) => ({ value: tag, label: tag }))}
+          />
+        </div>
+        <label htmlFor={authFilterId} className="sr-only">
+          按认证方式筛选
+        </label>
+        <Select
+          id={authFilterId}
+          className="w-full sm:w-36"
+          value={filterAuth}
+          onChange={setFilterAuth}
+          options={[
+            { value: 'all', label: '全部认证' },
+            { value: 'password', label: '密码' },
+            { value: 'key', label: 'SSH 密钥' },
+          ]}
+        />
+        <label htmlFor={monitorFilterId} className="sr-only">
+          按监控状态筛选
+        </label>
+        <Select
+          id={monitorFilterId}
+          className="w-full sm:w-36"
+          value={filterMonitor}
+          onChange={setFilterMonitor}
+          options={[
+            { value: 'all', label: '全部监控' },
+            { value: 'on', label: '启用' },
+            { value: 'off', label: '关闭' },
+          ]}
+        />
+      </Card>
+
       <Card className="hidden md:block">
         <DataTable
           columns={columns}
-          rows={hosts.data}
+          rows={filtered}
           rowKey={(host) => host.id}
           loading={hosts.isLoading}
-          empty={emptyState}
+          empty={narrowedToNothing ? noMatchState : emptyState}
           selection={{ selected, onChange: setSelected }}
         />
       </Card>
@@ -271,8 +403,8 @@ export function HostsPage() {
               <Skeleton className="h-8 w-full" />
             </Card>
           ))
-        ) : hosts.data?.length ? (
-          hosts.data.map((host) => (
+        ) : filtered.length ? (
+          filtered.map((host) => (
             <Card
               key={host.id}
               className={cn('min-w-0 p-4', selected.has(host.id) && 'border-accent')}
@@ -303,6 +435,10 @@ export function HostsPage() {
               <dl className="mt-3 grid grid-cols-[52px_minmax(0,1fr)] items-center gap-y-2 text-[12px]">
                 <dt className="text-muted">认证</dt>
                 <dd className="text-text">{host.auth_type === 'key' ? 'SSH 密钥' : '密码'}</dd>
+                <dt className="text-muted">标签</dt>
+                <dd className="min-w-0">
+                  <TagsCell host={host} />
+                </dd>
                 <dt className="text-muted">跳板</dt>
                 <dd className="text-text">
                   {hosts.data?.find((item) => item.id === host.jump_host_id)?.name ?? '直连'}
@@ -327,7 +463,7 @@ export function HostsPage() {
             </Card>
           ))
         ) : (
-          <Card className="p-4">{emptyState}</Card>
+          <Card className="p-4">{narrowedToNothing ? noMatchState : emptyState}</Card>
         )}
       </div>
 
@@ -492,6 +628,39 @@ export function HostsPage() {
                         .filter((item) => item.name !== editing?.name)
                         .map((item) => ({ value: item.id, label: item.name })),
                     ]}
+                  />
+                )}
+              />
+            )}
+          </Field>
+
+          <Field
+            label="标签"
+            hint="用于按用途或环境分组，可输入新标签回车创建"
+            className="sm:col-span-6"
+          >
+            {(id) => (
+              <Controller
+                name="tags"
+                control={control}
+                render={({ field }) => (
+                  <MultiSelect
+                    id={id}
+                    value={field.value ?? []}
+                    onChange={field.onChange}
+                    placeholder="选择或创建标签"
+                    searchPlaceholder="搜索或输入新标签…"
+                    // 候选 = 已有标签 ∪ 当前值：刚创建、还没保存到任何主机的标签也要能回显 label
+                    options={[...new Set([...allTags, ...(field.value ?? [])])].map((tag) => ({
+                      value: tag,
+                      label: tag,
+                    }))}
+                    onCreateOption={(label) => {
+                      const tag = label.trim()
+                      if (tag && !(field.value ?? []).includes(tag)) {
+                        field.onChange([...(field.value ?? []), tag])
+                      }
+                    }}
                   />
                 )}
               />

@@ -30,31 +30,33 @@ type HostRefInput struct {
 }
 
 type HostUpdateInput struct {
-	Host           string  `json:"host" jsonschema:"要修改的主机当前名称"`
-	Name           string  `json:"name" jsonschema:"修改后的主机名，与当前名称相同表示不改名"`
-	Addr           string  `json:"addr" jsonschema:"主机地址或 IP"`
-	Port           int     `json:"port" jsonschema:"SSH 端口，0 视为 22"`
-	Username       string  `json:"username" jsonschema:"SSH 登录用户名"`
-	AuthType       string  `json:"auth_type" jsonschema:"认证方式：key 或 password"`
-	KeyID          *int64  `json:"key_id,omitempty" jsonschema:"key 认证使用的密钥 ID，auth_type=key 时必填"`
-	Password       *string `json:"password,omitempty" jsonschema:"新的登录密码；auth_type 保持 password 且沿用原密码时可省略"`
-	JumpHost       string  `json:"jump_host,omitempty" jsonschema:"跳板主机名，留空表示直连；整体替换语义下省略即清除原跳板配置"`
-	MonitorEnabled *bool   `json:"monitor_enabled,omitempty" jsonschema:"是否纳入后台资源监控轮询，省略表示保持原值"`
+	Host           string   `json:"host" jsonschema:"要修改的主机当前名称"`
+	Name           string   `json:"name" jsonschema:"修改后的主机名，与当前名称相同表示不改名"`
+	Addr           string   `json:"addr" jsonschema:"主机地址或 IP"`
+	Port           int      `json:"port" jsonschema:"SSH 端口，0 视为 22"`
+	Username       string   `json:"username" jsonschema:"SSH 登录用户名"`
+	AuthType       string   `json:"auth_type" jsonschema:"认证方式：key 或 password"`
+	KeyID          *int64   `json:"key_id,omitempty" jsonschema:"key 认证使用的密钥 ID，auth_type=key 时必填"`
+	Password       *string  `json:"password,omitempty" jsonschema:"新的登录密码；auth_type 保持 password 且沿用原密码时可省略"`
+	JumpHost       string   `json:"jump_host,omitempty" jsonschema:"跳板主机名，留空表示直连；整体替换语义下省略即清除原跳板配置"`
+	MonitorEnabled *bool    `json:"monitor_enabled,omitempty" jsonschema:"是否纳入后台资源监控轮询，省略表示保持原值"`
+	Tags           []string `json:"tags,omitempty" jsonschema:"主机标签，用于分组与筛选；整体替换语义下省略即清空标签"`
 }
 
 type ManagedHostItem struct {
-	ID             int64   `json:"id"`
-	Name           string  `json:"name"`
-	Addr           string  `json:"addr"`
-	Port           int     `json:"port"`
-	Username       string  `json:"username"`
-	AuthType       string  `json:"auth_type"`
-	KeyID          *int64  `json:"key_id"`
-	HostKeyFP      *string `json:"hostkey_fp"`
-	JumpHost       *string `json:"jump_host"`
-	MonitorEnabled bool    `json:"monitor_enabled"`
-	CreatedAt      int64   `json:"created_at"`
-	Online         bool    `json:"online"`
+	ID             int64    `json:"id"`
+	Name           string   `json:"name"`
+	Addr           string   `json:"addr"`
+	Port           int      `json:"port"`
+	Username       string   `json:"username"`
+	AuthType       string   `json:"auth_type"`
+	KeyID          *int64   `json:"key_id"`
+	HostKeyFP      *string  `json:"hostkey_fp"`
+	JumpHost       *string  `json:"jump_host"`
+	MonitorEnabled bool     `json:"monitor_enabled"`
+	Tags           []string `json:"tags"`
+	CreatedAt      int64    `json:"created_at"`
+	Online         bool     `json:"online"`
 }
 
 type ManagedHostsOutput struct {
@@ -154,7 +156,7 @@ func (s *Server) hostUpdate(ctx context.Context, _ *mcp.CallToolRequest, in Host
 	}
 	updated, err := s.HostManager.Update(ctx, host.ID, hostmanager.Input{
 		Name: in.Name, Addr: in.Addr, Port: in.Port, Username: in.Username, AuthType: in.AuthType,
-		KeyID: in.KeyID, Password: in.Password, JumpHost: in.JumpHost, MonitorEnabled: in.MonitorEnabled,
+		KeyID: in.KeyID, Password: in.Password, JumpHost: in.JumpHost, MonitorEnabled: in.MonitorEnabled, Tags: in.Tags,
 	})
 	if err != nil {
 		return errorResult(err.Error()), ManagedHostItem{}, nil
@@ -221,7 +223,7 @@ func (s *Server) managedHostItem(ctx context.Context, host store.Host) ManagedHo
 	item := ManagedHostItem{
 		ID: view.ID, Name: view.Name, Addr: view.Addr, Port: view.Port, Username: view.Username,
 		AuthType: view.AuthType, KeyID: view.KeyID, HostKeyFP: view.HostKeyFP,
-		MonitorEnabled: view.MonitorEnabled, CreatedAt: view.CreatedAt, Online: s.Pool.IsOnline(host.Name),
+		MonitorEnabled: view.MonitorEnabled, Tags: view.Tags, CreatedAt: view.CreatedAt, Online: s.Pool.IsOnline(host.Name),
 	}
 	if host.JumpHostID.Valid {
 		if jump, err := s.Store.GetHost(ctx, host.JumpHostID.Int64); err == nil {
