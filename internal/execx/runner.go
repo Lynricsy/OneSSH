@@ -288,14 +288,17 @@ func (r *Runner) Run(ctx context.Context, client *ssh.Client, command, cwd strin
 	timedOut := false
 	timer := time.NewTimer(opt.Timeout)
 	defer timer.Stop()
+	// 超时或取消时必须先发 SSH signal；只关闭 channel 不会终止 OpenSSH 的远端进程组。
 	select {
 	case waitErr = <-done:
 	case <-ctx.Done():
 		timedOut = true
+		_ = session.Signal(ssh.SIGKILL)
 		_ = session.Close()
 		waitErr = ctx.Err()
 	case <-timer.C:
 		timedOut = true
+		_ = session.Signal(ssh.SIGKILL)
 		_ = session.Close()
 		waitErr = errors.New("command timeout")
 	}
