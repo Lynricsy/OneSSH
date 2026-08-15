@@ -248,6 +248,12 @@ func (w *limitedWriter) captured() []byte {
 	return out
 }
 
+func terminateSession(session *ssh.Session) {
+	// 必须先发 SSH signal；只关闭 channel 不会终止 OpenSSH 的远端进程组。
+	_ = session.Signal(ssh.SIGKILL)
+	_ = session.Close()
+}
+
 func (r *Runner) Run(ctx context.Context, client *ssh.Client, command, cwd string, env map[string]string, opt Options) (Result, error) {
 	if opt.Timeout <= 0 {
 		opt.Timeout = 60 * time.Second
@@ -288,18 +294,15 @@ func (r *Runner) Run(ctx context.Context, client *ssh.Client, command, cwd strin
 	timedOut := false
 	timer := time.NewTimer(opt.Timeout)
 	defer timer.Stop()
-	// 超时或取消时必须先发 SSH signal；只关闭 channel 不会终止 OpenSSH 的远端进程组。
 	select {
 	case waitErr = <-done:
 	case <-ctx.Done():
 		timedOut = true
-		_ = session.Signal(ssh.SIGKILL)
-		_ = session.Close()
+		terminateSession(session)
 		waitErr = ctx.Err()
 	case <-timer.C:
 		timedOut = true
-		_ = session.Signal(ssh.SIGKILL)
-		_ = session.Close()
+		terminateSession(session)
 		waitErr = errors.New("command timeout")
 	}
 	stdoutBytes := stdout.captured()
