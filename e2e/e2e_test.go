@@ -336,6 +336,22 @@ func TestEndToEnd(t *testing.T) {
 			t.Fatalf("cwd 未持久化 %+v", second)
 		}
 	})
+	t.Run("exec timeout terminates remote command", func(t *testing.T) {
+		const marker = "/tmp/onessh-timeout-test"
+		timedOut := decoded[execResult](t, call(t, a, "exec", map[string]any{
+			"host": "ssh1", "command": "rm -f " + marker + "; sleep 2; touch " + marker, "timeout_s": 1,
+		}))
+		if !timedOut.Timeout {
+			t.Fatalf("exec 未按时超时: %+v", timedOut)
+		}
+		time.Sleep(2500 * time.Millisecond)
+		probe := decoded[execResult](t, call(t, a, "exec", map[string]any{
+			"host": "ssh1", "command": "test ! -e " + marker + " || { rm -f " + marker + "; exit 1; }",
+		}))
+		if probe.ExitCode != 0 {
+			t.Fatalf("超时后远端命令仍继续执行: %+v", probe)
+		}
+	})
 	t.Run("large output artifact", func(t *testing.T) {
 		large := decoded[execResult](t, call(t, a, "exec", map[string]any{"host": "ssh1", "command": "seq 1 100000", "max_lines": 200}))
 		if !large.Truncated || large.ArtifactID == "" {
