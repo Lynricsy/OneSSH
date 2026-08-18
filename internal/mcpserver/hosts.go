@@ -15,10 +15,11 @@ import (
 )
 
 type HostItem struct {
-	Name     string `json:"name"`
-	Addr     string `json:"addr"`
-	Username string `json:"username"`
-	Online   bool   `json:"online"`
+	Name     string   `json:"name"`
+	Addr     string   `json:"addr"`
+	Username string   `json:"username"`
+	Online   bool     `json:"online"`
+	Tags     []string `json:"tags" jsonschema:"主机标签，用于分组与筛选；无标签时为空数组"`
 }
 
 type HostsOutput struct {
@@ -67,7 +68,7 @@ func (s *Server) registerHosts() {
 	register[Empty, HostsOutput](s, &mcp.Tool{
 		Name:        "hosts_list",
 		Title:       "列出可用主机",
-		Description: "列出当前令牌可访问的 SSH 主机名、地址、登录用户和实时连接状态。其他工具的 host 参数只接受这里返回的 name，开始任何主机相关任务前先调用一次。",
+		Description: "列出当前令牌可访问的 SSH 主机名、地址、登录用户、标签和实时连接状态。其他工具的 host 参数只接受这里返回的 name，开始任何主机相关任务前先调用一次。可按 tags 区分环境或用途后再选择目标主机。",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(false)},
 	}, s.hostsList)
 	register[Empty, ManagedHostsOutput](s, &mcp.Tool{
@@ -115,7 +116,14 @@ func (s *Server) hostsList(ctx context.Context, _ *mcp.CallToolRequest, _ Empty)
 	}
 	out := HostsOutput{Hosts: make([]HostItem, 0, len(p.Hosts))}
 	for _, host := range p.Hosts {
-		out.Hosts = append(out.Hosts, HostItem{Name: host.Name, Addr: net.JoinHostPort(host.Addr, strconv.Itoa(host.Port)), Username: host.Username, Online: s.Pool.IsOnline(host.Name)})
+		tags := host.Tags
+		if tags == nil {
+			tags = []string{}
+		}
+		out.Hosts = append(out.Hosts, HostItem{
+			Name: host.Name, Addr: net.JoinHostPort(host.Addr, strconv.Itoa(host.Port)),
+			Username: host.Username, Online: s.Pool.IsOnline(host.Name), Tags: tags,
+		})
 	}
 	return nil, out, nil
 }
