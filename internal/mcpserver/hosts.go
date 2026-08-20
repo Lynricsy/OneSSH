@@ -19,7 +19,7 @@ type HostItem struct {
 	Addr     string   `json:"addr"`
 	Username string   `json:"username"`
 	Online   bool     `json:"online"`
-	Tags     []string `json:"tags" jsonschema:"主机标签，用于分组与筛选；无标签时为空数组"`
+	Tags     []string `json:"tags"`
 }
 
 type HostsOutput struct {
