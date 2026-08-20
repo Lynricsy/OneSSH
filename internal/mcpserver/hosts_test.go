@@ -2,7 +2,9 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"onessh/internal/cryptox"
@@ -65,5 +67,37 @@ func TestHostsListReturnsTagsForAuthorizedHosts(t *testing.T) {
 	}
 	if got["db-01"].Tags == nil || len(got["db-01"].Tags) != 0 {
 		t.Fatalf("无标签主机 tags = %#v，期望空数组", got["db-01"].Tags)
+	}
+}
+
+// hosts_list 的 tags 是加法契约：无标签必须序列化成 []，不能是 null，否则严格 schema 的客户端会解析失败。
+// Principal.Hosts 由调用方构造，这里直接注入 Tags 为 nil 的主机，覆盖 store 路径无法触达的分支。
+func TestHostsListSerializesMissingTagsAsEmptyArray(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	box, err := cryptox.New(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := sshpool.New(st, box)
+	defer pool.Close()
+	server := &Server{Pool: pool}
+	ctx := context.WithValue(context.Background(), principalKey{}, Principal{
+		Hosts: map[string]store.Host{"legacy": {Name: "legacy", Addr: "10.0.0.9", Port: 22, Username: "root", Tags: nil}},
+		Store: st,
+	})
+	_, out, err := server.hostsList(ctx, nil, Empty{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"tags":[]`) {
+		t.Fatalf("无标签主机序列化结果 = %s，期望 \"tags\":[]", raw)
 	}
 }
