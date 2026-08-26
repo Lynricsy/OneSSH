@@ -83,6 +83,7 @@ func Open(dataDir string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("打开 sqlite: %w", err)
 	}
+	db.SetMaxOpenConns(1) // SQLite 单写者模型，串行化写操作避免 SQLITE_BUSY
 	if _, err = db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("设置数据库参数: %w", err)
@@ -230,3 +231,9 @@ func tableHasColumn(tx *sql.Tx, table, column string) (bool, error) {
 
 func (s *Store) Close() error                     { return s.DB.Close() }
 func (s *Store) Health(ctx context.Context) error { return s.DB.PingContext(ctx) }
+
+// CheckpointWAL 将 WAL 日志刷回主库，防止 WAL 文件无限膨胀
+func (s *Store) CheckpointWAL(ctx context.Context) error {
+	_, err := s.DB.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
+	return err
+}

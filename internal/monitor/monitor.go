@@ -53,6 +53,8 @@ func (m *Manager) Start(ctx context.Context) {
 	go func() {
 		clean := time.NewTicker(time.Hour)
 		defer clean.Stop()
+		ckpt := time.NewTicker(10 * time.Minute)
+		defer ckpt.Stop()
 		var poll *time.Ticker
 		var pollC <-chan time.Time
 		if m.interval > 0 {
@@ -69,6 +71,12 @@ func (m *Manager) Start(ctx context.Context) {
 				m.Poll(ctx)
 			case <-clean.C:
 				m.cleanup(ctx)
+			case <-ckpt.C:
+				ckptCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				if err := m.Store.CheckpointWAL(ckptCtx); err != nil {
+					log.Printf("WAL checkpoint 失败: %v", err)
+				}
+				cancel()
 			}
 		}
 	}()
@@ -105,14 +113,22 @@ func (m *Manager) Poll(ctx context.Context) {
 		log.Printf("监控主机列表失败: %v", err)
 		return
 	}
+	// 限制并发采样数为 5，避免多 goroutine 同时写库触发 SQLITE_BUSY
+	sem := make(chan struct{}, 5)
+	var wg sync.WaitGroup
 	for _, h := range hosts {
 		h := h
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
+			sem <- struct{}{}        // 获取信号量
+			defer func() { <-sem }() // 释放信号量
 			if _, err := m.Sample(ctx, h); err != nil {
 				log.Printf("监控采样 %s 失败: %v", h.Name, err)
 			}
 		}()
 	}
+	wg.Wait() // 等待本轮所有采样完成
 }
 func (m *Manager) Sample(ctx context.Context, h store.Host) (Snapshot, error) {
 	client, err := m.Pool.Get(ctx, h.Name)
