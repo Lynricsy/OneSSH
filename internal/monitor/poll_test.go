@@ -2,100 +2,148 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"onessh/internal/execx"
-	"onessh/internal/sshpool"
 	"onessh/internal/store"
 )
 
-// fakeSSHPool is a minimal sshpool.Pool substitute for testing Poll behavior.
-type fakeSSHPool struct{}
-
-func TestPollRespectsConcurrencyLimit(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
+func newPollTestManager(t *testing.T, hostCount int, sample sampleFunc) *Manager {
+	t.Helper()
+	ctx := context.Background()
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
-
-	// Create 10 monitored hosts
-	for i := 0; i < 10; i++ {
-		h := store.Host{Name: "test-" + string(rune('a'+i)), Addr: "127.0.0.1", Port: 22, Username: "root", AuthType: "key"}
-		if _, err := st.CreateHost(ctx, h); err != nil {
+	t.Cleanup(func() { st.Close() })
+	for i := range hostCount {
+		_, err = st.CreateHost(ctx, store.Host{
+			Name:           fmt.Sprintf("test-%d", i),
+			Addr:           "127.0.0.1",
+			Port:           22,
+			Username:       "root",
+			AuthType:       "password",
+			MonitorEnabled: true,
+		})
+		if err != nil {
 			t.Fatal(err)
 		}
 	}
+	manager := New(st, nil, nil, 0)
+	manager.sample = sample
+	return manager
+}
 
-	var active, peak int64
-
-	// We can't easily mock sshpool.Pool, so we test the semaphore logic directly
-	// by creating a Manager with a custom Sample override via a wrapper test.
-	// Instead, we verify the semaphore+ctx pattern in isolation.
-
-	sem := make(chan struct{}, 5)
-	done := make(chan struct{})
-
-	for i := 0; i < 10; i++ {
-		go func() {
-			select {
-			case <-ctx.Done():
-				return
-			case sem <- struct{}{}:
-			}
-			cur := atomic.AddInt64(&active, 1)
-			for {
-				old := atomic.LoadInt64(&peak)
-				if cur <= old || atomic.CompareAndSwapInt64(&peak, old, cur) {
-					break
-				}
-			}
-			time.Sleep(50 * time.Millisecond)
-			atomic.AddInt64(&active, -1)
-			<-sem
-			done <- struct{}{}
-		}()
-	}
-
-	for i := 0; i < 10; i++ {
+func waitForSamples(t *testing.T, started <-chan struct{}, count int) {
+	t.Helper()
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	for range count {
 		select {
-		case <-done:
-		case <-ctx.Done():
-			t.Fatal("timeout waiting for goroutines")
+		case <-started:
+		case <-timer.C:
+			t.Fatalf("等待 %d 个采样启动超时", count)
 		}
 	}
-
-	if p := atomic.LoadInt64(&peak); p > 5 {
-		t.Fatalf("peak concurrency %d exceeds limit 5", p)
-	}
 }
 
-func TestPollSemaphoreRespectsCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	sem := make(chan struct{}, 5)
+func TestPollLimitsGlobalConcurrencyAndSkipsOverlap(t *testing.T) {
+	ctx := context.Background()
+	started := make(chan struct{}, 10)
+	release := make(chan struct{})
+	var active, peak, sampled atomic.Int64
+	manager := newPollTestManager(t, 10, func(ctx context.Context, _ store.Host) (Snapshot, error) {
+		current := active.Add(1)
+		for {
+			previous := peak.Load()
+			if current <= previous || peak.CompareAndSwap(previous, current) {
+				break
+			}
+		}
+		sampled.Add(1)
+		started <- struct{}{}
+		defer active.Add(-1)
+		select {
+		case <-release:
+			return Snapshot{}, nil
+		case <-ctx.Done():
+			return Snapshot{}, ctx.Err()
+		}
+	})
 
-	// Fill the semaphore
-	for i := 0; i < 5; i++ {
-		sem <- struct{}{}
-	}
-
-	cancel()
-
-	// The next acquire should respect ctx.Done()
+	pollDone := make(chan struct{})
+	go func() {
+		manager.Poll(ctx)
+		close(pollDone)
+	}()
+	waitForSamples(t, started, maxConcurrentSamples)
 	select {
-	case sem <- struct{}{}:
-		t.Fatal("semaphore acquire should have been blocked")
-	case <-ctx.Done():
-		// expected
+	case <-pollDone:
+		t.Fatal("Poll 在活动采样结束前返回")
+	default:
+	}
+
+	overlapDone := make(chan struct{})
+	go func() {
+		manager.Poll(ctx)
+		close(overlapDone)
+	}()
+	select {
+	case <-overlapDone:
+	case <-time.After(time.Second):
+		t.Fatal("重叠 Poll 未被立即跳过")
+	}
+	select {
+	case <-started:
+		t.Fatal("重叠 Poll 启动了额外采样")
+	default:
+	}
+
+	close(release)
+	select {
+	case <-pollDone:
+	case <-time.After(time.Second):
+		t.Fatal("释放采样后 Poll 未返回")
+	}
+	if got := peak.Load(); got != maxConcurrentSamples {
+		t.Fatalf("峰值并发 = %d，期望 %d", got, maxConcurrentSamples)
+	}
+	if got := sampled.Load(); got != 10 {
+		t.Fatalf("完成采样数 = %d，期望 10", got)
 	}
 }
 
-// Verify that Manager can be created (compile check after API changes)
-func TestManagerCompiles(t *testing.T) {
-	_ = New(nil, (*sshpool.Pool)(nil), (*execx.Runner)(nil), time.Minute)
+func TestPollCancellationStopsWorkers(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{}, maxConcurrentSamples)
+	var active, sampled atomic.Int64
+	manager := newPollTestManager(t, 10, func(ctx context.Context, _ store.Host) (Snapshot, error) {
+		active.Add(1)
+		sampled.Add(1)
+		started <- struct{}{}
+		defer active.Add(-1)
+		<-ctx.Done()
+		return Snapshot{}, ctx.Err()
+	})
+
+	pollDone := make(chan struct{})
+	go func() {
+		manager.Poll(ctx)
+		close(pollDone)
+	}()
+	waitForSamples(t, started, maxConcurrentSamples)
+	cancel()
+	select {
+	case <-pollDone:
+	case <-time.After(time.Second):
+		t.Fatal("取消后 Poll 未返回")
+	}
+	if got := active.Load(); got != 0 {
+		t.Fatalf("取消后仍有 %d 个活动采样", got)
+	}
+	if got := sampled.Load(); got != maxConcurrentSamples {
+		t.Fatalf("取消后启动了 %d 个采样，期望 %d", got, maxConcurrentSamples)
+	}
 }
