@@ -127,8 +127,8 @@ func (s *Store) ListAuditTools(ctx context.Context) ([]string, error) {
 	return tools, rows.Err()
 }
 func (s *Store) AddMetric(ctx context.Context, m Metric) error {
-	unlock := s.LockWrite()
-	defer unlock()
+	s.metricWriteMu.Lock()
+	defer s.metricWriteMu.Unlock()
 	_, err := s.DB.ExecContext(ctx, `INSERT OR REPLACE INTO metrics(host_id,ts,cpu_pct,mem_used_kb,mem_total_kb,load1,disks_json) VALUES(?,?,?,?,?,?,?)`, m.HostID, m.Ts, nullFloat(m.CPUPct), nullInt(m.MemUsedKB), nullInt(m.MemTotalKB), nullFloat(m.Load1), m.DisksJSON)
 	return err
 }

@@ -141,6 +141,67 @@ func TestOpenWaitsForConcurrentWriter(t *testing.T) {
 	}
 }
 
+func TestCheckpointWALReportsBusy(t *testing.T) {
+	ctx := context.Background()
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	st.DB.SetMaxOpenConns(2)
+
+	reader, err := st.DB.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	writer, err := st.DB.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if writer != nil {
+			writer.Close()
+		}
+	}()
+	if _, err = writer.ExecContext(ctx, `PRAGMA busy_timeout=0`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = reader.ExecContext(ctx, `BEGIN`); err != nil {
+		t.Fatal(err)
+	}
+	defer reader.ExecContext(ctx, `ROLLBACK`)
+	var count int
+	if err = reader.QueryRowContext(ctx, `SELECT count(*) FROM metrics`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = writer.ExecContext(ctx, `INSERT INTO metrics(host_id,ts) VALUES(1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err = writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writer = nil
+
+	busy, err := st.CheckpointWAL(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !busy {
+		t.Fatal("活动读事务阻塞 TRUNCATE 时未返回 busy")
+	}
+	if _, err = reader.ExecContext(ctx, `ROLLBACK`); err != nil {
+		t.Fatal(err)
+	}
+	busy, err = st.CheckpointWAL(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if busy {
+		t.Fatal("读事务结束后 TRUNCATE 仍返回 busy")
+	}
+}
+
 func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

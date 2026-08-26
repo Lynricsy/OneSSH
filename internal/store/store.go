@@ -50,10 +50,8 @@ var migration0011 string
 var migration0012 string
 
 type Store struct {
-	DB *sql.DB
-	// writeMu serializes write operations to avoid SQLITE_BUSY under high concurrency.
-	// Reads are unaffected and can proceed concurrently.
-	writeMu sync.Mutex
+	DB            *sql.DB
+	metricWriteMu sync.Mutex
 }
 
 func sqliteDSN(dbPath string) (string, error) {
@@ -98,13 +96,6 @@ func Open(dataDir string) (*Store, error) {
 		return nil, fmt.Errorf("执行数据库迁移: %w", err)
 	}
 	return &Store{DB: db}, nil
-}
-
-// LockWrite acquires the write mutex and returns a release function.
-// Use to serialize write-heavy operations (e.g., monitor sampling) to avoid SQLITE_BUSY.
-func (s *Store) LockWrite() func() {
-	s.writeMu.Lock()
-	return s.writeMu.Unlock
 }
 
 // CheckpointWAL performs a WAL checkpoint with TRUNCATE mode.
