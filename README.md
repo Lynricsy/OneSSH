@@ -270,7 +270,7 @@ WebUI 的「活动」页会为每次 `exec`、`job_start`，以及 `exec_many` �
 | `ONESSH_LISTEN` | | `:8866` | HTTP 监听地址 |
 | `ONESSH_PUBLIC_URL` | | 按请求推导 | 对外访问来源，如 `https://ssh.example.com`；生产 OAuth 部署应显式设置，同时决定是否发布 MCP 服务器图标 |
 | `ONESSH_DATA_DIR` | | `/data` | SQLite 与 artifact 数据目录 |
-| `ONESSH_POLL_INTERVAL` | | `60` | 监控轮询秒数，设为 `0` 关闭 |
+| `ONESSH_POLL_INTERVAL` | | `60` | 监控轮询秒数，设为 `0` 关闭；单轮最多并发采样 5 台，上一轮未结束时跳过新一轮 |
 | `ONESSH_SEARCH_HELPER` | | `auto` | `auto` 在 Linux amd64/arm64 上启用临时搜索 helper；`off` 强制使用原生工具或纯 SFTP |
 | `ONESSH_EMBEDDING_API_URL` | | — | OpenAI 兼容 API 根地址，如 `https://api.example.com/v1`；需同时设置模型才启用 |
 | `ONESSH_EMBEDDING_API_KEY` | | — | embedding 服务 Bearer 密钥；服务不需要鉴权时可留空 |
@@ -381,6 +381,7 @@ docker pull ghcr.io/lynricsy/onessh:latest
 **运维约束**
 
 - 首次连接会接受并保存主机指纹；指纹变化即拒绝连接，确认主机确实重装后才能在 WebUI 重置。
+- SSH TCP 建连与协议握手均限制为 15 秒；调用上下文更早取消或到期时立即中断，避免失常目标长期占用连接与监控槽位。
 - 令牌与 OAuth 授权都按最小权限分配主机，不再使用立即删除。
 - 不要把 `ONESSH_MASTER_KEY`、管理员密码、Agent 令牌、OAuth 令牌或导出的数据卷提交到版本控制。
 

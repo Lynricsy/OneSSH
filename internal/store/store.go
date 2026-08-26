@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 
 	_ "modernc.org/sqlite"
 )
@@ -48,7 +49,10 @@ var migration0011 string
 //go:embed migrations/0012_audit_command_runs.sql
 var migration0012 string
 
-type Store struct{ DB *sql.DB }
+type Store struct {
+	DB      *sql.DB
+	writeMu sync.Mutex
+}
 
 func sqliteDSN(dbPath string) (string, error) {
 	absolutePath, err := filepath.Abs(dbPath)
@@ -92,6 +96,14 @@ func Open(dataDir string) (*Store, error) {
 		return nil, fmt.Errorf("执行数据库迁移: %w", err)
 	}
 	return &Store{DB: db}, nil
+}
+
+// CheckpointWAL performs a WAL checkpoint with TRUNCATE mode.
+// Returns (busy, error): busy=true means another connection blocked the checkpoint.
+func (s *Store) CheckpointWAL(ctx context.Context) (busy bool, err error) {
+	var log, checkpointed int
+	err = s.DB.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &log, &checkpointed)
+	return
 }
 
 type migration struct {

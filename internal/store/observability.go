@@ -22,6 +22,8 @@ func (s *Store) AddAudit(ctx context.Context, a Audit) error {
 		}
 		runIDs = string(encoded)
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO audit(ts,token_id,token_name,tool,host,params_json,command_run_ids_json,ok,exit_code,duration_ms,bytes_out) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, a.Ts, nullInt(a.TokenID), nullString(a.TokenName), a.Tool, nullString(a.Host), a.ParamsJSON, runIDs, boolInt(a.OK), nullInt(a.ExitCode), a.DurationMS, a.BytesOut)
 	return err
 }
@@ -127,6 +129,8 @@ func (s *Store) ListAuditTools(ctx context.Context) ([]string, error) {
 	return tools, rows.Err()
 }
 func (s *Store) AddMetric(ctx context.Context, m Metric) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	_, err := s.DB.ExecContext(ctx, `INSERT OR REPLACE INTO metrics(host_id,ts,cpu_pct,mem_used_kb,mem_total_kb,load1,disks_json) VALUES(?,?,?,?,?,?,?)`, m.HostID, m.Ts, nullFloat(m.CPUPct), nullInt(m.MemUsedKB), nullInt(m.MemTotalKB), nullFloat(m.Load1), m.DisksJSON)
 	return err
 }
@@ -152,6 +156,8 @@ func (s *Store) MetricsSince(ctx context.Context, hostID, since int64) ([]Metric
 	return out, rows.Err()
 }
 func (s *Store) CleanupMetrics(ctx context.Context, cutoff int64) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM metrics WHERE ts<?`, cutoff)
 	return err
 }

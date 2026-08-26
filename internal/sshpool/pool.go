@@ -16,8 +16,11 @@ import (
 	"onessh/internal/store"
 )
 
-// maxJumpChain 须与 hostmanager 中的同名常量保持一致。
-const maxJumpChain = 5
+const (
+	// maxJumpChain 须与 hostmanager 中的同名常量保持一致。
+	maxJumpChain      = 5
+	sshConnectTimeout = 15 * time.Second
+)
 
 type entry struct {
 	mu     sync.Mutex
@@ -117,7 +120,7 @@ func (p *Pool) dial(ctx context.Context, h store.Host, via []string) (*ssh.Clien
 	callback := func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 		fp := ssh.FingerprintSHA256(key)
 		if !h.HostKeyFP.Valid || h.HostKeyFP.String == "" {
-			if err := p.store.UpdateHostFingerprint(context.Background(), h.ID, &fp); err != nil {
+			if err := p.store.UpdateHostFingerprint(ctx, h.ID, &fp); err != nil {
 				return fmt.Errorf("记录主机指纹: %w", err)
 			}
 			return nil
@@ -132,7 +135,7 @@ func (p *Pool) dial(ctx context.Context, h store.Host, via []string) (*ssh.Clien
 		Auth:            auths,
 		AuthCallback:    authCallback,
 		HostKeyCallback: callback,
-		Timeout:         15 * time.Second,
+		Timeout:         sshConnectTimeout,
 	}
 	addr := net.JoinHostPort(h.Addr, strconv.Itoa(h.Port))
 	var conn net.Conn
@@ -153,16 +156,47 @@ func (p *Pool) dial(ctx context.Context, h store.Host, via []string) (*ssh.Clien
 			return nil, fmt.Errorf("经跳板 %s 连接 %s: %w", jump.Name, nameAddr(h), err)
 		}
 	} else {
-		d := net.Dialer{Timeout: 15 * time.Second}
+		d := net.Dialer{Timeout: sshConnectTimeout}
 		conn, err = d.DialContext(ctx, "tcp", addr)
 		if err != nil {
 			return nil, fmt.Errorf("连接 %s: %w", nameAddr(h), err)
 		}
 	}
+	client, err := newSSHClient(ctx, conn, addr, config)
+	if err != nil {
+		return nil, fmt.Errorf("SSH 握手 %s: %w", nameAddr(h), err)
+	}
+	return client, nil
+}
+
+// ClientConfig.Timeout 只限制 TCP 建连；NewClientConn 需要独立的握手期限与取消处理。
+func newSSHClient(ctx context.Context, conn net.Conn, addr string, config *ssh.ClientConfig) (*ssh.Client, error) {
+	if err := ctx.Err(); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	handshakeCtx, cancel := context.WithTimeout(ctx, sshConnectTimeout)
+	defer cancel()
+	stopCancel := context.AfterFunc(handshakeCtx, func() { conn.Close() })
 	cc, chans, reqs, err := ssh.NewClientConn(conn, addr, config)
+	cancelStopped := stopCancel()
 	if err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("SSH 握手 %s: %w", nameAddr(h), err)
+		if ctxErr := handshakeCtx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		return nil, err
+	}
+	if !cancelStopped {
+		cc.Close()
+		if ctxErr := handshakeCtx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		return nil, context.Canceled
+	}
+	if ctxErr := handshakeCtx.Err(); ctxErr != nil {
+		cc.Close()
+		return nil, ctxErr
 	}
 	return ssh.NewClient(cc, chans, reqs), nil
 }

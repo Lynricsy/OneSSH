@@ -34,6 +34,11 @@ type Snapshot struct {
 	Load1      *float64 `json:"load1"`
 	Disks      []Disk   `json:"disks"`
 }
+
+const maxConcurrentSamples = 5
+
+type sampleFunc func(context.Context, store.Host) (Snapshot, error)
+
 type Manager struct {
 	Store    *store.Store
 	Pool     *sshpool.Pool
@@ -42,6 +47,9 @@ type Manager struct {
 	mu       sync.Mutex
 	previous map[int64]CPU
 	cancel   context.CancelFunc
+	pollMu   sync.Mutex
+	polling  bool
+	sample   sampleFunc
 }
 
 func New(st *store.Store, p *sshpool.Pool, e *execx.Runner, interval time.Duration) *Manager {
@@ -53,22 +61,33 @@ func (m *Manager) Start(ctx context.Context) {
 	go func() {
 		clean := time.NewTicker(time.Hour)
 		defer clean.Stop()
+		ckpt := time.NewTicker(10 * time.Minute)
+		defer ckpt.Stop()
 		var poll *time.Ticker
 		var pollC <-chan time.Time
 		if m.interval > 0 {
 			poll = time.NewTicker(m.interval)
 			pollC = poll.C
 			defer poll.Stop()
-			m.Poll(ctx)
+			go m.Poll(ctx)
 		}
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-pollC:
-				m.Poll(ctx)
+				go m.Poll(ctx)
 			case <-clean.C:
 				m.cleanup(ctx)
+			case <-ckpt.C:
+				ckptCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				busy, err := m.Store.CheckpointWAL(ckptCtx)
+				if err != nil {
+					log.Printf("WAL checkpoint 失败: %v", err)
+				} else if busy {
+					log.Printf("WAL checkpoint 被阻塞（busy=1），将在下次重试")
+				}
+				cancel()
 			}
 		}
 	}()
@@ -100,19 +119,64 @@ func (m *Manager) cleanup(ctx context.Context) {
 	}
 }
 func (m *Manager) Poll(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+	m.pollMu.Lock()
+	if m.polling {
+		m.pollMu.Unlock()
+		return
+	}
+	m.polling = true
+	m.pollMu.Unlock()
+	defer func() {
+		m.pollMu.Lock()
+		m.polling = false
+		m.pollMu.Unlock()
+	}()
+
 	hosts, err := m.Store.MonitoredHosts(ctx)
 	if err != nil {
 		log.Printf("监控主机列表失败: %v", err)
 		return
 	}
-	for _, h := range hosts {
-		h := h
+	workerCount := min(maxConcurrentSamples, len(hosts))
+	if workerCount == 0 {
+		return
+	}
+	sample := m.sample
+	if sample == nil {
+		sample = m.Sample
+	}
+	jobs := make(chan store.Host)
+	var wg sync.WaitGroup
+	wg.Add(workerCount)
+	for range workerCount {
 		go func() {
-			if _, err := m.Sample(ctx, h); err != nil {
-				log.Printf("监控采样 %s 失败: %v", h.Name, err)
+			defer wg.Done()
+			for h := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				if _, sampleErr := sample(ctx, h); sampleErr != nil && ctx.Err() == nil {
+					log.Printf("监控采样 %s 失败: %v", h.Name, sampleErr)
+				}
 			}
 		}()
 	}
+sendHosts:
+	for _, h := range hosts {
+		if ctx.Err() != nil {
+			break
+		}
+		select {
+		case jobs <- h:
+		case <-ctx.Done():
+			break sendHosts
+		}
+	}
+	close(jobs)
+	wg.Wait()
 }
 func (m *Manager) Sample(ctx context.Context, h store.Host) (Snapshot, error) {
 	client, err := m.Pool.Get(ctx, h.Name)
