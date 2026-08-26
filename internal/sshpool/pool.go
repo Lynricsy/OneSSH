@@ -175,38 +175,28 @@ func newSSHClient(ctx context.Context, conn net.Conn, addr string, config *ssh.C
 		conn.Close()
 		return nil, err
 	}
-	deadline := time.Now().Add(sshConnectTimeout)
-	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
-		deadline = ctxDeadline
-	}
-	if err := conn.SetDeadline(deadline); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("设置握手期限: %w", err)
-	}
-	stopCancel := context.AfterFunc(ctx, func() { conn.Close() })
+	handshakeCtx, cancel := context.WithTimeout(ctx, sshConnectTimeout)
+	defer cancel()
+	stopCancel := context.AfterFunc(handshakeCtx, func() { conn.Close() })
 	cc, chans, reqs, err := ssh.NewClientConn(conn, addr, config)
 	cancelStopped := stopCancel()
 	if err != nil {
 		conn.Close()
-		if ctxErr := ctx.Err(); ctxErr != nil {
+		if ctxErr := handshakeCtx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
 		return nil, err
 	}
 	if !cancelStopped {
 		cc.Close()
-		if ctxErr := ctx.Err(); ctxErr != nil {
+		if ctxErr := handshakeCtx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
 		return nil, context.Canceled
 	}
-	if ctxErr := ctx.Err(); ctxErr != nil {
+	if ctxErr := handshakeCtx.Err(); ctxErr != nil {
 		cc.Close()
 		return nil, ctxErr
-	}
-	if err = conn.SetDeadline(time.Time{}); err != nil {
-		cc.Close()
-		return nil, fmt.Errorf("清除握手期限: %w", err)
 	}
 	return ssh.NewClient(cc, chans, reqs), nil
 }

@@ -5,9 +5,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"database/sql"
 	"errors"
+	"io"
 	"net"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -133,9 +137,200 @@ func waitForStalledHandshake(t *testing.T, accepted <-chan net.Conn) net.Conn {
 	}
 }
 
+type directTCPIPRequest struct {
+	Host       string
+	Port       uint32
+	OriginHost string
+	OriginPort uint32
+}
+
+func startTestJumpServer(t *testing.T) (string, func()) {
+	t.Helper()
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := &ssh.ServerConfig{
+		PasswordCallback: func(_ ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
+			if string(password) != testPassword {
+				return nil, errors.New("wrong password")
+			}
+			return nil, nil
+		},
+	}
+	config.AddHostKey(signer)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var (
+		connMu     sync.Mutex
+		serverConn net.Conn
+		stopOnce   sync.Once
+	)
+	go func() {
+		rawConn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		connMu.Lock()
+		serverConn = rawConn
+		connMu.Unlock()
+		sshConn, channels, requests, handshakeErr := ssh.NewServerConn(rawConn, config)
+		if handshakeErr != nil {
+			rawConn.Close()
+			return
+		}
+		defer sshConn.Close()
+		go ssh.DiscardRequests(requests)
+		for newChannel := range channels {
+			if newChannel.ChannelType() != "direct-tcpip" {
+				newChannel.Reject(ssh.UnknownChannelType, "仅支持 direct-tcpip")
+				continue
+			}
+			var request directTCPIPRequest
+			if err := ssh.Unmarshal(newChannel.ExtraData(), &request); err != nil {
+				newChannel.Reject(ssh.ConnectionFailed, "解析转发目标失败")
+				continue
+			}
+			target, dialErr := net.Dial("tcp", net.JoinHostPort(request.Host, strconv.Itoa(int(request.Port))))
+			if dialErr != nil {
+				newChannel.Reject(ssh.ConnectionFailed, dialErr.Error())
+				continue
+			}
+			channel, channelRequests, acceptErr := newChannel.Accept()
+			if acceptErr != nil {
+				target.Close()
+				continue
+			}
+			go ssh.DiscardRequests(channelRequests)
+			go func() {
+				done := make(chan struct{}, 2)
+				go func() {
+					_, _ = io.Copy(target, channel)
+					done <- struct{}{}
+				}()
+				go func() {
+					_, _ = io.Copy(channel, target)
+					done <- struct{}{}
+				}()
+				<-done
+				channel.Close()
+				target.Close()
+			}()
+		}
+	}()
+	stop := func() {
+		stopOnce.Do(func() {
+			listener.Close()
+			connMu.Lock()
+			if serverConn != nil {
+				serverConn.Close()
+			}
+			connMu.Unlock()
+		})
+	}
+	return listener.Addr().String(), stop
+}
+
+func TestGetCancelsStalledSSHHandshakeThroughJumpHost(t *testing.T) {
+	jumpAddr, stopJump := startTestJumpServer(t)
+	defer stopJump()
+	jumpHost, jumpPortText, err := net.SplitHostPort(jumpAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jumpPort, err := strconv.Atoi(jumpPortText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer targetListener.Close()
+	targetAccepted := make(chan net.Conn, 1)
+	go func() {
+		conn, acceptErr := targetListener.Accept()
+		if acceptErr == nil {
+			targetAccepted <- conn
+		}
+	}()
+
+	ctx := context.Background()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	box, err := cryptox.New(bytes.Repeat([]byte{10}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	password, err := box.Seal([]byte(testPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	jump, err := st.CreateHost(ctx, store.Host{
+		Name:        "jump",
+		Addr:        jumpHost,
+		Port:        jumpPort,
+		Username:    "test",
+		AuthType:    "password",
+		PasswordEnc: password,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetPort := targetListener.Addr().(*net.TCPAddr).Port
+	if _, err = st.CreateHost(ctx, store.Host{
+		Name:        "target",
+		Addr:        "127.0.0.1",
+		Port:        targetPort,
+		Username:    "test",
+		AuthType:    "password",
+		PasswordEnc: password,
+		JumpHostID:  sql.NullInt64{Int64: jump.ID, Valid: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pool := New(st, box)
+	defer func() {
+		pool.Close()
+		st.Close()
+	}()
+
+	callCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, getErr := pool.Get(callCtx, "target")
+		result <- getErr
+	}()
+	targetConn := waitForStalledHandshake(t, targetAccepted)
+	defer targetConn.Close()
+	if !pool.IsOnline("jump") {
+		t.Fatal("测试未通过跳板连接目标")
+	}
+	cancel()
+	select {
+	case err = <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("取消跳板握手错误 = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("取消后跳板 SSH 握手未返回")
+	}
+}
+
 func TestGetCancelsStalledSSHHandshake(t *testing.T) {
 	pool, accepted := newStalledHandshakePool(t)
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	result := make(chan error, 1)
 	go func() {
 		_, err := pool.Get(ctx, "stalled")
