@@ -50,8 +50,8 @@ var migration0011 string
 var migration0012 string
 
 type Store struct {
-	DB            *sql.DB
-	metricWriteMu sync.Mutex
+	DB      *sql.DB
+	writeMu sync.Mutex
 }
 
 func sqliteDSN(dbPath string) (string, error) {
