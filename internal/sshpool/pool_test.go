@@ -1,6 +1,8 @@
 package sshpool
 
 import (
+	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -10,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"onessh/internal/cryptox"
+	"onessh/internal/store"
 )
 
 const testPassword = "secret"
@@ -71,6 +75,104 @@ func runPasswordHandshake(t *testing.T, serverConfig *ssh.ServerConfig) error {
 		t.Fatal("等待 SSH 测试服务端结束超时")
 	}
 	return clientErr
+}
+func newStalledHandshakePool(t *testing.T) (*Pool, <-chan net.Conn) {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	box, err := cryptox.New(bytes.Repeat([]byte{9}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	password, err := box.Seal([]byte(testPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if _, err = st.CreateHost(ctx, store.Host{
+		Name:        "stalled",
+		Addr:        "127.0.0.1",
+		Port:        port,
+		Username:    "test",
+		AuthType:    "password",
+		PasswordEnc: password,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pool := New(st, box)
+	t.Cleanup(func() {
+		listener.Close()
+		pool.Close()
+		st.Close()
+	})
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr == nil {
+			accepted <- conn
+		}
+	}()
+	return pool, accepted
+}
+
+func waitForStalledHandshake(t *testing.T, accepted <-chan net.Conn) net.Conn {
+	t.Helper()
+	select {
+	case conn := <-accepted:
+		return conn
+	case <-time.After(time.Second):
+		t.Fatal("等待停滞 SSH 握手建立连接超时")
+		return nil
+	}
+}
+
+func TestGetCancelsStalledSSHHandshake(t *testing.T) {
+	pool, accepted := newStalledHandshakePool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, err := pool.Get(ctx, "stalled")
+		result <- err
+	}()
+	serverConn := waitForStalledHandshake(t, accepted)
+	defer serverConn.Close()
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("取消握手错误 = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("取消后 SSH 握手未返回")
+	}
+}
+
+func TestGetTimesOutStalledSSHHandshake(t *testing.T) {
+	pool, accepted := newStalledHandshakePool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, err := pool.Get(ctx, "stalled")
+		result <- err
+	}()
+	serverConn := waitForStalledHandshake(t, accepted)
+	defer serverConn.Close()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("握手超时错误 = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("超过上下文期限后 SSH 握手未返回")
+	}
 }
 
 func TestPasswordAuthenticationHandshake(t *testing.T) {
