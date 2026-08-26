@@ -1,27 +1,14 @@
-# Changelog
+# 变更日志
 
-All notable changes to this project will be documented in this file.
+本文件记录 OneSSH 的重要变更，格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [未发布]
 
-## [Unreleased]
+### 修复
 
-### Fixed
-
-- **Fix SQLITE_BUSY errors under high-concurrency monitor sampling**
-  - Add `Store.writeMu` mutex to serialize write operations and prevent database contention
-  - Apply write lock to `AddMetric` to protect concurrent metric inserts
-  - Limit concurrent sampling goroutines to 5 using a semaphore with context cancellation support
-  - Ensure semaphore acquisition respects context cancellation to prevent goroutine leaks during shutdown
-
-- **Prevent WAL file bloat with periodic checkpoint**
-  - Add `Store.CheckpointWAL()` method using `PRAGMA wal_checkpoint(TRUNCATE)`
-  - Checkpoint returns `(busy, error)` to properly detect when checkpoint is blocked
-  - Run WAL checkpoint every 10 minutes in the monitor manager's main loop
-  - Log when checkpoint is blocked (busy=1) for observability
-
-### Changed
-
-- Monitor sampling now uses bounded concurrency (max 5 parallel samples) instead of unlimited goroutines
-- `Store.CheckpointWAL()` signature changed from `error` to `(bool, error)` to report busy status
+- 修复大量主机同时采样时的 SQLite 写锁竞争：
+  - 仅串行化高频指标写入，保留数据库多连接读取能力。
+  - 每轮监控固定使用最多 5 个采样 worker；上一轮未结束时跳过新的轮询，避免跨轮次突破并发上限或累积 goroutine。
+  - 轮询取消后停止派发新任务，并等待活动 worker 退出。
+- 每 10 分钟尝试执行 `PRAGMA wal_checkpoint(TRUNCATE)` 回收 WAL 文件；检查点被活动连接阻塞时记录 `busy=1` 并在下一周期重试。
+- 为 SSH 协议握手增加 15 秒期限并接入调用上下文取消，避免目标接受 TCP 后不发送 SSH banner 时无限等待。
