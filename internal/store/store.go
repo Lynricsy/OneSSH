@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 
 	_ "modernc.org/sqlite"
 )
@@ -48,7 +49,12 @@ var migration0011 string
 //go:embed migrations/0012_audit_command_runs.sql
 var migration0012 string
 
-type Store struct{ DB *sql.DB }
+type Store struct {
+	DB *sql.DB
+	// writeMu serializes write operations to avoid SQLITE_BUSY under high concurrency.
+	// Reads are unaffected and can proceed concurrently.
+	writeMu sync.Mutex
+}
 
 func sqliteDSN(dbPath string) (string, error) {
 	absolutePath, err := filepath.Abs(dbPath)
@@ -83,7 +89,6 @@ func Open(dataDir string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("打开 sqlite: %w", err)
 	}
-	db.SetMaxOpenConns(1) // SQLite 单写者模型，串行化写操作避免 SQLITE_BUSY
 	if _, err = db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("设置数据库参数: %w", err)
@@ -93,6 +98,21 @@ func Open(dataDir string) (*Store, error) {
 		return nil, fmt.Errorf("执行数据库迁移: %w", err)
 	}
 	return &Store{DB: db}, nil
+}
+
+// LockWrite acquires the write mutex and returns a release function.
+// Use to serialize write-heavy operations (e.g., monitor sampling) to avoid SQLITE_BUSY.
+func (s *Store) LockWrite() func() {
+	s.writeMu.Lock()
+	return s.writeMu.Unlock
+}
+
+// CheckpointWAL performs a WAL checkpoint with TRUNCATE mode.
+// Returns (busy, error): busy=true means another connection blocked the checkpoint.
+func (s *Store) CheckpointWAL(ctx context.Context) (busy bool, err error) {
+	var log, checkpointed int
+	err = s.DB.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &log, &checkpointed)
+	return
 }
 
 type migration struct {
@@ -232,8 +252,17 @@ func tableHasColumn(tx *sql.Tx, table, column string) (bool, error) {
 func (s *Store) Close() error                     { return s.DB.Close() }
 func (s *Store) Health(ctx context.Context) error { return s.DB.PingContext(ctx) }
 
-// CheckpointWAL 将 WAL 日志刷回主库，防止 WAL 文件无限膨胀
-func (s *Store) CheckpointWAL(ctx context.Context) error {
-	_, err := s.DB.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
-	return err
+// LockWrite acquires the write mutex and returns a release function.
+// Use to serialize write-heavy operations (e.g., monitor sampling) to avoid SQLITE_BUSY.
+func (s *Store) LockWrite() func() {
+	s.writeMu.Lock()
+	return s.writeMu.Unlock
+}
+
+// CheckpointWAL performs a WAL checkpoint with TRUNCATE mode.
+// Returns (busy, error): busy=true means another connection blocked the checkpoint.
+func (s *Store) CheckpointWAL(ctx context.Context) (busy bool, err error) {
+	var log, checkpointed int
+	err = s.DB.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &log, &checkpointed)
+	return
 }
