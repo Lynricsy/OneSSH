@@ -120,7 +120,7 @@ func (p *Pool) dial(ctx context.Context, h store.Host, via []string) (*ssh.Clien
 	callback := func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 		fp := ssh.FingerprintSHA256(key)
 		if !h.HostKeyFP.Valid || h.HostKeyFP.String == "" {
-			if err := p.store.UpdateHostFingerprint(context.Background(), h.ID, &fp); err != nil {
+			if err := p.store.UpdateHostFingerprint(ctx, h.ID, &fp); err != nil {
 				return fmt.Errorf("记录主机指纹: %w", err)
 			}
 			return nil

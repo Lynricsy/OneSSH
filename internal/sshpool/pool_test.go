@@ -349,24 +349,18 @@ func TestGetCancelsStalledSSHHandshake(t *testing.T) {
 	}
 }
 
-func TestGetTimesOutStalledSSHHandshake(t *testing.T) {
-	pool, accepted := newStalledHandshakePool(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+func TestNewSSHClientTimesOutStalledHandshake(t *testing.T) {
+	clientSide, serverSide := net.Pipe()
+	defer serverSide.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	result := make(chan error, 1)
-	go func() {
-		_, err := pool.Get(ctx, "stalled")
-		result <- err
-	}()
-	serverConn := waitForStalledHandshake(t, accepted)
-	defer serverConn.Close()
-	select {
-	case err := <-result:
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("握手超时错误 = %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("超过上下文期限后 SSH 握手未返回")
+	config := &ssh.ClientConfig{
+		User:            "test",
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+	_, err := newSSHClient(ctx, clientSide, "pipe", config)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("握手超时错误 = %v", err)
 	}
 }
 
