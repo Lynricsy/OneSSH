@@ -251,18 +251,3 @@ func tableHasColumn(tx *sql.Tx, table, column string) (bool, error) {
 
 func (s *Store) Close() error                     { return s.DB.Close() }
 func (s *Store) Health(ctx context.Context) error { return s.DB.PingContext(ctx) }
-
-// LockWrite acquires the write mutex and returns a release function.
-// Use to serialize write-heavy operations (e.g., monitor sampling) to avoid SQLITE_BUSY.
-func (s *Store) LockWrite() func() {
-	s.writeMu.Lock()
-	return s.writeMu.Unlock
-}
-
-// CheckpointWAL performs a WAL checkpoint with TRUNCATE mode.
-// Returns (busy, error): busy=true means another connection blocked the checkpoint.
-func (s *Store) CheckpointWAL(ctx context.Context) (busy bool, err error) {
-	var log, checkpointed int
-	err = s.DB.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &log, &checkpointed)
-	return
-}
