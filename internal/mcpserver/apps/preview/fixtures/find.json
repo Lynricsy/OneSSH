@@ -1,0 +1,43 @@
+{
+  "input": {
+    "host": "web-01",
+    "pattern": "**/*.conf",
+    "path": "/etc/nginx",
+    "limit": 1000
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"paths\": [\n    \"/etc/nginx/nginx.conf\",\n    \"/etc/nginx/conf.d/gzip.conf\",\n    \"/etc/nginx/conf.d/tls.conf\",\n    \"/etc/nginx/conf.d/upstream.conf\",\n    \"/etc/nginx/sites-available/api.conf\",\n    \"/etc/nginx/sites-available/default.conf\",\n    \"/etc/nginx/sites-enabled/api.conf\",\n    \"/etc/nginx/snippets/fastcgi-php.conf\",\n    \"/etc/nginx/snippets/snakeoil.conf\"\n  ],\n  \"truncated\": false,\n  \"engine\": \"helper\",\n  \"warning\": \"远端未安装 fd，已通过临时 helper 遍历\"\n}"
+      }
+    ],
+    "structuredContent": {
+      "paths": [
+        "/etc/nginx/nginx.conf",
+        "/etc/nginx/conf.d/gzip.conf",
+        "/etc/nginx/conf.d/tls.conf",
+        "/etc/nginx/conf.d/upstream.conf",
+        "/etc/nginx/sites-available/api.conf",
+        "/etc/nginx/sites-available/default.conf",
+        "/etc/nginx/sites-enabled/api.conf",
+        "/etc/nginx/snippets/fastcgi-php.conf",
+        "/etc/nginx/snippets/snakeoil.conf"
+      ],
+      "truncated": false,
+      "engine": "helper",
+      "warning": "远端未安装 fd，已通过临时 helper 遍历"
+    },
+    "isError": false
+  },
+  "title": "路径查找",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+      }
+    ],
+    "isError": true
+  }
+}

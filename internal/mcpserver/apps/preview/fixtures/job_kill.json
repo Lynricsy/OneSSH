@@ -1,0 +1,28 @@
+{
+  "input": {
+    "job_id": "job_51ac7f23",
+    "signal": "TERM"
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"ok\": true\n}"
+      }
+    ],
+    "structuredContent": {
+      "ok": true
+    },
+    "isError": false
+  },
+  "title": "终止任务",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+      }
+    ],
+    "isError": true
+  }
+}

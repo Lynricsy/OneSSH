@@ -1,0 +1,92 @@
+{
+  "input": {
+    "host": "web-01",
+    "pattern": "ssl_protocols",
+    "path": "/etc/nginx",
+    "context": 1,
+    "limit": 100
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"lines\": [\n    {\n      \"path\": \"/etc/nginx/nginx.conf\",\n      \"line\": 19,\n      \"text\": \"    server_name api.example.com;\",\n      \"match\": false\n    },\n    {\n      \"path\": \"/etc/nginx/nginx.conf\",\n      \"line\": 20,\n      \"column\": 5,\n      \"text\": \"    ssl_protocols TLSv1.2 TLSv1.3;\",\n      \"match\": true\n    },\n    {\n      \"path\": \"/etc/nginx/nginx.conf\",\n      \"line\": 21,\n      \"text\": \"    ssl_session_cache shared:SSL:10m;\",\n      \"match\": false\n    },\n    {\n      \"path\": \"/etc/nginx/sites-enabled/api.conf\",\n      \"line\": 43,\n      \"text\": \"    server_name api.example.com;\",\n      \"match\": false\n    },\n    {\n      \"path\": \"/etc/nginx/sites-enabled/api.conf\",\n      \"line\": 44,\n      \"column\": 5,\n      \"text\": \"    ssl_protocols TLSv1.2 TLSv1.3;\",\n      \"match\": true\n    },\n    {\n      \"path\": \"/etc/nginx/sites-enabled/api.conf\",\n      \"line\": 45,\n      \"text\": \"    ssl_session_cache shared:SSL:10m;\",\n      \"match\": false\n    },\n    {\n      \"path\": \"/etc/nginx/conf.d/tls.conf\",\n      \"line\": 6,\n      \"text\": \"    server_name api.example.com;\",\n      \"match\": false\n    },\n    {\n      \"path\": \"/etc/nginx/conf.d/tls.conf\",\n      \"line\": 7,\n      \"column\": 5,\n      \"text\": \"    ssl_protocols TLSv1.2 TLSv1.3;\",\n      \"match\": true\n    },\n    {\n      \"path\": \"/etc/nginx/conf.d/tls.conf\",\n      \"line\": 8,\n      \"text\": \"    ssl_session_cache shared:SSL:10m;\",\n      \"match\": false\n    }\n  ],\n  \"match_count\": 3,\n  \"truncated\": false,\n  \"engine\": \"rg\"\n}"
+      }
+    ],
+    "structuredContent": {
+      "lines": [
+        {
+          "path": "/etc/nginx/nginx.conf",
+          "line": 19,
+          "text": "    server_name api.example.com;",
+          "match": false
+        },
+        {
+          "path": "/etc/nginx/nginx.conf",
+          "line": 20,
+          "column": 5,
+          "text": "    ssl_protocols TLSv1.2 TLSv1.3;",
+          "match": true
+        },
+        {
+          "path": "/etc/nginx/nginx.conf",
+          "line": 21,
+          "text": "    ssl_session_cache shared:SSL:10m;",
+          "match": false
+        },
+        {
+          "path": "/etc/nginx/sites-enabled/api.conf",
+          "line": 43,
+          "text": "    server_name api.example.com;",
+          "match": false
+        },
+        {
+          "path": "/etc/nginx/sites-enabled/api.conf",
+          "line": 44,
+          "column": 5,
+          "text": "    ssl_protocols TLSv1.2 TLSv1.3;",
+          "match": true
+        },
+        {
+          "path": "/etc/nginx/sites-enabled/api.conf",
+          "line": 45,
+          "text": "    ssl_session_cache shared:SSL:10m;",
+          "match": false
+        },
+        {
+          "path": "/etc/nginx/conf.d/tls.conf",
+          "line": 6,
+          "text": "    server_name api.example.com;",
+          "match": false
+        },
+        {
+          "path": "/etc/nginx/conf.d/tls.conf",
+          "line": 7,
+          "column": 5,
+          "text": "    ssl_protocols TLSv1.2 TLSv1.3;",
+          "match": true
+        },
+        {
+          "path": "/etc/nginx/conf.d/tls.conf",
+          "line": 8,
+          "text": "    ssl_session_cache shared:SSL:10m;",
+          "match": false
+        }
+      ],
+      "match_count": 3,
+      "truncated": false,
+      "engine": "rg"
+    },
+    "isError": false
+  },
+  "title": "内容搜索",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+      }
+    ],
+    "isError": true
+  }
+}

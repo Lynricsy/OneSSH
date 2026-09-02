@@ -1,0 +1,55 @@
+{
+  "input": {
+    "host": "web-01",
+    "fresh": true
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"host_id\": 1,\n  \"ts\": 1788359015,\n  \"cpu_pct\": 37.4,\n  \"mem_used_kb\": 6094848,\n  \"mem_total_kb\": 8126464,\n  \"load1\": 1.27,\n  \"disks\": [\n    {\n      \"mount\": \"/\",\n      \"used_kb\": 38914048,\n      \"total_kb\": 51609600\n    },\n    {\n      \"mount\": \"/var\",\n      \"used_kb\": 19398656,\n      \"total_kb\": 20971520\n    },\n    {\n      \"mount\": \"/boot\",\n      \"used_kb\": 198656,\n      \"total_kb\": 1046528\n    },\n    {\n      \"mount\": \"/srv/assets\",\n      \"used_kb\": 104857600,\n      \"total_kb\": 524288000\n    }\n  ]\n}"
+      }
+    ],
+    "structuredContent": {
+      "host_id": 1,
+      "ts": 1788359015,
+      "cpu_pct": 37.4,
+      "mem_used_kb": 6094848,
+      "mem_total_kb": 8126464,
+      "load1": 1.27,
+      "disks": [
+        {
+          "mount": "/",
+          "used_kb": 38914048,
+          "total_kb": 51609600
+        },
+        {
+          "mount": "/var",
+          "used_kb": 19398656,
+          "total_kb": 20971520
+        },
+        {
+          "mount": "/boot",
+          "used_kb": 198656,
+          "total_kb": 1046528
+        },
+        {
+          "mount": "/srv/assets",
+          "used_kb": 104857600,
+          "total_kb": 524288000
+        }
+      ]
+    },
+    "isError": false
+  },
+  "title": "资源指标",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+      }
+    ],
+    "isError": true
+  }
+}

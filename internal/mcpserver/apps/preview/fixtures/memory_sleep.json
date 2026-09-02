@@ -1,0 +1,29 @@
+{
+  "input": {
+    "host": "web-01"
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"deduped\": 7,\n  \"decayed\": 23,\n  \"pruned\": 4\n}"
+      }
+    ],
+    "structuredContent": {
+      "deduped": 7,
+      "decayed": 23,
+      "pruned": 4
+    },
+    "isError": false
+  },
+  "title": "记忆维护",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+      }
+    ],
+    "isError": true
+  }
+}

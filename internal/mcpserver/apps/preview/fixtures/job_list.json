@@ -1,0 +1,101 @@
+{
+  "input": {},
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"jobs\": [\n    {\n      \"job\": {\n        \"id\": \"job_7cf3a91e\",\n        \"host_id\": 5,\n        \"command\": \"make release VERSION=v0.2.0\",\n        \"cwd\": \"/srv/onessh\",\n        \"pid\": 48001,\n        \"used_setsid\": true,\n        \"status\": \"running\",\n        \"exit_code\": null,\n        \"started_at\": 1788348345,\n        \"finished_at\": null\n      },\n      \"log_bytes\": 182934\n    },\n    {\n      \"job\": {\n        \"id\": \"job_2b81dd40\",\n        \"host_id\": 5,\n        \"command\": \"tar -czf /backup/db-$(date +%F).tar.gz /var/lib/postgresql\",\n        \"cwd\": \"/srv/onessh\",\n        \"pid\": 48002,\n        \"used_setsid\": true,\n        \"status\": \"exited\",\n        \"exit_code\": 0,\n        \"started_at\": 1788348435,\n        \"finished_at\": 1788351855\n      },\n      \"log_bytes\": 412\n    },\n    {\n      \"job\": {\n        \"id\": \"job_ee09c517\",\n        \"host_id\": 5,\n        \"command\": \"rsync -a --delete /srv/assets/ backup:/srv/assets/\",\n        \"cwd\": \"/srv/onessh\",\n        \"pid\": 48003,\n        \"used_setsid\": true,\n        \"status\": \"exited\",\n        \"exit_code\": 23,\n        \"started_at\": 1788348525,\n        \"finished_at\": 1788353655\n      },\n      \"log_bytes\": 88231\n    },\n    {\n      \"job\": {\n        \"id\": \"job_51ac7f23\",\n        \"host_id\": 5,\n        \"command\": \"tcpdump -i eth0 -w /tmp/cap.pcap\",\n        \"cwd\": \"/srv/onessh\",\n        \"pid\": 48004,\n        \"used_setsid\": true,\n        \"status\": \"lost\",\n        \"exit_code\": null,\n        \"started_at\": 1788348615,\n        \"finished_at\": null\n      },\n      \"log_bytes\": 0\n    },\n    {\n      \"job\": {\n        \"id\": \"job_9d4e12ab\",\n        \"host_id\": 5,\n        \"command\": \"python3 -u train.py --epochs 200\",\n        \"cwd\": \"/srv/onessh\",\n        \"pid\": 48005,\n        \"used_setsid\": true,\n        \"status\": \"killed\",\n        \"exit_code\": null,\n        \"started_at\": 1788348705,\n        \"finished_at\": 1788356955\n      },\n      \"log_bytes\": 1490233\n    }\n  ]\n}"
+      }
+    ],
+    "structuredContent": {
+      "jobs": [
+        {
+          "job": {
+            "id": "job_7cf3a91e",
+            "host_id": 5,
+            "command": "make release VERSION=v0.2.0",
+            "cwd": "/srv/onessh",
+            "pid": 48001,
+            "used_setsid": true,
+            "status": "running",
+            "exit_code": null,
+            "started_at": 1788348345,
+            "finished_at": null
+          },
+          "log_bytes": 182934
+        },
+        {
+          "job": {
+            "id": "job_2b81dd40",
+            "host_id": 5,
+            "command": "tar -czf /backup/db-$(date +%F).tar.gz /var/lib/postgresql",
+            "cwd": "/srv/onessh",
+            "pid": 48002,
+            "used_setsid": true,
+            "status": "exited",
+            "exit_code": 0,
+            "started_at": 1788348435,
+            "finished_at": 1788351855
+          },
+          "log_bytes": 412
+        },
+        {
+          "job": {
+            "id": "job_ee09c517",
+            "host_id": 5,
+            "command": "rsync -a --delete /srv/assets/ backup:/srv/assets/",
+            "cwd": "/srv/onessh",
+            "pid": 48003,
+            "used_setsid": true,
+            "status": "exited",
+            "exit_code": 23,
+            "started_at": 1788348525,
+            "finished_at": 1788353655
+          },
+          "log_bytes": 88231
+        },
+        {
+          "job": {
+            "id": "job_51ac7f23",
+            "host_id": 5,
+            "command": "tcpdump -i eth0 -w /tmp/cap.pcap",
+            "cwd": "/srv/onessh",
+            "pid": 48004,
+            "used_setsid": true,
+            "status": "lost",
+            "exit_code": null,
+            "started_at": 1788348615,
+            "finished_at": null
+          },
+          "log_bytes": 0
+        },
+        {
+          "job": {
+            "id": "job_9d4e12ab",
+            "host_id": 5,
+            "command": "python3 -u train.py --epochs 200",
+            "cwd": "/srv/onessh",
+            "pid": 48005,
+            "used_setsid": true,
+            "status": "killed",
+            "exit_code": null,
+            "started_at": 1788348705,
+            "finished_at": 1788356955
+          },
+          "log_bytes": 1490233
+        }
+      ]
+    },
+    "isError": false
+  },
+  "title": "任务列表",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+      }
+    ],
+    "isError": true
+  }
+}

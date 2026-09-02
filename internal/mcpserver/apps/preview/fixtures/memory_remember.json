@@ -1,0 +1,33 @@
+{
+  "input": {
+    "host": "web-01",
+    "content": "web-01 的 nginx 配置在 /etc/nginx，reload 用 systemctl reload nginx，不要用 restart（会断掉长连接）。",
+    "importance": 0.8,
+    "veracity": "tool"
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"id\": 184,\n  \"bank\": \"web-01\",\n  \"deduped\": false,\n  \"embedded\": true\n}"
+      }
+    ],
+    "structuredContent": {
+      "id": 184,
+      "bank": "web-01",
+      "deduped": false,
+      "embedded": true
+    },
+    "isError": false
+  },
+  "title": "保存记忆",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+      }
+    ],
+    "isError": true
+  }
+}

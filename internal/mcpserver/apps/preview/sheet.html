@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>OneSSH 卡片总览</title>
+<style>
+:root{color-scheme:light}
+html[data-sheet="dark"]{color-scheme:dark}
+body{margin:0;padding:20px;background:light-dark(#ececf1,#0f1013);
+font:13px/1.55 ui-sans-serif,system-ui,"PingFang SC","Microsoft YaHei",sans-serif;color:light-dark(#17191c,#e6e9ed)}
+h2{margin:26px 0 10px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:light-dark(#6b7280,#8b94a1)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(430px,1fr));gap:18px;align-items:start}
+.cell{min-width:0}
+.cap{margin:0 0 6px;font:600 11.5px/1.4 ui-monospace,Menlo,Consolas,monospace;color:light-dark(#0d9488,#2dd4bf)}
+.shell{border:1px solid light-dark(#e0e2e8,#2b3038);border-radius:14px;overflow:hidden;
+background:light-dark(#fff,#212121);box-shadow:0 1px 2px #0000000d}
+iframe{display:block;width:100%;border:0;height:90px;background:transparent}
+</style>
+</head>
+<body>
+<div id="sheet"></div>
+<script>
+// 一次性把 32 张卡片全部渲染出来，供无头浏览器整页截图做视觉验收。
+// 每个 iframe 都由本页扮演宿主完成一次完整的 ui/* 握手，行为与真实宿主一致。
+const TOOLS=[["hosts_list","hosts"],["hosts_manage_list","hosts"],["host_create","hosts"],["host_update","hosts"],
+["host_test","hosts"],["host_reset_fingerprint","hosts"],["host_delete","hosts"],
+["exec","exec"],["session_env","exec"],["output_read","exec"],["exec_many","exec"],
+["job_start","jobs"],["job_list","jobs"],["job_status","jobs"],["job_logs","jobs"],["job_kill","jobs"],
+["file_read","files"],["file_write","files"],["file_edit","files"],["file_list","files"],["file_transfer","files"],
+["grep","search"],["find","search"],
+["memory_remember","memory"],["memory_recall","memory"],["memory_list","memory"],["memory_update","memory"],
+["memory_forget","memory"],["memory_stats","memory"],["memory_sleep","memory"],
+["host_status","monitor"],["image_view","image"]];
+const params=new URLSearchParams(location.search);
+const THEME=params.get("theme")==="dark"?"dark":"light";
+const ERROR=params.get("state")==="error";
+document.documentElement.dataset.sheet=THEME;
+const VARS={light:{"--color-background-primary":"#ffffff","--color-background-secondary":"#f7f7f8",
+ "--color-text-primary":"#0d0d0d","--color-text-secondary":"#5d5d5d","--color-border-primary":"#e5e5e5"},
+ dark:{"--color-background-primary":"#212121","--color-background-secondary":"#2f2f2f",
+ "--color-text-primary":"#ececec","--color-text-secondary":"#b4b4b4","--color-border-primary":"#3d3d3d"}}[THEME];
+const frames=new Map();
+let ready=0;
+(async function(){
+  const [shell,style,runtime]=await Promise.all(["../shell.html","../style.css","../runtime.js"].map(u=>fetch(u+"?t="+Date.now()).then(r=>r.text())));
+  const views={};
+  for(const g of [...new Set(TOOLS.map(t=>t[1]))]) views[g]=await fetch("../views/"+g+".js?t="+Date.now()).then(r=>r.text());
+  const root=document.getElementById("sheet");
+  let group=null,grid=null;
+  for(const [tool,g] of TOOLS){
+    if(g!==group){group=g;const head=document.createElement("h2");head.textContent=g;root.append(head);
+      grid=document.createElement("div");grid.className="grid";root.append(grid);}
+    const cell=document.createElement("div");cell.className="cell";
+    const cap=document.createElement("p");cap.className="cap";cap.textContent=tool;cell.append(cap);
+    const box=document.createElement("div");box.className="shell";
+    const frame=document.createElement("iframe");frame.setAttribute("sandbox","allow-scripts");
+    const fixture=await fetch("fixtures/"+tool+".json?t="+Date.now()).then(r=>r.ok?r.json():null).catch(()=>null);
+    frame.srcdoc=shell.replaceAll("{{TOOL}}",tool).replaceAll("{{TITLE}}",(fixture&&fixture.title)||tool)
+      .replace("{{STYLE}}",style).replace("{{RUNTIME}}",runtime).replace("{{VIEW}}",views[g]);
+    frames.set(frame,{tool,fixture});
+    box.append(frame);cell.append(box);grid.append(cell);
+  }
+  window.__sheetTotal=TOOLS.length;
+})();
+window.addEventListener("message",e=>{
+  let entry=null,frame=null;
+  for(const [f,v] of frames) if(f.contentWindow===e.source){entry=v;frame=f;break;}
+  if(!entry) return;
+  const m=e.data; if(!m||m.jsonrpc!=="2.0") return;
+  const send=o=>frame.contentWindow.postMessage(o,"*");
+  if(m.method==="ui/initialize"){
+    send({jsonrpc:"2.0",id:m.id,result:{protocolVersion:"2026-01-26",hostInfo:{name:"sheet",version:"1"},
+      hostCapabilities:{serverTools:{},updateModelContext:{}},
+      hostContext:{theme:THEME,displayMode:"inline",availableDisplayModes:["inline","fullscreen"],
+        locale:"zh-CN",platform:"web",styles:{variables:VARS}}}});
+    return;
+  }
+  if(m.method==="ui/notifications/initialized"){
+    if(!entry.fixture){ready++;return;}
+    send({jsonrpc:"2.0",method:"ui/notifications/tool-input",params:{arguments:entry.fixture.input||{}}});
+    const result=ERROR?(entry.fixture.error||{content:[{type:"text",text:"host not authorized"}],isError:true}):entry.fixture.result;
+    send({jsonrpc:"2.0",method:"ui/notifications/tool-result",params:result});
+    ready++;
+    return;
+  }
+  if(m.method==="ui/notifications/size-changed"){frame.style.height=Math.max(60,m.params.height)+"px";return;}
+  if(m.method==="tools/call"){
+    const canned=(entry.fixture&&entry.fixture.calls&&entry.fixture.calls[m.params.name])||null;
+    send({jsonrpc:"2.0",id:m.id,result:canned||{content:[{type:"text",text:"预览没有该调用的数据"}],isError:true}});
+    return;
+  }
+  if(m.id!==undefined) send({jsonrpc:"2.0",id:m.id,result:{}});
+});
+Object.defineProperty(window,"__sheetReady",{get:()=>ready});
+</script>
+</body>
+</html>

@@ -1,0 +1,72 @@
+{
+  "input": {
+    "hosts": [
+      "web-01",
+      "web-02",
+      "db-main",
+      "cache-01",
+      "build-runner"
+    ],
+    "command": "nginx -v 2>&1 || true",
+    "timeout_s": 30
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"results\": [\n    {\n      \"host\": \"web-01\",\n      \"run_id\": \"run_A1\",\n      \"exit_code\": 0,\n      \"timeout\": false,\n      \"output\": \"nginx version: nginx/1.24.0 (Ubuntu)\"\n    },\n    {\n      \"host\": \"web-02\",\n      \"run_id\": \"run_A2\",\n      \"exit_code\": 0,\n      \"timeout\": false,\n      \"output\": \"nginx version: nginx/1.24.0 (Ubuntu)\"\n    },\n    {\n      \"host\": \"db-main\",\n      \"run_id\": \"run_A3\",\n      \"exit_code\": 127,\n      \"timeout\": false,\n      \"output\": \"bash: line 1: nginx: command not found\"\n    },\n    {\n      \"host\": \"cache-01\",\n      \"run_id\": \"\",\n      \"exit_code\": -1,\n      \"timeout\": false,\n      \"output\": \"\",\n      \"error\": \"dial tcp 10.0.2.21:22: connect: connection refused\"\n    },\n    {\n      \"host\": \"build-runner\",\n      \"run_id\": \"run_A5\",\n      \"exit_code\": -1,\n      \"timeout\": true,\n      \"output\": \"（命令在 30 秒后被中断）\"\n    }\n  ]\n}"
+      }
+    ],
+    "structuredContent": {
+      "results": [
+        {
+          "host": "web-01",
+          "run_id": "run_A1",
+          "exit_code": 0,
+          "timeout": false,
+          "output": "nginx version: nginx/1.24.0 (Ubuntu)"
+        },
+        {
+          "host": "web-02",
+          "run_id": "run_A2",
+          "exit_code": 0,
+          "timeout": false,
+          "output": "nginx version: nginx/1.24.0 (Ubuntu)"
+        },
+        {
+          "host": "db-main",
+          "run_id": "run_A3",
+          "exit_code": 127,
+          "timeout": false,
+          "output": "bash: line 1: nginx: command not found"
+        },
+        {
+          "host": "cache-01",
+          "run_id": "",
+          "exit_code": -1,
+          "timeout": false,
+          "output": "",
+          "error": "dial tcp 10.0.2.21:22: connect: connection refused"
+        },
+        {
+          "host": "build-runner",
+          "run_id": "run_A5",
+          "exit_code": -1,
+          "timeout": true,
+          "output": "（命令在 30 秒后被中断）"
+        }
+      ]
+    },
+    "isError": false
+  },
+  "title": "批量执行",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+      }
+    ],
+    "isError": true
+  }
+}

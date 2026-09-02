@@ -1,0 +1,83 @@
+{
+  "input": {},
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"hosts\": [\n    {\n      \"name\": \"web-01\",\n      \"addr\": \"10.0.1.11:22\",\n      \"username\": \"deploy\",\n      \"online\": true,\n      \"tags\": [\n        \"prod\",\n        \"nginx\"\n      ]\n    },\n    {\n      \"name\": \"web-02\",\n      \"addr\": \"10.0.1.12:22\",\n      \"username\": \"deploy\",\n      \"online\": true,\n      \"tags\": [\n        \"prod\",\n        \"nginx\"\n      ]\n    },\n    {\n      \"name\": \"db-main\",\n      \"addr\": \"10.0.2.10:22\",\n      \"username\": \"postgres\",\n      \"online\": true,\n      \"tags\": [\n        \"prod\",\n        \"postgres\"\n      ]\n    },\n    {\n      \"name\": \"cache-01\",\n      \"addr\": \"10.0.2.21:22\",\n      \"username\": \"redis\",\n      \"online\": false,\n      \"tags\": [\n        \"prod\",\n        \"redis\"\n      ]\n    },\n    {\n      \"name\": \"build-runner\",\n      \"addr\": \"192.168.30.7:2222\",\n      \"username\": \"ci\",\n      \"online\": true,\n      \"tags\": [\n        \"staging\",\n        \"ci\"\n      ]\n    },\n    {\n      \"name\": \"bastion\",\n      \"addr\": \"203.0.113.9:22\",\n      \"username\": \"jump\",\n      \"online\": true,\n      \"tags\": []\n    }\n  ]\n}"
+      }
+    ],
+    "structuredContent": {
+      "hosts": [
+        {
+          "name": "web-01",
+          "addr": "10.0.1.11:22",
+          "username": "deploy",
+          "online": true,
+          "tags": [
+            "prod",
+            "nginx"
+          ]
+        },
+        {
+          "name": "web-02",
+          "addr": "10.0.1.12:22",
+          "username": "deploy",
+          "online": true,
+          "tags": [
+            "prod",
+            "nginx"
+          ]
+        },
+        {
+          "name": "db-main",
+          "addr": "10.0.2.10:22",
+          "username": "postgres",
+          "online": true,
+          "tags": [
+            "prod",
+            "postgres"
+          ]
+        },
+        {
+          "name": "cache-01",
+          "addr": "10.0.2.21:22",
+          "username": "redis",
+          "online": false,
+          "tags": [
+            "prod",
+            "redis"
+          ]
+        },
+        {
+          "name": "build-runner",
+          "addr": "192.168.30.7:2222",
+          "username": "ci",
+          "online": true,
+          "tags": [
+            "staging",
+            "ci"
+          ]
+        },
+        {
+          "name": "bastion",
+          "addr": "203.0.113.9:22",
+          "username": "jump",
+          "online": true,
+          "tags": []
+        }
+      ]
+    },
+    "isError": false
+  },
+  "title": "主机列表",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+      }
+    ],
+    "isError": true
+  }
+}

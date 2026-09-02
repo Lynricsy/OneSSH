@@ -1,0 +1,31 @@
+{
+  "input": {
+    "host": "build-runner",
+    "command": "make release VERSION=v0.2.0",
+    "cwd": "/srv/onessh"
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"job_id\": \"job_7cf3a91e\",\n  \"run_id\": \"run_01K4M8ZZ01\",\n  \"pid\": 48213\n}"
+      }
+    ],
+    "structuredContent": {
+      "job_id": "job_7cf3a91e",
+      "run_id": "run_01K4M8ZZ01",
+      "pid": 48213
+    },
+    "isError": false
+  },
+  "title": "后台任务",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+      }
+    ],
+    "isError": true
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "input": {
+    "job_id": "job_7cf3a91e",
+    "tail_lines": 100
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"output\": \"go build -trimpath -o /out/onessh ./cmd/onessh\\n==> 编译 linux/amd64\\n==> 编译 linux/arm64\\n==> 编译 darwin/arm64\\ngo: downloading github.com/modelcontextprotocol/go-sdk v1.7.0\\ngo: downloading golang.org/x/crypto v0.44.0\\n[14:00] packing dist/onessh_0.2.0_linux_amd64.tar.gz\\n[14:01] packing dist/onessh_0.2.0_linux_arm64.tar.gz\\n[14:02] packing dist/onessh_0.2.0_darwin_amd64.tar.gz\\n[14:03] packing dist/onessh_0.2.0_darwin_arm64.tar.gz\\n[14:04] packing dist/onessh_0.2.0_freebsd_amd64.tar.gz\\n[14:05] packing dist/onessh_0.2.0_freebsd_arm64.tar.gz\\nsha256sum ./*.tar.gz > checksums.txt\\nmake: *** [Makefile:31: verify] Error 1\"\n}"
+      }
+    ],
+    "structuredContent": {
+      "output": "go build -trimpath -o /out/onessh ./cmd/onessh\n==> 编译 linux/amd64\n==> 编译 linux/arm64\n==> 编译 darwin/arm64\ngo: downloading github.com/modelcontextprotocol/go-sdk v1.7.0\ngo: downloading golang.org/x/crypto v0.44.0\n[14:00] packing dist/onessh_0.2.0_linux_amd64.tar.gz\n[14:01] packing dist/onessh_0.2.0_linux_arm64.tar.gz\n[14:02] packing dist/onessh_0.2.0_darwin_amd64.tar.gz\n[14:03] packing dist/onessh_0.2.0_darwin_arm64.tar.gz\n[14:04] packing dist/onessh_0.2.0_freebsd_amd64.tar.gz\n[14:05] packing dist/onessh_0.2.0_freebsd_arm64.tar.gz\nsha256sum ./*.tar.gz > checksums.txt\nmake: *** [Makefile:31: verify] Error 1"
+    },
+    "isError": false
+  },
+  "title": "任务日志",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+      }
+    ],
+    "isError": true
+  }
+}

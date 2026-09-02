@@ -1,0 +1,39 @@
+{
+  "input": {
+    "host": "web-01",
+    "path": "/srv/reports/latency-p99.png",
+    "max_dim": 1024
+  },
+  "result": {
+    "content": [
+      {
+        "type": "image",
+        "data": "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",
+        "mimeType": "image/png"
+      },
+      {
+        "type": "text",
+        "text": "原始 1280x720，输出 320x180，2043 字节"
+      }
+    ],
+    "structuredContent": {
+      "original_width": 1280,
+      "original_height": 720,
+      "width": 320,
+      "height": 180,
+      "bytes": 2043,
+      "mime_type": "image/png"
+    },
+    "isError": false
+  },
+  "title": "远程图片",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+      }
+    ],
+    "isError": true
+  }
+}

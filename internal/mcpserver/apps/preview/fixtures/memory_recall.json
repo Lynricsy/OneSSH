@@ -1,0 +1,73 @@
+{
+  "input": {
+    "host": "web-01",
+    "query": "nginx 配置改完怎么生效",
+    "limit": 8
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"results\": [\n    {\n      \"id\": 184,\n      \"bank\": \"web-01\",\n      \"host_id\": 1,\n      \"content\": \"web-01 的 nginx 配置在 /etc/nginx，reload 用 systemctl reload nginx，不要用 restart（会断掉长连接）。\",\n      \"source\": \"mcp\",\n      \"importance\": 0.8,\n      \"veracity\": \"tool\",\n      \"score\": 0.91,\n      \"fts_score\": 0.74,\n      \"dense_score\": 0.88,\n      \"created_at\": 1788358935,\n      \"recall_count\": 6\n    },\n    {\n      \"id\": 151,\n      \"bank\": \"web-01\",\n      \"host_id\": 1,\n      \"content\": \"web-01 与 web-02 前面有 LB，改配置要两台同时改，否则会出现 50% 请求失败。\",\n      \"source\": \"mcp\",\n      \"importance\": 0.75,\n      \"veracity\": \"stated\",\n      \"score\": 0.77,\n      \"fts_score\": 0.61,\n      \"dense_score\": 0.72,\n      \"created_at\": 1787581455,\n      \"recall_count\": 3\n    },\n    {\n      \"id\": 92,\n      \"bank\": \"global\",\n      \"host_id\": null,\n      \"content\": \"所有 prod 主机的 systemd 单元改动后必须 daemon-reload，否则重启会读到旧单元。\",\n      \"source\": \"mcp\",\n      \"importance\": 0.6,\n      \"veracity\": \"inferred\",\n      \"score\": 0.52,\n      \"fts_score\": 0.4,\n      \"dense_score\": 0.55,\n      \"created_at\": 1783175055,\n      \"recall_count\": 11\n    }\n  ],\n  \"engine\": \"hybrid\"\n}"
+      }
+    ],
+    "structuredContent": {
+      "results": [
+        {
+          "id": 184,
+          "bank": "web-01",
+          "host_id": 1,
+          "content": "web-01 的 nginx 配置在 /etc/nginx，reload 用 systemctl reload nginx，不要用 restart（会断掉长连接）。",
+          "source": "mcp",
+          "importance": 0.8,
+          "veracity": "tool",
+          "score": 0.91,
+          "fts_score": 0.74,
+          "dense_score": 0.88,
+          "created_at": 1788358935,
+          "recall_count": 6
+        },
+        {
+          "id": 151,
+          "bank": "web-01",
+          "host_id": 1,
+          "content": "web-01 与 web-02 前面有 LB，改配置要两台同时改，否则会出现 50% 请求失败。",
+          "source": "mcp",
+          "importance": 0.75,
+          "veracity": "stated",
+          "score": 0.77,
+          "fts_score": 0.61,
+          "dense_score": 0.72,
+          "created_at": 1787581455,
+          "recall_count": 3
+        },
+        {
+          "id": 92,
+          "bank": "global",
+          "host_id": null,
+          "content": "所有 prod 主机的 systemd 单元改动后必须 daemon-reload，否则重启会读到旧单元。",
+          "source": "mcp",
+          "importance": 0.6,
+          "veracity": "inferred",
+          "score": 0.52,
+          "fts_score": 0.4,
+          "dense_score": 0.55,
+          "created_at": 1783175055,
+          "recall_count": 11
+        }
+      ],
+      "engine": "hybrid"
+    },
+    "isError": false
+  },
+  "title": "召回记忆",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+      }
+    ],
+    "isError": true
+  }
+}

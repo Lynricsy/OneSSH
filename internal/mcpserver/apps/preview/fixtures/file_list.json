@@ -1,0 +1,117 @@
+{
+  "input": {
+    "host": "web-01",
+    "path": "/etc/nginx"
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"entries\": [\n    {\n      \"name\": \"conf.d\",\n      \"size\": 4096,\n      \"mode\": \"drwxr-xr-x\",\n      \"mtime\": 1788337455,\n      \"directory\": true\n    },\n    {\n      \"name\": \"sites-available\",\n      \"size\": 4096,\n      \"mode\": \"drwxr-xr-x\",\n      \"mtime\": 1786544655,\n      \"directory\": true\n    },\n    {\n      \"name\": \"sites-enabled\",\n      \"size\": 4096,\n      \"mode\": \"drwxr-xr-x\",\n      \"mtime\": 1786544655,\n      \"directory\": true\n    },\n    {\n      \"name\": \"snippets\",\n      \"size\": 4096,\n      \"mode\": \"drwxr-xr-x\",\n      \"mtime\": 1776263055,\n      \"directory\": true\n    },\n    {\n      \"name\": \"fastcgi.conf\",\n      \"size\": 1077,\n      \"mode\": \"-rw-r--r--\",\n      \"mtime\": 1768227855,\n      \"directory\": false\n    },\n    {\n      \"name\": \"mime.types\",\n      \"size\": 5349,\n      \"mode\": \"-rw-r--r--\",\n      \"mtime\": 1768227855,\n      \"directory\": false\n    },\n    {\n      \"name\": \"nginx.conf\",\n      \"size\": 901,\n      \"mode\": \"-rw-r--r--\",\n      \"mtime\": 1788358515,\n      \"directory\": false\n    },\n    {\n      \"name\": \"proxy_params\",\n      \"size\": 355,\n      \"mode\": \"-rw-r--r--\",\n      \"mtime\": 1768227855,\n      \"directory\": false\n    },\n    {\n      \"name\": \"ssl.conf\",\n      \"size\": 214,\n      \"mode\": \"lrwxrwxrwx\",\n      \"mtime\": 1785075855,\n      \"directory\": false,\n      \"symlink_target\": \"/etc/letsencrypt/options-ssl-nginx.conf\"\n    },\n    {\n      \"name\": \"scgi_params\",\n      \"size\": 636,\n      \"mode\": \"-rw-r--r--\",\n      \"mtime\": 1768227855,\n      \"directory\": false\n    }\n  ]\n}"
+      }
+    ],
+    "structuredContent": {
+      "entries": [
+        {
+          "name": "conf.d",
+          "size": 4096,
+          "mode": "drwxr-xr-x",
+          "mtime": 1788337455,
+          "directory": true
+        },
+        {
+          "name": "sites-available",
+          "size": 4096,
+          "mode": "drwxr-xr-x",
+          "mtime": 1786544655,
+          "directory": true
+        },
+        {
+          "name": "sites-enabled",
+          "size": 4096,
+          "mode": "drwxr-xr-x",
+          "mtime": 1786544655,
+          "directory": true
+        },
+        {
+          "name": "snippets",
+          "size": 4096,
+          "mode": "drwxr-xr-x",
+          "mtime": 1776263055,
+          "directory": true
+        },
+        {
+          "name": "fastcgi.conf",
+          "size": 1077,
+          "mode": "-rw-r--r--",
+          "mtime": 1768227855,
+          "directory": false
+        },
+        {
+          "name": "mime.types",
+          "size": 5349,
+          "mode": "-rw-r--r--",
+          "mtime": 1768227855,
+          "directory": false
+        },
+        {
+          "name": "nginx.conf",
+          "size": 901,
+          "mode": "-rw-r--r--",
+          "mtime": 1788358515,
+          "directory": false
+        },
+        {
+          "name": "proxy_params",
+          "size": 355,
+          "mode": "-rw-r--r--",
+          "mtime": 1768227855,
+          "directory": false
+        },
+        {
+          "name": "ssl.conf",
+          "size": 214,
+          "mode": "lrwxrwxrwx",
+          "mtime": 1785075855,
+          "directory": false,
+          "symlink_target": "/etc/letsencrypt/options-ssl-nginx.conf"
+        },
+        {
+          "name": "scgi_params",
+          "size": 636,
+          "mode": "-rw-r--r--",
+          "mtime": 1768227855,
+          "directory": false
+        }
+      ]
+    },
+    "isError": false
+  },
+  "calls": {
+    "file_read": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\n  \"content\": \"1:user  www-data;\\n2:worker_processes  auto;\\n3:pid /run/nginx.pid;\\n4:\\n5:events {\\n6:    worker_connections  4096;\\n7:    multi_accept on;\\n8:}\\n9:\\n10:http {\\n11:    sendfile            on;\\n12:    tcp_nopush          on;\\n13:    types_hash_max_size 2048;\\n14:    server_tokens       off;\\n15:\\n16:    include             /etc/nginx/mime.types;\\n17:    default_type        application/octet-stream;\\n18:\\n19:    ssl_protocols       TLSv1.2 TLSv1.3;\\n20:    ssl_prefer_server_ciphers off;\\n21:\\n22:    access_log  /var/log/nginx/access.log;\\n23:    error_log   /var/log/nginx/error.log warn;\\n24:\\n25:    gzip on;\\n26:    gzip_types text/plain application/json application/javascript text/css;\\n27:\\n28:    include /etc/nginx/conf.d/*.conf;\\n29:    include /etc/nginx/sites-enabled/*;\\n30:}\",\n  \"sha256\": \"3b1f0c9a77d4e5628f14b0a9c3e7d215884ab6f0c9d3e71a25b8f4c60d97ea31\",\n  \"bytes\": 812,\n  \"total_lines\": 30\n}"
+        }
+      ],
+      "structuredContent": {
+        "content": "1:user  www-data;\n2:worker_processes  auto;\n3:pid /run/nginx.pid;\n4:\n5:events {\n6:    worker_connections  4096;\n7:    multi_accept on;\n8:}\n9:\n10:http {\n11:    sendfile            on;\n12:    tcp_nopush          on;\n13:    types_hash_max_size 2048;\n14:    server_tokens       off;\n15:\n16:    include             /etc/nginx/mime.types;\n17:    default_type        application/octet-stream;\n18:\n19:    ssl_protocols       TLSv1.2 TLSv1.3;\n20:    ssl_prefer_server_ciphers off;\n21:\n22:    access_log  /var/log/nginx/access.log;\n23:    error_log   /var/log/nginx/error.log warn;\n24:\n25:    gzip on;\n26:    gzip_types text/plain application/json application/javascript text/css;\n27:\n28:    include /etc/nginx/conf.d/*.conf;\n29:    include /etc/nginx/sites-enabled/*;\n30:}",
+        "sha256": "3b1f0c9a77d4e5628f14b0a9c3e7d215884ab6f0c9d3e71a25b8f4c60d97ea31",
+        "bytes": 812,
+        "total_lines": 30
+      },
+      "isError": false
+    }
+  },
+  "title": "目录列表",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+      }
+    ],
+    "isError": true
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "input": {
+    "job_id": "job_7cf3a91e"
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"job\": {\n    \"id\": \"job_7cf3a91e\",\n    \"host_id\": 5,\n    \"command\": \"make release VERSION=v0.2.0\",\n    \"cwd\": \"/srv/onessh\",\n    \"pid\": 48001,\n    \"used_setsid\": true,\n    \"status\": \"running\",\n    \"exit_code\": null,\n    \"started_at\": 1788348345,\n    \"finished_at\": null\n  },\n  \"log_bytes\": 182934\n}"
+      }
+    ],
+    "structuredContent": {
+      "job": {
+        "id": "job_7cf3a91e",
+        "host_id": 5,
+        "command": "make release VERSION=v0.2.0",
+        "cwd": "/srv/onessh",
+        "pid": 48001,
+        "used_setsid": true,
+        "status": "running",
+        "exit_code": null,
+        "started_at": 1788348345,
+        "finished_at": null
+      },
+      "log_bytes": 182934
+    },
+    "isError": false
+  },
+  "title": "任务状态",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+      }
+    ],
+    "isError": true
+  }
+}

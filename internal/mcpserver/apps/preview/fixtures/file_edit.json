@@ -1,0 +1,37 @@
+{
+  "input": {
+    "host": "web-01",
+    "path": "/etc/nginx/nginx.conf",
+    "edits": [
+      {
+        "old_text": "access_log  /var/log/nginx/access.log;",
+        "new_text": "access_log  /var/log/nginx/access.log combined buffer=32k flush=5s;"
+      }
+    ],
+    "expected_sha256": "3b1f0c9a77d4e5628f14b0a9c3e7d215884ab6f0c9d3e71a25b8f4c60d97ea31"
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"sha256\": \"c47a0e9b13d2f68501ba7cd394e2f8016d5b93ca27e40f8a16b3d97c25ea0f43\",\n  \"bytes\": 901,\n  \"diff\": \"--- /etc/nginx/nginx.conf\\n+++ /etc/nginx/nginx.conf\\n@@ -17,7 +17,8 @@\\n     ssl_protocols       TLSv1.2 TLSv1.3;\\n     ssl_prefer_server_ciphers off;\\n \\n-    access_log  /var/log/nginx/access.log;\\n+    access_log  /var/log/nginx/access.log combined buffer=32k flush=5s;\\n+    log_not_found off;\\n     error_log   /var/log/nginx/error.log warn;\\n \\n     gzip on;\\n@@ -25,4 +26,5 @@\\n     gzip_types text/plain application/json application/javascript text/css;\\n \\n+    client_max_body_size 32m;\\n     include /etc/nginx/conf.d/*.conf;\"\n}"
+      }
+    ],
+    "structuredContent": {
+      "sha256": "c47a0e9b13d2f68501ba7cd394e2f8016d5b93ca27e40f8a16b3d97c25ea0f43",
+      "bytes": 901,
+      "diff": "--- /etc/nginx/nginx.conf\n+++ /etc/nginx/nginx.conf\n@@ -17,7 +17,8 @@\n     ssl_protocols       TLSv1.2 TLSv1.3;\n     ssl_prefer_server_ciphers off;\n \n-    access_log  /var/log/nginx/access.log;\n+    access_log  /var/log/nginx/access.log combined buffer=32k flush=5s;\n+    log_not_found off;\n     error_log   /var/log/nginx/error.log warn;\n \n     gzip on;\n@@ -25,4 +26,5 @@\n     gzip_types text/plain application/json application/javascript text/css;\n \n+    client_max_body_size 32m;\n     include /etc/nginx/conf.d/*.conf;"
+    },
+    "isError": false
+  },
+  "title": "文件编辑",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+      }
+    ],
+    "isError": true
+  }
+}

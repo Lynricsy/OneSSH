@@ -1,0 +1,51 @@
+{
+  "input": {
+    "name": "cache-02",
+    "addr": "10.0.2.22",
+    "port": 22,
+    "username": "redis",
+    "auth_type": "key",
+    "key_id": 3,
+    "tags": [
+      "prod",
+      "redis"
+    ]
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"id\": 9,\n  \"name\": \"cache-02\",\n  \"addr\": \"10.0.2.22\",\n  \"port\": 22,\n  \"username\": \"redis\",\n  \"auth_type\": \"key\",\n  \"key_id\": 3,\n  \"hostkey_fp\": null,\n  \"jump_host\": null,\n  \"monitor_enabled\": true,\n  \"tags\": [\n    \"prod\",\n    \"redis\"\n  ],\n  \"created_at\": 1788358935,\n  \"online\": false\n}"
+      }
+    ],
+    "structuredContent": {
+      "id": 9,
+      "name": "cache-02",
+      "addr": "10.0.2.22",
+      "port": 22,
+      "username": "redis",
+      "auth_type": "key",
+      "key_id": 3,
+      "hostkey_fp": null,
+      "jump_host": null,
+      "monitor_enabled": true,
+      "tags": [
+        "prod",
+        "redis"
+      ],
+      "created_at": 1788358935,
+      "online": false
+    },
+    "isError": false
+  },
+  "title": "新增主机",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+      }
+    ],
+    "isError": true
+  }
+}
