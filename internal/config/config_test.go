@@ -51,3 +51,40 @@ func TestLoadSearchHelperMode(t *testing.T) {
 		}
 	})
 }
+
+func TestLoadMCPAppsSwitch(t *testing.T) {
+	base := map[string]string{
+		"ONESSH_MASTER_KEY":     strings.Repeat("ab", 32),
+		"ONESSH_ADMIN_PASSWORD": "pw",
+	}
+	cases := []struct {
+		value   string
+		want    bool
+		wantErr bool
+	}{
+		{value: "", want: true},
+		{value: "on", want: true},
+		{value: "off", want: false},
+		{value: "yes", wantErr: true},
+	}
+	for _, tc := range cases {
+		for key, value := range base {
+			t.Setenv(key, value)
+		}
+		t.Setenv("ONESSH_MCP_APPS", tc.value)
+		cfg, err := Load()
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("ONESSH_MCP_APPS=%q 应当报错", tc.value)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("ONESSH_MCP_APPS=%q 出错: %v", tc.value, err)
+			continue
+		}
+		if cfg.MCPApps != tc.want {
+			t.Errorf("ONESSH_MCP_APPS=%q 得到 %v，期望 %v", tc.value, cfg.MCPApps, tc.want)
+		}
+	}
+}
