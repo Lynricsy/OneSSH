@@ -476,20 +476,28 @@
     var jobId = inputText(ctx, "job_id");
     var signal = inputText(ctx, "signal") || "TERM";
 
+    /* ok:true 只代表「这次请求没出错」，不代表信号真的发出去了。
+       internal/jobs/manager.go 的 Kill 有三条路径都返回 nil：任务记录已不是 running 时直接返回
+       （不敢复用持久化 PID，怕 PID 复用误伤无关进程）、远端脚本发现 exit 文件已写好（任务先一步
+       自己退了）、以及进程已不在或身份核验不过（判为失联）——这三种情况一次 kill 都没发。
+       所以卡片不能说「信号已发往整个进程组」：把「请求受理了」讲成「进程收到信号了」，
+       用户就会以为任务已被自己终止，而真实结局可能是它早就跑完、或者根本失联了。
+       信号种类是用户自己选的输入，仍值得显示，但要退到 chip 里，不再当作结论。 */
     return ui.card({
       kicker: "JOB",
       title: t("终止后台任务", "Terminate job"),
       subtitle: jobId,
+      chips: [ui.chip(t("信号 ", "signal ") + signal, { mono: true })],
       status: ok
-        ? ui.pill("warn", t("已发送 ", "Sent ") + signal)
-        : ui.pill("muted", t("未发送", "Not sent")),
-      // 发信号成功不等于进程已经结束，所以这里给的是「查看状态」而不是任何再次终止的入口。
+        ? ui.pill("warn", t("已处理", "Handled"))
+        : ui.pill("muted", t("结果未知", "Unknown")),
+      // 终止请求受理不等于进程已经结束，所以这里给的是「查看状态」而不是任何再次终止的入口。
       actions: [statusAction(ctx, jobId, t("确认状态", "Confirm status"))],
       body: ok
-        ? ui.note(t("信号已发往整个进程组。TERM 是优雅退出，进程可能需要一点时间才结束；用 job_status 确认最终状态。",
-          "The signal was delivered to the whole process group. TERM is a graceful stop and the process may take a moment to exit; confirm the final state with job_status."), "info")
-        : ui.empty(t("网关没有确认信号发送结果，任务可能已经自己结束了",
-          "The gateway did not confirm the signal; the job may have already finished on its own"))
+        ? ui.note(t("网关已受理这次终止请求，但这只说明请求本身没有出错：任务也可能在发信号之前就已经自己退出或失联，网关同样按成功返回。就算信号确实发出去了，TERM 是优雅退出，进程还要一点时间才结束。最终状态一律用 job_status 确认。",
+          "The gateway accepted the request, but that only means the request itself did not fail: the job may have already exited or gone out of reach before any signal was sent, and the gateway reports success all the same. Even when a signal did go out, TERM is a graceful stop and the process needs a moment. Always confirm the final state with job_status."), "info")
+        : ui.empty(t("网关没有返回这次终止的处理结果，任务当前状态无法从这张卡判断，请用 job_status 确认",
+          "The gateway returned no outcome for this request; this card cannot tell you the job's current state, so check it with job_status"))
     });
   });
 })();

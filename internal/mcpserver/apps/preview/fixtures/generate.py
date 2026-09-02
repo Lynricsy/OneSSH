@@ -10,7 +10,7 @@
 非零退出码、超时、离线主机、软链接、缺失字段等实际会遇到的形态。
 """
 
-import json, os, time
+import hashlib, json, os, time
 
 NOW = int(time.time())
 def ago(seconds): return NOW - seconds
@@ -47,6 +47,10 @@ managed = [
  {"id":5,"name":"build-runner","addr":"192.168.30.7","port":2222,"username":"ci","auth_type":"key","key_id":7,
   "hostkey_fp":"SHA256:Nm3Bv6Cx9Zl2Ka5Jh8Gf1Ds4Ap7Qw0Er3Ty6Ui9Op2Ls","jump_host":None,"monitor_enabled":True,
   "tags":["staging","ci"],"created_at":ago(41*DAY),"online":True},
+ # 跳板自身也是一台已注册主机，真实的 hosts_manage_list 一定会把它列出来
+ {"id":6,"name":"bastion","addr":"203.0.113.9","port":22,"username":"jump","auth_type":"key","key_id":3,
+  "hostkey_fp":"SHA256:Qw8Er2Ty5Ui1Op4As7Df0Gh3Jk6Lz9Xc2Vb5Nm8Qp1","jump_host":None,"monitor_enabled":False,
+  "tags":[],"created_at":ago(120*DAY),"online":True},
 ]
 F["hosts_manage_list"] = {"input":{}, "result": sc({"hosts":managed})}
 F["host_create"] = {"input":{"name":"cache-02","addr":"10.0.2.22","port":22,"username":"redis","auth_type":"key","key_id":3,"tags":["prod","redis"]},
@@ -57,10 +61,12 @@ F["host_update"] = {"input":{"host":"cache-01","name":"cache-01","addr":"10.0.2.
                              "auth_type":"key","key_id":3,"monitor_enabled":True,"tags":["prod","redis","tls"]},
                     "result": sc(dict(managed[3], auth_type="key", key_id=3, monitor_enabled=True, tags=["prod","redis","tls"]))}
 uptime_out = " 14:23:07 up 42 days,  3:11,  2 users,  load average: 0.34, 0.51, 0.48"
+uptime_bytes = len((uptime_out + "\n").encode())
 F["host_test"] = {"input":{"host":"web-01"},
                   "result": sc({"stdout":uptime_out+"\n","stderr":"","output":uptime_out,"exit_code":0,
-                                "cwd":"/home/deploy","timeout":False,"truncated":False,"total_lines":1,"total_bytes":78,
-                                "stdout_bytes":78,"stderr_bytes":0,"output_recorded":True})}
+                                "cwd":"/home/deploy","timeout":False,"truncated":False,"total_lines":1,
+                                "total_bytes":uptime_bytes,"stdout_bytes":uptime_bytes,"stderr_bytes":0,
+                                "output_recorded":True})}
 F["host_reset_fingerprint"] = {"input":{"host":"cache-01"}, "result": sc({"ok":True})}
 F["host_delete"] = {"input":{"host":"cache-01"}, "result": sc({"ok":True})}
 
@@ -156,11 +162,15 @@ conf = "\n".join([
  "    access_log  /var/log/nginx/access.log;","    error_log   /var/log/nginx/error.log warn;","",
  "    gzip on;","    gzip_types text/plain application/json application/javascript text/css;","",
  "    include /etc/nginx/conf.d/*.conf;","    include /etc/nginx/sites-enabled/*;","}"])
-# files.Manager.Read 返回的正文每行带 "行号:" 前缀
+# files.Manager.Read 返回的正文每行带 "行号:" 前缀；
+# sha256 与 bytes 说的是远端原文件（不是加了行号的正文），这里照真实语义算出来，
+# 否则画廊里展示的校验和与字节数跟内容对不上，反而教人怀疑卡片。
+raw_conf = conf + "\n"
 numbered_conf = "\n".join("%d:%s" % (i + 1, line) for i, line in enumerate(conf.split("\n")))
 F["file_read"] = {"input":{"host":"web-01","path":"/etc/nginx/nginx.conf","offset":1,"limit":500},
-                  "result": sc({"content":numbered_conf,"sha256":"3b1f0c9a77d4e5628f14b0a9c3e7d215884ab6f0c9d3e71a25b8f4c60d97ea31",
-                                "bytes":812,"total_lines":30})}
+                  "result": sc({"content":numbered_conf,
+                                "sha256":hashlib.sha256(raw_conf.encode()).hexdigest(),
+                                "bytes":len(raw_conf.encode()),"total_lines":len(conf.split("\n"))})}
 F["file_write"] = {"input":{"host":"web-01","path":"/etc/nginx/conf.d/gzip.conf","content":"gzip_comp_level 5;\n","mode":"0644"},
                    "result": sc({"sha256":"9c1d7e4a02b58f36ad91c0e7452b8d9f31607ca4de82b195f0c73a6e8d24b7f5","bytes":19,
                                  "non_atomic":True,"warning":"目标文件系统不支持覆盖 rename，已退化为先删后写"})}
@@ -170,7 +180,8 @@ diff = "\n".join([
  "-    access_log  /var/log/nginx/access.log;","+    access_log  /var/log/nginx/access.log combined buffer=32k flush=5s;",
  "+    log_not_found off;","     error_log   /var/log/nginx/error.log warn;"," ","     gzip on;","@@ -25,4 +26,5 @@",
  "     gzip_types text/plain application/json application/javascript text/css;"," ",
- "+    client_max_body_size 32m;","     include /etc/nginx/conf.d/*.conf;"])
+ "+    client_max_body_size 32m;","     include /etc/nginx/conf.d/*.conf;",
+ "     include /etc/nginx/sites-enabled/*;"])
 F["file_edit"] = {"input":{"host":"web-01","path":"/etc/nginx/nginx.conf",
                            "edits":[{"old_text":"access_log  /var/log/nginx/access.log;","new_text":"access_log  /var/log/nginx/access.log combined buffer=32k flush=5s;"}],
                            "expected_sha256":"3b1f0c9a77d4e5628f14b0a9c3e7d215884ab6f0c9d3e71a25b8f4c60d97ea31"},
@@ -292,9 +303,49 @@ TITLES = {
     "image_view": "远程图片"
 }
 
+
+# 错误态要用该工具**真的会返回**的那句话，否则画廊里演示的是一个不可能出现的失败。
+# 取值都对照 internal/mcpserver/auth.go、jobs.go、memory.go 与 execx/runner.go 的原文。
+HOST_DENIED = "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+MANAGE_DENIED = "host management not authorized\n该令牌没有 manage_hosts 权限。"
+ERRORS = {
+    "hosts_list": "unauthorized",
+    "hosts_manage_list": MANAGE_DENIED,
+    "host_create": MANAGE_DENIED,
+    "host_update": MANAGE_DENIED,
+    "host_test": MANAGE_DENIED,
+    "host_reset_fingerprint": MANAGE_DENIED,
+    "host_delete": MANAGE_DENIED,
+    "exec": HOST_DENIED,
+    "session_env": HOST_DENIED,
+    "output_read": "artifact 已过期或不存在",
+    "exec_many": "hosts 不能为空",
+    "job_start": HOST_DENIED,
+    "job_list": HOST_DENIED,
+    "job_status": "unknown job: job_7cf3a91e",
+    "job_logs": "job not authorized: job_7cf3a91e",
+    "job_kill": "unknown job: job_51ac7f23",
+    "file_read": HOST_DENIED,
+    "file_write": HOST_DENIED,
+    "file_edit": HOST_DENIED,
+    "file_list": HOST_DENIED,
+    "file_transfer": HOST_DENIED,
+    "grep": HOST_DENIED,
+    "find": HOST_DENIED,
+    "memory_remember": HOST_DENIED,
+    "memory_recall": HOST_DENIED,
+    "memory_list": HOST_DENIED,
+    "memory_update": "memory 不存在: 184",
+    "memory_forget": "memory 不存在: 118",
+    "memory_stats": "unauthorized",
+    "memory_sleep": HOST_DENIED,
+    "host_status": "暂无监控数据，可使用 fresh=true",
+    "image_view": HOST_DENIED,
+}
+
 for tool, data in F.items():
     data["title"] = TITLES[tool]
-    data.setdefault("error", {"content":[{"type":"text","text":"host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"}],"isError":True})
+    data.setdefault("error", {"content":[{"type":"text","text":ERRORS[tool]}],"isError":True})
     with open(os.path.join(out, tool + ".json"), "w", encoding="utf-8") as fh:
         json.dump(data, fh, ensure_ascii=False, indent=2)
 expected = ("hosts_list hosts_manage_list host_create host_update host_test host_reset_fingerprint host_delete "

@@ -8,6 +8,12 @@
 
   var PROTOCOL_VERSION = "2026-01-26";
   var INIT_TIMEOUT_MS = 3000;
+  /* 卡片自己支持的显示模式，握手时随 appCapabilities 一起报给宿主。
+     CONTRACT §2.1 写的是 appCapabilities:{}，这里刻意多报一项：availableDisplayModes 才是宿主
+     判断「能不能给它全屏」的依据，什么都不声明的宿主完全有理由直接拒绝 ui/request-display-mode，
+     而卡片右上角还挂着一个点不动的全屏按钮——对用户来说那比少一个按钮更糟。
+     canFullscreen() 也从这份列表出发，声明与按钮不会各说各话。 */
+  var APP_DISPLAY_MODES = ["inline", "fullscreen"];
   /* 卡片发起的只读调用要覆盖服务端真实的执行边界，而不是凭感觉给一个短值：
      host_status 的现场采样带一秒静置、job_list 会逐台刷新任务，主机一多就远超 20 秒。
      超时太短的后果是服务端明明还在正常处理，卡片却已经报「宿主没有响应」并丢弃了回包。
@@ -68,6 +74,13 @@
     var loc = state.locale;
     if (!loc || typeof loc !== "string") return zh;
     return /^zh/i.test(loc) ? zh : (en == null ? zh : en);
+  }
+
+  // 文档 lang 必须跟着我们真正渲染出来的那套文案走，而不是照抄宿主 locale：
+  // t() 只有中英两套，宿主报 fr-FR 时正文其实是英文，标成 fr 只会让读屏器用法语规则念英文。
+  // 复用 t() 本身做判断，文案与发音规则不会各走各的。
+  function applyLang() {
+    document.documentElement.lang = t("zh-CN", "en");
   }
 
   function append(parent, child) {
@@ -816,7 +829,7 @@
     }, INIT_TIMEOUT_MS);
     request("ui/initialize", {
       appInfo: { name: "onessh-" + state.expectedTool, version: "1.0.0" },
-      appCapabilities: {},
+      appCapabilities: { availableDisplayModes: APP_DISPLAY_MODES },
       protocolVersion: PROTOCOL_VERSION
     }, INIT_TIMEOUT_MS).then(function (result) {
       if (settled) return;
@@ -927,7 +940,7 @@
       docEl.setAttribute("data-display-mode", patch.displayMode);
     }
     if (Array.isArray(patch.availableDisplayModes)) state.displayModes = patch.availableDisplayModes;
-    if (typeof patch.locale === "string") state.locale = patch.locale;
+    if (typeof patch.locale === "string") { state.locale = patch.locale; applyLang(); }
     var dims = patch.containerDimensions;
     if (dims && numeric(dims.maxHeight) !== null) {
       state.maxHeight = numeric(dims.maxHeight);
@@ -976,8 +989,14 @@
    * 回调、导航与显示模式
    * ------------------------------------------------------------------ */
 
+  // 宿主是否宣告了 serverTools。can() 与 callTool() 共用同一判断，
+  // 免得出现「按钮说能点、真按下去却发到一个没人应答的通道」。
+  function hasServerTools() {
+    return !!(state.hostCapabilities && state.hostCapabilities.serverTools);
+  }
+
   function canCallHost() {
-    return !!(state.hostCapabilities && state.hostCapabilities.serverTools) ||
+    return hasServerTools() ||
       !!(window.openai && typeof window.openai.callTool === "function");
   }
 
@@ -989,7 +1008,10 @@
     if (!can(name)) {
       return Promise.reject(new Error(t("该工具不允许从卡片调用", "This tool cannot be called from the card")));
     }
-    if (state.bridged) return request("tools/call", { name: name, arguments: args || {} });
+    // 握手成功不等于宿主接 tools/call：只有它确实宣告了 serverTools 才走标准通道。
+    // 从前只看 state.bridged，遇到「新桥握手 + 只有旧版 callTool」的宿主，请求会发进一个
+    // 没人应答的方法，刷新与导航全部超时失败，而旁边那条旧接口本来是通的。
+    if (state.bridged && hasServerTools()) return request("tools/call", { name: name, arguments: args || {} });
     if (window.openai && typeof window.openai.callTool === "function") {
       // 旧宿主的 callTool 可能永远不 settle，而 refresh/navigate 正卡在 setBusy(true) 上等它：
       // 没有超时就意味着按钮全禁用、状态永远停在 busy，用户毫无恢复手段。与 request() 同一套语义。
@@ -1018,6 +1040,8 @@
   function isFullscreen() { return state.displayMode === "fullscreen"; }
 
   function canFullscreen() {
+    // 宿主只会授予我们声明过的模式，所以先看自己的声明，再跟宿主给的清单取交集。
+    if (APP_DISPLAY_MODES.indexOf("fullscreen") < 0) return false;
     if (Array.isArray(state.displayModes) && state.displayModes.length) {
       return state.displayModes.indexOf("fullscreen") >= 0 || isFullscreen();
     }
@@ -1025,7 +1049,11 @@
   }
 
   function setDisplayMode(mode) {
-    if (state.bridged) {
+    var legacy = !!(window.openai && typeof window.openai.requestDisplayMode === "function");
+    // 与 callTool 同理：宿主从没在 hostContext 里报过 availableDisplayModes，就没有证据说明它接
+    // ui/request-display-mode——而 canFullscreen() 正是凭旧版接口的存在才把按钮显示出来的，
+    // 这时候把请求发进新桥只会石沉大海，不如走那条已知可用的旧接口。
+    if (state.bridged && (state.displayModes.length || !legacy)) {
       request("ui/request-display-mode", { mode: mode }).then(function (result) {
         applyHostContext({ displayMode: (result && result.mode) || mode });
         decorateChrome();
@@ -1033,7 +1061,7 @@
       }, function () { /* 宿主拒绝时保持现状 */ });
       return;
     }
-    if (window.openai && typeof window.openai.requestDisplayMode === "function") {
+    if (legacy) {
       try { window.openai.requestDisplayMode({ mode: mode }); } catch (err) { /* 忽略 */ }
       applyHostContext({ displayMode: mode });
       decorateChrome();
@@ -1411,8 +1439,14 @@
   function render(result) {
     /* 去重键要同时含参数：宿主复用同一个 iframe 发起第二次调用时，两次结果完全可能
        字节级相同（连着列两个空目录都是 {"entries":[]}），只比结果就会跳过重建，
-       卡片仍挂着上一次的路径/主机，看起来却像是这次调用的结果。 */
-    var key = stringify([state.input, result]);
+       卡片仍挂着上一次的路径/主机，看起来却像是这次调用的结果。
+
+       但参数要取「宿主这次调用的那份」，也就是导航栈底那份原始参数：用户点进
+       下一层之后 state.input 指向的是被导航工具的参数，此时宿主重放同一份结果
+       会算出另一个键，白白重建一次卡片、丢掉折叠态还抖一下高度。 */
+    var base = state.stack.length ? state.stack[0] : null;
+    var baseInput = base && base.input && typeof base.input === "object" ? base.input : state.input;
+    var key = stringify([baseInput, result]);
     // 宿主在同一次调用里可能重复推送同一份结果；重渲染会导致折叠态丢失和高度抖动。
     // 但 tool-input 会先把状态切成 running，直接早退就再没人把它切回去，
     // 「参数 → 内容相同的结果」这条常见重放序列会让卡片永远停在执行中。
@@ -1424,9 +1458,8 @@
     state.lastKey = key;
     // 宿主推来的结果永远属于 expectedTool（契约 §2.3），而 navigate 之后 state.tool 指向的是被导航的工具。
     // 不复位就会拿被导航工具的视图去渲染原工具的数据，轻则内容错乱，重则掉进兜底卡片。
-    if (state.stack.length) {
-      var base = state.stack[0];
-      state.input = base.input && typeof base.input === "object" ? base.input : {};
+    if (base) {
+      state.input = baseInput;
       state.stack.length = 0;
     }
     state.tool = state.expectedTool;
@@ -1447,6 +1480,7 @@
     state.tool = state.expectedTool;
     root = document.getElementById("root");
     syncCtx();
+    applyLang();   // shell.html 写死的 lang 只在宿主没报 locale 时才碰巧是对的，这里统一由运行时负责
     // 即便 ui 桥可用也先记下 openai globals 的初始快照：宿主会为切主题、切显示模式
     // 这类变化重放整份 globals，认不出「其实没换」就会把本地结果擦回启动时那一份。
     if (window.openai) lastGlobals = stringify(window.openai.toolOutput);

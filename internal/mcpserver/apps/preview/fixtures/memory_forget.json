@@ -19,7 +19,7 @@
     "content": [
       {
         "type": "text",
-        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+        "text": "memory 不存在: 118"
       }
     ],
     "isError": true

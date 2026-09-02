@@ -6,7 +6,6 @@ import (
 	"embed"
 	"encoding/hex"
 	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -28,7 +27,6 @@ const (
 	appLegacyTemplateKey    = "openai/outputTemplate"
 	appLegacyAccessibleKey  = "openai/widgetAccessible"
 	appLegacyCSPKey         = "openai/widgetCSP"
-	appLegacyDomainKey      = "openai/widgetDomain"
 	appLegacyBorderKey      = "openai/widgetPrefersBorder"
 	appLegacyDescriptionKey = "openai/widgetDescription"
 	appInvokingKey          = "openai/toolInvocation/invoking"
@@ -108,12 +106,12 @@ type appCatalog struct {
 	order   []string
 }
 
-func newAppCatalog(publicURL string, enabled bool) (*appCatalog, error) {
+func newAppCatalog(enabled bool) (*appCatalog, error) {
 	catalog := &appCatalog{enabled: enabled, entries: map[string]appEntry{}}
 	if !enabled {
 		return catalog, nil
 	}
-	catalog.uiMeta = appResourceMeta(publicURL)
+	catalog.uiMeta = appResourceMeta()
 	for _, binding := range appBindings {
 		html, err := assembleAppHTML(binding)
 		if err != nil {
@@ -133,35 +131,18 @@ func newAppCatalog(publicURL string, enabled bool) (*appCatalog, error) {
 
 // appResourceMeta 返回资源侧的标准 ui 元数据与旧版 openai 别名。
 // csp 两个域名列表都留空表示卡片不发起任何外部请求，宿主据此收紧沙箱 CSP。
-// domain 只在配置了 https 来源时发布：宿主用它给卡片分配独立沙箱源，http 或未配置时省略比给错更安全。
-func appResourceMeta(publicURL string) mcp.Meta {
+//
+// 这里刻意不发布 ui.domain：规范把它描述为「宿主分配的专用沙箱源，格式由宿主决定」，
+// 而我们手上只有网关自己的对外地址，两者不是一回事，填错反而可能让宿主分配不出沙箱。
+// 卡片正文完全自包含、不读写任何存储，也就没有「需要一个稳定独立源」的理由。
+func appResourceMeta() mcp.Meta {
 	csp := map[string]any{"connectDomains": []string{}, "resourceDomains": []string{}, "frameDomains": []string{}}
-	ui := map[string]any{"csp": csp, "prefersBorder": true}
-	meta := mcp.Meta{
-		"ui":                    ui,
+	return mcp.Meta{
+		"ui":                    map[string]any{"csp": csp, "prefersBorder": true},
 		appLegacyCSPKey:         map[string]any{"connect_domains": []string{}, "resource_domains": []string{}},
 		appLegacyBorderKey:      true,
 		appLegacyDescriptionKey: "OneSSH 工具结果卡片",
 	}
-	if domain := appWidgetDomain(publicURL); domain != "" {
-		ui["domain"] = domain
-		meta[appLegacyDomainKey] = domain
-	}
-	return meta
-}
-
-// 宿主拿 domain 去分配独立沙箱源，它必须是一个纯 origin。
-// 逐字符判前缀太容易漏：https://a.example?x=1 里没有斜杠，却已经不是 origin 了。
-// 交给 url.Parse 逐项排除路径、查询、片段和用户信息，宁可不发布也不发一个宿主解析不了的值。
-func appWidgetDomain(publicURL string) string {
-	parsed, err := url.Parse(strings.TrimSpace(publicURL))
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" ||
-		parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery ||
-		parsed.Fragment != "" || parsed.RawFragment != "" ||
-		(parsed.Path != "" && parsed.Path != "/") {
-		return ""
-	}
-	return "https://" + parsed.Host
 }
 
 // appResourceURI 把 HTML 内容哈希写进 URI。宿主按 URI 缓存卡片正文，

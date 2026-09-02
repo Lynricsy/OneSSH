@@ -322,7 +322,13 @@
     // 翻页步长必须等于服务端真正使用的页大小，所以这里照抄 memory_list 的钳位规则（默认 50、下限 1、上限 200）：
     // 用本页条数兜底会把最后一页当成满页，传了超限的 limit 又会把真的满页当成末页，两头都会翻错。
     var limit = limitRaw !== null && limitRaw > 0 ? Math.max(1, Math.min(200, Math.floor(limitRaw))) : 50;
-    var hasMore = list.length > 0 && list.length >= limit;
+    // 服务端只回这一页的 memories，既没有 total 也没有 has_more（见 memory.go 的 memory_list），
+    // 所以满页时「后面还有没有」是真的不知道：条数正好是 limit 整数倍的 bank，最后一满页翻过去就是空的。
+    // 这里不假装知道，也不假装没有——满页允许翻，但按钮旁边写明这一下只是试探，
+    // 空页再直说「offset 越过末尾了」，用户就不会把翻空当成记忆丢了。
+    var maybeMore = list.length > 0 && list.length >= limit;
+    var maybeMoreWhy = t("服务端不返回总条数，满页时无法判断后面还有没有；翻过去是空页，就说明刚才那页已经是末尾。",
+      "The server returns no total, so a full page cannot tell whether more exist; an empty next page means the previous one was the end.");
 
     var status = [];
     status.push(list.length
@@ -331,8 +337,11 @@
     // 第一页不必强调起始位置，只有翻过页之后「我现在在哪」才是真问题。
     if (offset > 0) status.push(ui.pill("muted", t("第 " + fmt.num(offset + 1) + " 条起", "from #" + fmt.num(offset + 1))));
 
+    // 越界的空页不能只说「这一页没有」：用户刚点完「下一页」，需要知道这是翻到头了、记忆还在前面。
+    // 不写「上一页就是末尾」是因为 offset 也可能是模型直接传进来的大数，那时末尾远在更前面。
     var body = list.length ? memoryStack(list) : ui.empty(offset > 0
-      ? t("这一页已经没有记忆了，回上一页看看。", "This page is empty — try the previous page.")
+      ? t("这个 offset 已经越过 bank 的末尾，这里没有记忆了，往前翻才能看到已有的内容。",
+        "This offset is past the end of the bank — page back to see the memories that are there.")
       : t("这个 bank 还没有记忆", "This bank has no memories yet"));
 
     var pager = null;
@@ -345,10 +354,12 @@
         }),
         ui.button({
           label: t("下一页", "Next"),
-          disabled: !hasMore,
+          disabled: !maybeMore,
+          title: maybeMore ? maybeMoreWhy : null,
           onClick: function () { ctx.refresh({ offset: offset + limit, limit: limit }); }
         }),
-        meta(t("每页 " + fmt.num(limit) + " 条", fmt.num(limit) + " per page"))
+        meta(t("每页 " + fmt.num(limit) + " 条", fmt.num(limit) + " per page")),
+        maybeMore ? meta(t("本页已满，可能还有", "Page is full — there may be more"), maybeMoreWhy) : null
       );
     }
 
@@ -371,17 +382,16 @@
     var id = numOf(data.id);
     if (id === null) id = numOf(args.id);
     var embedded = data.embedded;
-    // embedded 是「这条记忆现在有没有向量」，不是「本次重建过向量」：后端只在正文真的变了时才重算，
-    // 只改 importance/veracity 时向量原封不动。所以这里的措辞必须跟着 args.content 走，
-    // 否则一次纯重要度调整会被写成「已随新正文重建」，整张卡在说一件没发生的事。
+    // embedded 只说明「这条记忆现在有没有向量」。卡片无法断言这次是否重建过：
+    // 引擎只在正文与库里的旧正文真的不同时才重算（memoryx/engine.go 的 Update），
+    // 而回执里没有旧正文，传了一份与原文一模一样的 content 同样什么都不会重算。
+    // 所以下面一律只陈述当前状态。好在这个状态本身是够用的：embedded=true 时向量必定是按当前正文建的
+    //（正文一变就会清空重建，重建失败则落到 embedded=false），说「与当前正文一致」在两种情况下都成立。
     var content = textOf(args.content);
 
     var chips = [];
-    if (embedded === true) {
-      chips.push(ui.chip(content ? t("向量已重建", "Re-embedded") : t("已有向量", "Embedded")));
-    } else if (embedded === false) {
-      chips.push(ui.pill("muted", content ? t("向量未重建", "Not re-embedded") : t("无向量", "No vector")));
-    }
+    if (embedded === true) chips.push(ui.chip(t("有向量", "Embedded")));
+    else if (embedded === false) chips.push(ui.pill("muted", t("无向量", "No vector")));
 
     var importance = numOf(args.importance);
     var veracity = textOf(args.veracity);
@@ -408,15 +418,22 @@
       status: ui.pill("ok", t("已更新", "Updated")),
       body: ui.stack(
         changed,
+        // 改了正文却没有向量，是这次调用留下的一个真实后果：引擎会先清掉旧向量再重建，
+        // 没配 embedding 服务或重建失败都只写日志、不报错，于是这条记忆从此只剩关键词能召回。
+        // 两种原因回执里分不出来，就都说出来，别替服务端认定是「失败」。
+        content && embedded === false
+          ? ui.note(t("这条记忆现在没有语义向量：可能没有配置 embedding 服务，也可能本次重建失败。之后只能靠关键词召回。",
+            "This memory now has no vector — either no embedding service is configured, or the rebuild failed. It can only be recalled by keyword from now on."), "warn")
+          : null,
         ui.kv([
           { label: t("记忆 ID", "Memory ID"), value: id === null ? "" : "#" + id, mono: true },
           {
             label: t("向量", "Embedding"),
             value: embedded === true
-              ? (content ? t("已随新正文重建", "Rebuilt for the new content")
+              ? (content ? t("与当前正文一致", "Matches the current content")
                 : t("未受本次修改影响", "Untouched by this update"))
               : (embedded === false
-                ? (content ? t("正文已改，但没能重建向量", "Content changed but re-embedding failed")
+                ? (content ? t("正文已更新，但现在没有向量", "Content updated, but there is no vector now")
                   : t("这条记忆没有向量", "This memory has no vector"))
                 : "")
           }
@@ -560,8 +577,19 @@
     var pruned = numOf(data.pruned);
     var touched = (deduped === null ? 0 : deduped) + (decayed === null ? 0 : decayed) + (pruned === null ? 0 : pruned);
 
+    // 回执里只有三个数字，作用域得从入参推：服务端 memoryBank() 把留空的 host 解释成全局 bank
+    // （host_id IS NULL），三条维护语句都只打在这一个 bank 上，不会波及别的主机。
+    // 这是一次会真删记忆的操作，「删的是哪一批」必须写在脸上，所以作用域既进 chip 也进正文那句话；
+    // 措辞里点明「没有指定 host」，万一宿主没回传参数，用户也能看出这句话是据什么说的。
+    var host = textOf(args.host);
+    var scope = host
+      ? t("主机 bank「" + host + "」", "the " + host + " host bank")
+      : t("全局 bank", "the global bank");
+
     var summary = touched === 0
-      ? ui.empty(t("这个 bank 当前没有需要整理的记忆", "Nothing in this bank needed cleaning up"))
+      ? ui.empty(host
+        ? t("主机 bank「" + host + "」当前没有需要整理的记忆", "Nothing in the " + host + " host bank needed cleaning up")
+        : t("全局 bank 当前没有需要整理的记忆", "Nothing in the global bank needed cleaning up"))
       : ui.metrics([
         { label: t("去重合并", "Deduped"), value: fmt.num(deduped) },
         { label: t("重要度衰减", "Decayed"), value: fmt.num(decayed) },
@@ -572,10 +600,17 @@
     return ui.card({
       kicker: "MEMORY",
       title: t("记忆维护", "Memory upkeep"),
-      chips: [bankChip(args.host)],
+      // host 留空时服务端用的 bank 名就叫 global，chip 里照写，别留空让人以为「全都整理了」。
+      chips: [bankChip(host || "global")],
       status: ui.pill("ok", t("已完成", "Done")),
       body: ui.stack(
         summary,
+        ui.note(host
+          ? t("本次只维护了" + scope + "，全局 bank 和其他主机的记忆不受影响。",
+            "Only " + scope + " was maintained; the global bank and other hosts were left alone.")
+          : t("本次调用没有指定 host，维护的是" + scope + "（所有主机共用的那批记忆），各主机自己的 bank 不受影响。",
+            "No host was given, so " + scope + " — the memories shared across hosts — was maintained; per-host banks were left alone."),
+          "info"),
         ui.note(
           t("维护是确定性规则：合并重复正文、30 天未召回的重要度乘 0.9、90 天从未召回且重要度不足 0.1 的清理掉。",
             "Upkeep follows fixed rules: merge duplicate content, multiply weight by 0.9 for memories not recalled in 30 days, and prune those never recalled in 90 days whose weight is below 0.1."),

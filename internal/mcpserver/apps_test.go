@@ -129,8 +129,7 @@ func TestAppBindingsCoverEveryTool(t *testing.T) {
 }
 
 func TestAppsExposeResourceForEveryTool(t *testing.T) {
-	const publicURL = "https://ssh.example.com"
-	session := newAppTestSession(t, publicURL, true)
+	session := newAppTestSession(t, "https://ssh.example.com", true)
 	tools := listAppTools(t, session)
 	resources := listAppResources(t, session)
 	if len(resources) != len(tools) {
@@ -168,8 +167,9 @@ func TestAppsExposeResourceForEveryTool(t *testing.T) {
 		if resourceUI == nil || resourceUI["prefersBorder"] != true {
 			t.Errorf("资源 %s 缺少标准 ui 元数据：%#v", uri, resource.Meta)
 		}
-		if resourceUI["domain"] != publicURL {
-			t.Errorf("资源 %s 的 domain = %#v，应为 %s", uri, resourceUI["domain"], publicURL)
+		// 卡片正文自包含，不申请专用沙箱源，因此不该发布 domain
+		if _, exists := resourceUI["domain"]; exists {
+			t.Errorf("资源 %s 不应发布 ui.domain：%#v", uri, resourceUI)
 		}
 	}
 }
@@ -229,7 +229,7 @@ func TestAppResourcesAreSelfContained(t *testing.T) {
 
 // 每张卡片只带自己那一组视图：同组工具要能互相导航，跨组代码则不该占用体积。
 func TestAppResourceCarriesOnlyItsOwnGroupViews(t *testing.T) {
-	catalog, err := newAppCatalog("", true)
+	catalog, err := newAppCatalog(true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,39 +267,22 @@ func TestAppsDisabledRemovesResourcesAndMeta(t *testing.T) {
 			t.Errorf("关闭卡片后 %s 仍带有 UI 元数据：%#v", name, tool.Meta)
 		}
 	}
-	if resources, err := session.ListResources(context.Background(), nil); err == nil && len(resources.Resources) != 0 {
+	// 出错就直接失败：用 err == nil 做前置守卫的话，resources/list 整条路径坏掉时这个断言会被静默跳过
+	resources, err := session.ListResources(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("关闭卡片后 ListResources 出错: %v", err)
+	}
+	if len(resources.Resources) != 0 {
 		t.Errorf("关闭卡片后仍列出 %d 个资源", len(resources.Resources))
 	}
 }
 
-func TestAppWidgetDomainRequiresBareHTTPSOrigin(t *testing.T) {
-	cases := map[string]string{
-		"https://ssh.example.com":      "https://ssh.example.com",
-		"https://ssh.example.com:8443": "https://ssh.example.com:8443",
-		"https://ssh.example.com/":     "https://ssh.example.com",
-		"http://127.0.0.1:8866":        "",
-		"https://ssh.example.com/mcp":  "",
-		"https://ssh.example.com?x=1":  "",
-		"https://ssh.example.com#frag": "",
-		"https://user@ssh.example.com": "",
-		"https://ssh.example.com?":     "",
-		"ftp://ssh.example.com":        "",
-		"ssh.example.com":              "",
-		"":                             "",
-	}
-	for input, want := range cases {
-		if got := appWidgetDomain(input); got != want {
-			t.Errorf("appWidgetDomain(%q) = %q，期望 %q", input, got, want)
-		}
-	}
-}
-
 func TestAppResourceURIIsStableForSameContent(t *testing.T) {
-	first, err := newAppCatalog("", true)
+	first, err := newAppCatalog(true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := newAppCatalog("", true)
+	second, err := newAppCatalog(true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +334,14 @@ func TestLegacyWidgetResourceServesSkybridgeMIME(t *testing.T) {
 		}
 	}
 	// 版本对不上说明宿主用的是缓存里的旧地址，此时应当报未找到而不是回一份新正文。
-	stale := appLegacyPrefix + "00000000/exec"
+	// 工具名从会话里现取，避免写死的名字被改掉之后这条断言变成「工具不存在」而不再检验版本分支。
+	anyTool := ""
+	for name := range tools {
+		if anyTool == "" || name < anyTool {
+			anyTool = name
+		}
+	}
+	stale := appLegacyPrefix + "00000000/" + anyTool
 	if _, err := session.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: stale}); err == nil {
 		t.Fatal("过期的旧版 URI 应当读取失败")
 	}

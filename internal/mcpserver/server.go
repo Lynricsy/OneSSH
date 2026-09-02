@@ -66,7 +66,7 @@ func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanage
 	s.Monitor = monitor.New(st, pool, s.Exec, pollInterval)
 	s.MCP = newProtocolServer(publicURL)
 	// 卡片资产在编译期内嵌，组装失败只可能是资产本身有问题，属于必须立刻暴露的构建错误。
-	apps, err := newAppCatalog(publicURL, mcpApps)
+	apps, err := newAppCatalog(mcpApps)
 	if err != nil {
 		log.Fatalf("组装 MCP Apps 卡片失败: %v", err)
 	}

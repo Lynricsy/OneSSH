@@ -52,12 +52,18 @@
       .map(function (tag) { return String(tag); });
   }
 
-  // hosts_list 的 addr 自带端口，管理接口则把 port 拆了出来，这里只负责后者的拼接。
+  // hosts_list 的 addr 自带端口（Go 侧用 net.JoinHostPort 拼好再下发），管理接口则把 port
+  // 拆了出来，这里只负责后者的拼接 —— 两张表并排时地址列必须是同一种写法。
   function endpoint(item) {
     var addr = textOf(item.addr);
     if (!addr) return "";
     var port = numOf(item.port);
-    return port === null ? addr : addr + ":" + port;
+    if (port === null) return addr;
+    // IPv6 字面量必须套方括号：fe80::1:22 里的末段既可能是端口也可能是地址的一部分，
+    // 而 sshpool 真正拨号用的也是 [fe80::1]:22，照抄这行才能直接粘进 ssh/scp。
+    // addr 自带方括号时不再套一层，免得写出 [[fe80::1]]:22。
+    var host = addr.indexOf(":") >= 0 && addr.charAt(0) !== "[" ? "[" + addr + "]" : addr;
+    return host + ":" + port;
   }
 
   function authLabel(item) {
@@ -318,9 +324,13 @@
     var cwd = textOf(data.cwd);
     var lineCount = numOf(data.total_lines);
     var stderr = textOf(data.stderr);
-    // output 是合并流，为空时退回 stdout：网关在某些路径下只填了后者。
-    var stdout = textOf(data.stdout);
-    var out = textOf(data.output) || stdout;
+    // execx.Runner 的 output 是「stdout 后接 stderr」拼成的合并流（再按 max_lines 截断），
+    // 所以有 stderr 时拿 output 当标准输出，会让同一段报错在两个页签里各出现一遍。
+    // 有 stderr 就只认 data.stdout；没有 stderr 时两者内容本就相同，但只有 output 走过
+    // 行数截断，用它才和上面那个「输出行数」以及「已截断」提示对得上。
+    // data.stdout 兜底是防御性的：万一网关只填了 stdout 没填 output，别把有内容说成空。
+    var merged = textOf(data.output);
+    var stdout = stderr ? textOf(data.stdout) : (merged || textOf(data.stdout));
 
     var status;
     if (timeout) status = ui.pill("warn", t("超时", "Timed out"));
@@ -347,7 +357,7 @@
         "The output was truncated; this only affects the display, not the connectivity verdict"), "warn"));
     }
 
-    if (!out && !stderr) {
+    if (!stdout && !stderr) {
       body.push(code === 0
         ? ui.empty(t("命令没有输出，退出码为 0 即表示连接与登录正常",
           "No output; exit code 0 already means the connection and login are fine"))
@@ -357,8 +367,8 @@
       body.push(ui.tabs([
         {
           label: t("标准输出", "stdout"),
-          node: out
-            ? ui.terminal({ text: out, title: t("uptime 输出", "uptime output") })
+          node: stdout
+            ? ui.terminal({ text: stdout, title: t("uptime 输出", "uptime output") })
             : ui.empty(t("标准输出为空", "stdout is empty"))
         },
         {
@@ -368,7 +378,7 @@
         }
       ]));
     } else {
-      body.push(ui.terminal({ text: out, title: t("uptime 输出", "uptime output") }));
+      body.push(ui.terminal({ text: stdout, title: t("uptime 输出", "uptime output") }));
     }
 
     return ui.card({

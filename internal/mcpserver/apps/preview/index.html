@@ -71,7 +71,7 @@ const HOST_VARS = {
          "--color-text-secondary":"#b4b4b4","--color-border-primary":"#3d3d3d","--border-radius-md":"12px"},
 };
 const el = id => document.getElementById(id);
-const state = {tool:null, theme:"light", error:false, fixtures:{}, assets:null, pending:null};
+const state = {tool:null, theme:"light", error:false, fixtures:{}, assets:null, seq:0, resultTimer:null};
 
 function logLine(text){ const box=el("log"); box.textContent += text+"\n"; box.scrollTop = box.scrollHeight; }
 
@@ -91,10 +91,13 @@ function buildHTML(tool, group, title){
     .replace("{{STYLE}}", a.style).replace("{{RUNTIME}}", a.runtime).replace("{{VIEW}}", a.views[group]);
 }
 
-async function fixture(tool){
-  if (state.fixtures[tool] !== undefined) return state.fixtures[tool];
-  try { state.fixtures[tool] = await fetch("fixtures/"+tool+".json?t="+Date.now()).then(r=>r.ok?r.json():null); }
-  catch { state.fixtures[tool] = null; }
+// 缓存的是 promise 而不是结果：同一个工具被连点两次时只发一次请求，
+// 两次 await 也一定拿到同一个对象，不会出现「后发先至」。
+function fixture(tool){
+  if (!(tool in state.fixtures)) {
+    state.fixtures[tool] = fetch("fixtures/"+tool+".json?t="+Date.now())
+      .then(r => r.ok ? r.json() : null).catch(() => null);
+  }
   return state.fixtures[tool];
 }
 
@@ -104,7 +107,11 @@ function reply(id, result){ send({jsonrpc:"2.0", id, result}); }
 
 window.addEventListener("message", async event => {
   const frame = el("frame");
-  if (!frame.contentWindow || event.source !== frame.contentWindow) return;
+  // 每次 show() 都会重写 srcdoc，iframe 会换一个全新的 window。把它连同 state.seq 一起记下来，
+  // 任何 await 之后都要拿它对账，否则回执与推送会落进已经换过一张卡的 iframe。
+  const win = event.source;
+  const seq = state.seq, tool = state.tool;
+  if (!frame.contentWindow || win !== frame.contentWindow) return;
   const msg = event.data;
   if (!msg || msg.jsonrpc !== "2.0") return;
   if (msg.method) logLine("← " + msg.method + (msg.params && msg.params.height ? " height="+msg.params.height : ""));
@@ -125,10 +132,16 @@ window.addEventListener("message", async event => {
     return;
   }
   if (msg.method === "ui/notifications/initialized") {
-    const data = await fixture(state.tool);
-    if (!data) { logLine("！缺少 fixtures/"+state.tool+".json"); return; }
+    const data = await fixture(tool);
+    // 连点两次工具时，这次 await 完全可能在新卡片装好之后才 resolve。
+    if (seq !== state.seq || frame.contentWindow !== win) return;
+    if (!data) { logLine("！缺少 fixtures/"+tool+".json"); return; }
     notify("ui/notifications/tool-input", {arguments: data.input || {}});
-    setTimeout(() => {
+    // 这 500ms 是故意留的「工具执行中」窗口，用来验收等待态；但它跨越了用户切卡片的时机，
+    // 到点时必须确认台上还是同一张卡，不然推过去的就是上一个工具的结果。
+    state.resultTimer = setTimeout(() => {
+      state.resultTimer = null;
+      if (seq !== state.seq || frame.contentWindow !== win) return;
       const result = state.error
         ? (data.error || {content:[{type:"text",text:"host not authorized: web-01"}], isError:true})
         : data.result;
@@ -141,14 +154,15 @@ window.addEventListener("message", async event => {
     return;
   }
   if (msg.method === "tools/call") {
-    const data = await fixture(state.tool);
+    const data = await fixture(tool);
     const canned = (data && data.calls && data.calls[msg.params.name]) || (await fixture(msg.params.name));
+    if (seq !== state.seq || frame.contentWindow !== win) return;   // 卡片已经换人，这条回执不该发过去
     reply(msg.id, canned ? (canned.result || canned) : {content:[{type:"text",text:"预览画廊没有为该调用准备数据"}], isError:true});
     return;
   }
   if (msg.method === "ui/request-display-mode") {
     reply(msg.id, {mode: msg.params.mode});
-    document.querySelector(".frame-wrap").style.maxWidth = msg.params.mode === "fullscreen" ? "100%" : "";
+    el("wrap").style.maxWidth = msg.params.mode === "fullscreen" ? "100%" : "";
     return;
   }
   if (msg.id !== undefined) reply(msg.id, {});
@@ -156,14 +170,21 @@ window.addEventListener("message", async event => {
 
 async function show(tool){
   const entry = TOOLS.find(t => t[0] === tool);
+  if (!entry) return;
+  const seq = ++state.seq;              // 每次切换领一个序号，await 回来发现自己不是最新的就整个作废
   state.tool = tool;
+  clearTimeout(state.resultTimer);      // 上一张卡还挂着的结果推送，绝不能落进即将装好的新 iframe
+  state.resultTimer = null;
   el("current").textContent = tool + " · " + entry[2];
   for (const node of document.querySelectorAll(".item")) node.classList.toggle("active", node.dataset.tool === tool);
   el("log").textContent = "";
   const frame = el("frame");
   frame.style.height = "120px";
-  frame.srcdoc = buildHTML(tool, entry[1], (await fixture(tool))?.title || entry[2]);
-  el("hint").textContent = (await fixture(tool)) ? "" : "缺少 fixture";
+  el("wrap").style.maxWidth = "";       // 新卡片从 inline 起步，容器也得跟着退出上一张卡的全屏
+  const data = await fixture(tool);
+  if (seq !== state.seq) return;        // 期间又点了别的工具，交给最新那次去写 srcdoc
+  frame.srcdoc = buildHTML(tool, entry[1], (data && data.title) || entry[2]);
+  el("hint").textContent = data ? "" : "缺少 fixture";
 }
 
 function boot(){

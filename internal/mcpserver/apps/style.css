@@ -12,11 +12,15 @@
   --border:   var(--color-border-primary,       light-dark(#e3e6ea, #262b33));
   --border-2: var(--color-border-secondary,     light-dark(#eef0f3, #1f242b));
   --text:     var(--color-text-primary,         light-dark(#17191c, #e6e9ed));
-  --muted:    var(--color-text-secondary,       light-dark(#5c6470, #8b94a1));
-  /* 三级文字压在 9.5–11.5px 的标签、表头、kicker 上，颜色再淡一点就读不出来了。
-     不挂宿主的 --color-text-tertiary：实拍里宿主给的三级色比这里的兜底值还淡，
-     表头与指标标签只剩 3.3:1；改挂二级色，宿主没给时用兜底值（浅 4.83:1 / 深 5.02:1）。 */
+  /* --faint 是 9.5–11.5px 的标签、表头、kicker 用色，是全卡最容易读不出来的一档。
+     不挂宿主的 --color-text-tertiary：实拍里宿主的三级色淡到 3.3:1，小字直接不合规。
+     宿主的二级色是它自己给「次要文字」定的下限，拿它当三级色是安全的。 */
   --faint:    var(--color-text-secondary,       light-dark(#6b7280, #7d8794));
+  /* 两级文字的落差只能往「更深」的方向拉：4.83:1 的浅色兜底再往浅里推 12% 就掉到 3.8:1，
+     所以 --muted 不再与 --faint 抢同一个宿主变量，而是从三级色朝正文推一档（26%）。
+     这样宿主只下发 --color-text-secondary 时两级仍分得开，深的一档也只会更清楚：
+     纯兜底下浅色 4.83 → 6.83:1、深色 5.02 → 6.96:1。 */
+  --muted:    color-mix(in srgb, var(--faint) 74%, var(--text) 26%);
   --accent:      light-dark(#0d9488, #2dd4bf);
   /* 实心按钮要托白字，浅色 accent 上只有 3.74:1；加深一档到 5.47:1，非文字场景仍用 --accent */
   --accent-strong: light-dark(#0f766e, #2dd4bf);
@@ -180,7 +184,7 @@ body {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .metric-label {
-  /* 标签是「这个大数字是什么」的唯一说明，用 --faint 在深色底上只剩 3.17:1，读不出来 */
+  /* 标签是「这个大数字是什么」的唯一说明，跟着数值走深的一档，不用 --faint */
   margin-top: 2px; font-size: 10px; font-weight: 600; letter-spacing: .06em;
   text-transform: uppercase; color: var(--muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -504,13 +508,17 @@ body {
 }
 .icon-expand::before { left: 1.5px; top: 1.5px; border-right: 0; border-bottom: 0; }
 .icon-expand::after  { right: 1.5px; bottom: 1.5px; border-left: 0; border-top: 0; }
+/* 后一张纸只画左上两条边，与前一张完全不相交：复制按钮同时出现在 kv 行（卡片底）、
+   term-bar（--bg-2）和 hover 后的表格行上，用任何一种固定底色去挖掉重叠区，
+   都会在别的底色上露成一块补丁，所以这里不填充，靠错位表达叠放。 */
 .icon-copy::before {
-  content: ""; position: absolute; left: 1px; top: 1px; width: 7px; height: 9px;
-  border: 1.2px solid currentColor; border-radius: 2px; opacity: .5;
+  content: ""; position: absolute; left: 1px; top: 1px; width: 9px; height: 9px;
+  border-top: 1.2px solid currentColor; border-left: 1.2px solid currentColor;
+  border-radius: 2px 0 0 0; opacity: .65;
 }
-.icon-copy::after {                        /* 前一张纸用背景色挡住后一张，形成叠放关系 */
-  content: ""; position: absolute; left: 4px; top: 3px; width: 8px; height: 9px;
-  border: 1.2px solid currentColor; border-radius: 2px; background: var(--bg);
+.icon-copy::after {
+  content: ""; position: absolute; left: 3.5px; top: 3.5px; width: 8px; height: 8px;
+  border: 1.2px solid currentColor; border-radius: 2px;
 }
 .icon-dot::before {
   content: ""; position: absolute; left: 4.5px; top: 4.5px; width: 4px; height: 4px;

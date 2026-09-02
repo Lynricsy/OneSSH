@@ -14,6 +14,12 @@
   var ARTIFACT_FOLD = 40;   // artifact 本身就是翻页看的，折叠阈值给大一些
   var FANOUT_FOLD = 12;     // 批量执行按主机分块，每块只留一个概览的高度
 
+  /* 手绘终端块要自己复刻 ui.terminal 的两道防卡死闸门：字符上限 + 分页追加。
+     runtime 没把 TEXT_LIMIT / TERM_PAGE 导出，只能照同一量级在这里再写一遍；
+     数值有意与 runtime.js 保持一致，改一边就得改另一边。 */
+  var TEXT_CAP = 200000;
+  var TERM_PAGE = 500;
+
   /* ------------------------------------------------------------------ *
    * 取值：exit_code 0、timeout false、空字符串都是有效结果，
    * 一律显式判 null，绝不用 `||` 兜底，否则「成功」会被当成「字段缺失」。
@@ -114,17 +120,21 @@
 
   /* 服务端 execx.ReadArtifact 用 fmt.Sprintf("%d:%s", i+1, line) 拼行号，正文形如
      "401:2026-09-02T09:41:47 ..."；另有对齐成 "   401  正文" 的老格式。两种分隔符
-     都要认，只认其中一种就会在另一种上整段解析失败，退回顺推行号从而画出两列号码。 */
-  var GUTTER = /^\s*(\d+)(?::|\s\s|$)([\s\S]*)$/;
+     都要认，只认其中一种就会在另一种上整段解析失败，退回顺推行号从而画出两列号码。
+     分隔符单独捕获成 m[2]：只有一行时「行号递增」这条佐证不存在，得靠它顶上。 */
+  var GUTTER = /^\s*(\d+)(:|\s\s|$)([\s\S]*)$/;
 
   /* artifact 正文形如 "401:正文"，行号已经写死在文本里。直接丢给 ui.terminal
      会得到两列行号，所以先把行号列拆出来：
      - 行号连续 → 交回 ui.terminal（它的行号列是从 startLine 顺推的，正好对得上）；
-     - 行号有跳跃（被 grep 过滤过）→ 顺推出来的号码是编造的，只能自己画一遍。 */
-  function parseGutter(text) {
+     - 行号有跳跃（被 grep 过滤过）→ 顺推出来的号码是编造的，只能自己画一遍。
+     minLine 收本次请求的 offset：服务端从第 offset 条结果起切片（带 grep 时按匹配数计），
+     所以第一行的真实行号必然不小于它——这是单行正文唯一拿得到的校验。 */
+  function parseGutter(text, minLine) {
     var all = fmt.lines(text);
-    if (all.length < 2) return null;
-    var rows = [], last = null, firstIndex = -1, matched = 0, consecutive = true;
+    if (!all.length) return null;
+    if (!(minLine >= 1)) minLine = 1;
+    var rows = [], last = null, firstIndex = -1, firstSep = "", matched = 0, consecutive = true;
     for (var i = 0; i < all.length; i++) {
       if (all[i] === "") {
         // 空行没有可信的号码，此时顺推必然错位，改走手绘分支
@@ -139,12 +149,18 @@
         if (n <= last) return null;   // 行号必须递增，否则这只是碰巧像行号的正文
         if (n !== last + 1) consecutive = false;
       }
-      if (firstIndex < 0) firstIndex = i;
+      if (firstIndex < 0) { firstIndex = i; firstSep = m[2]; }
       last = n;
       matched++;
-      rows.push({ n: n, text: m[2] == null ? "" : m[2] });
+      rows.push({ n: n, text: m[3] == null ? "" : m[3] });
     }
-    if (matched < 2) return null;
+    if (!matched) return null;
+    /* 单行也必须解析出来：grep 只命中一条、或翻到最后一页时，output_read 就只返回一行。
+       不解析的话侧栏行号和正文自带的 "N:" 会一起出现（两列号码），连复制出去的都是带前缀的原文。
+       一行没有「递增」可比对，换两条弱一些的佐证兜底：分隔符必须真的出现过
+       ——否则 "1842" 这种纯数字正文会被当成一个空内容的行号，正文直接消失——
+       且号码不小于 offset。 */
+    if (matched === 1 && (firstSep === "" || rows[firstIndex].n < minLine)) return null;
     return {
       rows: rows,
       consecutive: consecutive,
@@ -162,37 +178,101 @@
 
   // 行号不连续时手工搭终端块。class 与 ui.terminal 完全一致，视觉上看不出区别，
   // 区别只在行号列填的是原文里的真实号码，而不是顺推出来的。
+  // 既然是复刻，ui.terminal 那两道防卡死闸门也得一并复刻，否则这条分支等于绕开了保护。
   function gutterTerm(rows, title, fold) {
+    /* output_read 一页可达 5000 行（limit 上限），每行长度不设限：一页上千条长匹配
+       全建成节点，光是布局测量就能把 iframe 卡死。所以先按字符上限裁一刀，
+       而且必须裁在建节点之前——裁完还要留一条明确提示，否则用户会以为 grep 就只匹配到这些。 */
+    var view = [], used = 0, dropped = 0, clipped = false;
+    for (var i = 0; i < rows.length; i++) {
+      if (used >= TEXT_CAP) { dropped = rows.length - i; break; }
+      var text = rows[i].text;
+      if (used + text.length > TEXT_CAP) {
+        // 和 ui.terminal 一样从行中间切：单行就撑爆预算时，半行内容仍比整行丢掉有用
+        text = text.slice(0, TEXT_CAP - used);
+        clipped = true;
+      }
+      view.push({ n: rows[i].n, text: text });
+      used += text.length + 1;   // +1 抵掉行分隔符，字符口径与 ui.terminal 的整段正文一致
+    }
+
     var box = h("div", { class: "term" });
     var actions = h("div", { class: "term-bar-actions" });
     box.appendChild(h("div", { class: "term-bar" },
       h("span", { class: "term-title", text: title }), actions));
-    var body = h("div", { class: "term-body" });
+    // 终端行不换行，长匹配的后半截只能横向滚动看到；滚动容器不可聚焦，纯键盘用户就读不到那截
+    var body = h("div", { class: "term-body", tabindex: "0", role: "region", "aria-label": title });
     box.appendChild(body);
 
-    var limit = rows.length > fold ? fold : rows.length;
     function line(number, text, dim) {
       var tx = h("span", { class: "term-tx", text: text });
       if (dim) tx.style.setProperty("color", "var(--term-dim)");
       return h("div", { class: "term-line" },
         h("span", { class: "term-ln", text: number == null ? "" : String(number) }), tx);
     }
-    function paint() {
-      while (body.firstChild) body.removeChild(body.firstChild);
-      for (var i = 0; i < limit; i++) body.appendChild(line(rows[i].n, rows[i].text, false));
-      if (limit < rows.length) {
-        body.appendChild(line(null, t("… 还有 ", "… ") + (rows.length - limit) + t(" 行", " more lines"), true));
+
+    var cap = fmt.num(TEXT_CAP);
+    var cutLine = null;
+    if (dropped > 0) {
+      // 说清「还有多少行」和「怎么拿到它们」：这一页翻不出被裁的部分，只能靠收窄查询
+      cutLine = line(null, t(
+        "… 内容过长，已截断至 " + cap + " 字符，另有 " + fmt.num(dropped) + " 行未渲染；缩小 limit 或收紧 grep 可以看到其余部分",
+        "… truncated at " + cap + " chars; " + fmt.num(dropped) + " more lines not rendered — narrow limit or tighten grep"), true);
+    } else if (clipped) {
+      cutLine = line(null, t("… 这一行过长，已截断至 " + cap + " 字符",
+        "… this line was truncated at " + cap + " chars"), true);
+    }
+
+    var shown = 0, restLine = null, toggle = null;
+
+    function syncToggle() {
+      if (!toggle) return;
+      var left = view.length - shown;
+      toggle.setAttribute("aria-expanded", shown > fold ? "true" : "false");
+      toggle._label.textContent = left === 0
+        ? t("收起", "Collapse")
+        : (left <= TERM_PAGE
+          ? t("展开全部（" + fmt.num(view.length) + " 行）", "Show all " + fmt.num(view.length) + " lines")
+          : t("再展开 " + TERM_PAGE + " 行（还有 " + fmt.num(left) + " 行）",
+            "Show " + TERM_PAGE + " more of " + fmt.num(left) + " lines"));
+    }
+
+    // 按页追加而不是一次铺完：字符上限之内照样能有几千行，一次建完节点同样会卡
+    function paintTo(upTo) {
+      if (restLine) { restLine.remove(); restLine = null; }
+      if (cutLine) cutLine.remove();
+      var end = Math.min(view.length, upTo);
+      for (var j = shown; j < end; j++) body.appendChild(line(view[j].n, view[j].text, false));
+      shown = end;
+      if (shown < view.length) {
+        restLine = line(null, t("… 还有 ", "… ") + fmt.num(view.length - shown) + t(" 行", " more lines"), true);
+        body.appendChild(restLine);
       }
+      if (cutLine) body.appendChild(cutLine);   // 截断提示永远压在最后一行
+      syncToggle();
     }
-    if (rows.length > fold) {
-      var more = ui.button({
-        label: t("展开全部（" + rows.length + " 行）", "Show all " + rows.length + " lines"),
-        onClick: function () { limit = rows.length; more.remove(); paint(); }
+
+    function collapse() {
+      while (body.firstChild) body.removeChild(body.firstChild);
+      restLine = null;
+      shown = 0;
+      paintTo(fold);
+    }
+
+    if (view.length > fold) {
+      toggle = ui.button({
+        label: "",   // 文案随展开进度变，交给 syncToggle 填
+        onClick: function () {
+          if (shown >= view.length) collapse();
+          else paintTo(shown + Math.max(TERM_PAGE, fold));
+        }
       });
-      actions.appendChild(more);
+      actions.appendChild(toggle);
     }
-    actions.appendChild(ui.copy(plainText(rows), t("复制", "Copy")));
-    paint();
+    // 复制的是裁剪后的 view 而非原始 rows：交出去的文本得和眼前看到的一致，
+    // 否则「复制」会悄悄塞进一份卡片从未渲染、也没提示过的内容。
+    actions.appendChild(ui.copy(plainText(view), t("复制", "Copy")));
+    paintTo(fold);
     return box;
   }
 
@@ -369,7 +449,7 @@
     var limit = int(args.limit);
 
     var title = artifact ? "artifact " + artifact : t("完整输出", "Full output");
-    var parsed = content ? parseGutter(content) : null;
+    var parsed = content ? parseGutter(content, offset) : null;
     var shown = parsed ? parsed.rows.length : lineCount(content);
     var first = parsed ? parsed.first : offset;
     var last = parsed ? parsed.last : (shown ? offset + shown - 1 : offset);

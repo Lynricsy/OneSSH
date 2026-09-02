@@ -74,14 +74,32 @@
     return dir.charAt(dir.length - 1) === "/" ? dir + name : dir + "/" + name;
   }
 
+  /* 服务端在 path 省略时自己填 "."（internal/mcpserver/files.go），因此「不传 path」和
+     「显式传 .」指的是同一个目录：卡片也必须当成同一个，否则从子目录退回起始目录之后，
+     标题会从「起始目录」变成一个孤零零的 "."。 */
+  function isHomePath(pathText) {
+    var raw = strOf(pathText);
+    return raw === "" || raw === ".";
+  }
+
   /* 面包屑：每一段都要能单独还原成一个可用的目录路径。
      绝对路径额外补一个 "/" 头，`~` 与相对路径则原样保留首段——把 `~/logs` 改写成 `/logs`
-     会指向完全不同的目录。 */
+     会指向完全不同的目录。
+     相对路径的根是登录用户的起始目录，所以再补一段指向 "." 的入口：这张卡片靠 ctx.refresh
+     原地换目录，而 runtime 的返回栈只认 ctx.navigate，返回按钮根本不会出现；起始目录下
+     点进 logs/ 之后，面包屑里就只剩下当前这一层（还是不可点的），用户走进去就出不来了。 */
   function crumbsOf(pathText) {
     var raw = strOf(pathText);
-    if (!raw) return [];
     var absolute = raw.charAt(0) === "/";
-    var out = absolute ? [{ label: "/", path: "/" }] : [];
+    var tilde = raw === "~" || raw.indexOf("~/") === 0;   // "~" 自己会作为首段进循环
+    var out = [];
+    if (absolute) out.push({ label: "/", path: "/" });
+    else if (!tilde) {
+      out.push({
+        label: t("起始目录", "Home"), path: ".",
+        title: t("回到登录用户的起始目录", "Back to the login user's home directory")
+      });
+    }
     var parts = raw.split("/");
     var prefix = "";
     for (var i = 0; i < parts.length; i++) {
@@ -91,8 +109,7 @@
       else prefix = prefix === "/" ? "/" + seg : prefix + "/" + seg;
       out.push({ label: seg, path: prefix });
     }
-    if (!out.length) out.push({ label: raw, path: raw });
-    return out;
+    return out;   // 三个分支各自都先塞了一段（"/"、起始目录、或 "~" 自己），不会是空的
   }
 
   function pathRow(label, value) {
@@ -148,15 +165,23 @@
     if (offset === null || offset < 1) offset = 1;
     var limit = numOf(args.limit);
 
-    var parsed = parseGutter(content, offset);
+    /* 空文件只认 bytes===0。服务端（internal/files 的 Manager.Read）用 strings.Split 切行，
+       0 字节的文件也会切出一个空行，回来的是 bytes:0 / total_lines:1 / content:"1:"——
+       total_lines 恒 >= 1，等不到 0。按行数判的话空文件会被当成「一行的完整文件」，
+       卡片就画出一个什么都没有的终端块，读者只能猜那一行里是不是有看不见的字符。
+       total===0 留作兜底：服务端哪天不再补这个空行，那也是同一件事。 */
+    var blank = bytes === 0 || total === 0;
+
+    var parsed = blank ? null : parseGutter(content, offset);
     var text = parsed ? parsed.text : content;
-    var shown = parsed ? parsed.count : (content ? fmt.lines(content).length : 0);
+    var shown = blank ? 0 : (parsed ? parsed.count : (content ? fmt.lines(content).length : 0));
     var first = parsed ? parsed.start : offset;
     var last = shown ? first + shown - 1 : 0;
     var whole = shown > 0 && first === 1 && (total === null || last >= total);
 
     var status;
-    if (!shown) status = ui.pill("muted", t("没有内容", "Empty"));
+    if (blank) status = ui.pill("muted", t("空文件", "Empty file"));
+    else if (!shown) status = ui.pill("muted", t("这一段没有内容", "Empty range"));
     else if (whole) status = ui.pill("ok", t("完整文件", "Whole file"));
     else {
       status = ui.pill("info", t("部分内容 · 共 " + fmt.num(total) + " 行",
@@ -165,7 +190,11 @@
 
     var body = [ui.metrics([
       { label: t("字节", "Bytes"), value: bytes === null ? null : fmt.bytes(bytes) },
-      { label: t("总行数", "Lines"), value: total === null ? null : fmt.num(total) },
+      {
+        label: t("总行数", "Lines"),
+        // 空文件在服务端算作 1 行（切行的产物），照抄就会和旁边的「0 字节」当场打架
+        value: blank ? fmt.num(0) : (total === null ? null : fmt.num(total))
+      },
       {
         label: t("本次行范围", "Range"),
         value: shown ? fmt.num(first) + "–" + fmt.num(last) : null
@@ -173,11 +202,11 @@
       { label: "SHA-256", value: sha ? fmt.short(sha, 8, 6) : null, hint: sha || null }
     ])];
 
-    if (!shown) {
-      body.push(ui.empty(total === 0
-        ? t("这是一个空文件", "This file is empty")
-        : t("这一段没有内容，offset 可能已经越过文件末尾",
-            "Nothing in this range; the offset may be past the end of the file")));
+    if (blank) {
+      body.push(ui.empty(t("这是一个空文件（0 字节）", "This file is empty (0 bytes)")));
+    } else if (!shown) {
+      body.push(ui.empty(t("这一段没有内容，offset 可能已经越过文件末尾",
+        "Nothing in this range; the offset may be past the end of the file")));
     } else {
       body.push(ui.terminal({
         text: text,
@@ -192,8 +221,9 @@
       shaRow("SHA-256", sha)
     ]));
 
-    // 翻页会真的再读一次远端文件，宿主不允许回调时按钮点了没反应，不如不画
-    if (ctx.can("file_read") && total !== 0) {
+    // 翻页会真的再读一次远端文件，宿主不允许回调时按钮点了没反应，不如不画；
+    // 空文件也不画：两个按钮必然同时是禁用态，摆在那里只是让人以为还有别的页
+    if (ctx.can("file_read") && !blank) {
       var step = limit !== null && limit > 0 ? limit : (shown || DEFAULT_LIMIT);
       var atStart = first <= 1;
       var atEnd = !shown || (total !== null && last >= total);
@@ -414,6 +444,7 @@
     var args = argsOf(ctx);
     var host = strOf(args.host);
     var pathText = strOf(args.path);
+    var home = isHomePath(pathText);
     var entries = Array.isArray(data.entries) ? data.entries.filter(objOf) : [];
 
     var dirs = 0, links = 0;
@@ -437,10 +468,12 @@
     var canRead = ctx.can("file_read");
     var body = [];
 
-    // 面包屑是这张卡片最主要的导航方式：每一段都直接把当前卡片切到那一层目录
+    // 面包屑是这张卡片最主要的导航方式（也是唯一的「往回走」入口）：
+    // 每一段都直接把当前卡片切到那一层目录
     if (canList) {
       var crumbs = crumbsOf(pathText);
-      if (crumbs.length) {
+      // 只剩当前这一层时整行都点不动，等于把 subtitle 又抄了一遍，不如不占这一行
+      if (crumbs.length > 1) {
         var trail = ui.row();
         crumbs.forEach(function (crumb, index) {
           // 根那一段本身就是一条斜杠，后面再补分隔符会读成「/ / etc」
@@ -455,7 +488,8 @@
           }
           trail.appendChild(ui.button({
             label: crumb.label,
-            title: t("进入 ", "Open ") + crumb.path,
+            // 起始目录那一段的 path 是 "."，"进入 ." 读起来什么也没说，所以它自带说明
+            title: crumb.title || (t("进入 ", "Open ") + crumb.path),
             onClick: function () { ctx.refresh({ path: crumb.path }); }
           }));
         });
@@ -511,8 +545,10 @@
 
     return ui.card({
       kicker: "LIST",
-      title: pathText ? (baseName(pathText) || "/") : t("起始目录", "Home"),
-      subtitle: pathText || t("登录用户的起始目录", "the login user's home directory"),
+      // 从面包屑退回起始目录时 path 是 "."，与「没传 path」是同一个目录，
+      // 标题就不能一个写「起始目录」、另一个写成一个孤零零的 "."
+      title: home ? t("起始目录", "Home") : (baseName(pathText) || "/"),
+      subtitle: home ? t("登录用户的起始目录", "the login user's home directory") : pathText,
       chips: [hostChip(host)],
       status: status,
       actions: actions,

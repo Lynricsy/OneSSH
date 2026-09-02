@@ -15,6 +15,12 @@
   var CAP_INLINE = 420;
   var CAP_FULL = 720;
 
+  // 上限不能在渲染时按 ctx.isFullscreen() 算死：runtime 切显示模式时只改 documentElement 上的
+  // data-display-mode，不会重渲染视图，先出结果再进全屏的图会一直被 420 压着。
+  // 改成继承下来的自定义属性——属性一变，图片和滚动框的高度立刻跟着变，不需要任何 JS 参与。
+  var CAP_H = "var(--img-cap, " + CAP_INLINE + "px)";
+  var CAP_BOX = "calc(" + CAP_H + " + 16px)";     // 16px = 预览框上下 padding
+
   // data: URI 的类型直接决定浏览器怎么解释这段字节，所以只放行 image/*。
   var IMAGE_MIME = /^image\/[a-z0-9][a-z0-9.+-]*$/i;
 
@@ -49,6 +55,32 @@
   function dims(w, height) {
     // 像素数不加千分位：1,920 × 1,080 反而比 1920 × 1080 更难一眼比对
     return (w === null || height === null) ? "" : String(w) + " × " + String(height);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * max_dim：服务端 imagex.Process 先把它钳进范围再缩放——<=0 取默认 1024，
+   * 大于 2048 收到 2048。原样回显请求值等于报出一个从未生效的上限，
+   * 而用户正是照着它判断「这张图为什么只有这么清楚」。展示前做同一套归一。
+   * ------------------------------------------------------------------ */
+
+  var DIM_DEFAULT = 1024;
+  var DIM_CEILING = 2048;
+
+  // 返回 { value, suffix }：value 是真正生效的长边上限；请求值被改写时，suffix 交代原委，
+  // 免得用户以为卡片把自己传的数字看丢了。
+  function capOf(requested) {
+    var n = numOf(requested);
+    if (n === null) return null;   // 没传就不替服务端宣布默认值：那是与这次请求无关的实现细节
+    n = Math.floor(n);             // max_dim 是整数字段，小数部分不会有任何效果
+    if (n <= 0) {
+      return { value: DIM_DEFAULT, suffix: t("（请求 " + n + "，服务端按默认值处理）",
+        " (requested " + n + ", server default applied)") };
+    }
+    if (n > DIM_CEILING) {
+      return { value: DIM_CEILING, suffix: t("（请求 " + n + "，超过服务端上限）",
+        " (requested " + n + ", above the server ceiling)") };
+    }
+    return { value: n, suffix: "" };
   }
 
   /* ------------------------------------------------------------------ *
@@ -101,11 +133,26 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * 预览区：style.css 里没有 .preview 规则，尺寸相关的样式全部走内联 style
+   * 预览区：style.css 里没有 .preview 规则，尺寸相关的样式全部走内联 style；
+   * 唯一的例外是下面这条规则——「文档处于全屏模式时」是个属性选择器，内联样式表达不了。
    * ------------------------------------------------------------------ */
 
+  var capRuleDone = false;
+
+  function ensureCapRule() {
+    if (capRuleDone) return;
+    capRuleDone = true;
+    // 宿主页面一定有 <head>；取不到只可能是没有 head 的替身 DOM，
+    // 这时安静放弃即可——var() 的兜底值让内联模式的上限照常成立。
+    var head = document.head;
+    if (!head) return;
+    var sheet = document.createElement("style");
+    sheet.textContent = "html[data-display-mode=\"fullscreen\"]{--img-cap:" + CAP_FULL + "px}";
+    head.appendChild(sheet);
+  }
+
   function buildPreview(opt) {
-    var cap = opt.cap;
+    ensureCapRule();
     var img = h("img", {
       src: opt.src,
       alt: opt.name,
@@ -113,7 +160,7 @@
       style: {
         "display": "block",
         "max-width": "100%",
-        "max-height": cap + "px",
+        "max-height": CAP_H,
         "border-radius": "6px"
       }
     });
@@ -130,7 +177,7 @@
         "align-items": "flex-start",
         "padding": "8px",
         "overflow": "auto",
-        "max-height": (cap + 16) + "px",
+        "max-height": CAP_BOX,
         "background": "var(--bg-2)",
         "border": "1px solid var(--border-2)",
         "border-radius": "var(--radius-sm)",
@@ -153,7 +200,7 @@
     function setFit(actual) {
       box.setAttribute("data-fit", actual ? "actual" : "contain");
       img.style.setProperty("max-width", actual ? "none" : "100%");
-      img.style.setProperty("max-height", actual ? "none" : cap + "px");
+      img.style.setProperty("max-height", actual ? "none" : CAP_H);
       // 原始像素下从左上角开始看，居中会让横向滚动条一上来就停在图片中间
       box.style.setProperty("justify-content", actual ? "flex-start" : "center");
       box.style.setProperty("cursor", actual ? "zoom-out" : "zoom-in");
@@ -208,7 +255,7 @@
     var ow = numOf(d.original_width), oh = numOf(d.original_height);
     var w = numOf(d.width), hgt = numOf(d.height);
     var size = numOf(d.bytes);
-    var maxDim = numOf(args.max_dim);
+    var cap = capOf(args.max_dim);
 
     var pic = pickImage(result);
     var hasMime = knownMime(pic && pic.mime, d.mime_type);
@@ -233,9 +280,9 @@
     var scaleHint = null;
     if (scaled && ow) {
       scaleHint = t("已缩放至原图的 ", "Scaled to ") + fmt.pct((w / ow) * 100) +
-        (maxDim === null ? "" : t("，长边上限 ", ", long edge capped at ") + maxDim + "px");
-    } else if (maxDim !== null) {
-      scaleHint = t("长边上限 ", "Long edge capped at ") + maxDim + "px";
+        (cap === null ? "" : t("，长边上限 ", ", long edge capped at ") + cap.value + "px" + cap.suffix);
+    } else if (cap !== null) {
+      scaleHint = t("长边上限 ", "Long edge capped at ") + cap.value + "px" + cap.suffix;
     }
 
     var facts = ui.metrics([
@@ -264,7 +311,6 @@
         buildPreview({
           src: "data:" + mime + ";base64," + pic.data,
           name: name || t("远程图片", "Remote image"),
-          cap: (ctx && typeof ctx.isFullscreen === "function" && ctx.isFullscreen()) ? CAP_FULL : CAP_INLINE,
           onSize: function (nw, nh) {
             if (outNode) outNode.textContent = dims(nw, nh);
           }

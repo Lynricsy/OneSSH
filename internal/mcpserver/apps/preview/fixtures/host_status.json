@@ -7,12 +7,12 @@
     "content": [
       {
         "type": "text",
-        "text": "{\n  \"host_id\": 1,\n  \"ts\": 1788359015,\n  \"cpu_pct\": 37.4,\n  \"mem_used_kb\": 6094848,\n  \"mem_total_kb\": 8126464,\n  \"load1\": 1.27,\n  \"disks\": [\n    {\n      \"mount\": \"/\",\n      \"used_kb\": 38914048,\n      \"total_kb\": 51609600\n    },\n    {\n      \"mount\": \"/var\",\n      \"used_kb\": 19398656,\n      \"total_kb\": 20971520\n    },\n    {\n      \"mount\": \"/boot\",\n      \"used_kb\": 198656,\n      \"total_kb\": 1046528\n    },\n    {\n      \"mount\": \"/srv/assets\",\n      \"used_kb\": 104857600,\n      \"total_kb\": 524288000\n    }\n  ]\n}"
+        "text": "{\n  \"host_id\": 1,\n  \"ts\": 1788389830,\n  \"cpu_pct\": 37.4,\n  \"mem_used_kb\": 6094848,\n  \"mem_total_kb\": 8126464,\n  \"load1\": 1.27,\n  \"disks\": [\n    {\n      \"mount\": \"/\",\n      \"used_kb\": 38914048,\n      \"total_kb\": 51609600\n    },\n    {\n      \"mount\": \"/var\",\n      \"used_kb\": 19398656,\n      \"total_kb\": 20971520\n    },\n    {\n      \"mount\": \"/boot\",\n      \"used_kb\": 198656,\n      \"total_kb\": 1046528\n    },\n    {\n      \"mount\": \"/srv/assets\",\n      \"used_kb\": 104857600,\n      \"total_kb\": 524288000\n    }\n  ]\n}"
       }
     ],
     "structuredContent": {
       "host_id": 1,
-      "ts": 1788359015,
+      "ts": 1788389830,
       "cpu_pct": 37.4,
       "mem_used_kb": 6094848,
       "mem_total_kb": 8126464,
@@ -47,7 +47,7 @@
     "content": [
       {
         "type": "text",
-        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+        "text": "暂无监控数据，可使用 fresh=true"
       }
     ],
     "isError": true

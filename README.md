@@ -215,12 +215,12 @@ OneSSH 为**全部 32 个工具**各提供一张 [MCP Apps](https://modelcontext
 
 - 每个工具在 `tools/list` 里带 `_meta.ui.resourceUri`，指向 `ui://onessh/<工具名>?v=<内容哈希>`。
 - 同时附带旧版 `openai/outputTemplate` 别名，指向同一份正文的 `text/html+skybridge` 版本，供只认旧字段的 ChatGPT 版本读取。这份旧版资源走 URI 模板发布：按 URI 能读到，但不会出现在 `resources/list` 里，标准客户端看到的仍是干净的 32 条。
-- 对应资源以 `text/html;profile=mcp-app` 返回一份**完全自包含**的 HTML：样式与脚本全部内联，`_meta.ui.csp` 声明不访问任何外部域，宿主据此把 iframe 的 CSP 收到最紧。
+- 对应资源以 `text/html;profile=mcp-app` 返回一份**完全自包含**的 HTML：样式与脚本全部内联，`_meta.ui.csp` 声明不访问任何外部域，宿主据此把 iframe 的 CSP 收到最紧。卡片不申请专用沙箱源（不发布 `ui.domain`）：正文自包含、不读写任何存储，没有需要稳定独立来源的理由。
 - 卡片通过 `postMessage` 上的 JSON-RPC 与宿主通信：`ui/initialize` 握手、`ui/notifications/tool-result` 接收结果、`ui/notifications/size-changed` 自适应高度，并跟随宿主下发的主题与设计令牌自动切换深浅色。
 
 卡片内的交互**只做只读导航**：翻页、进入子目录、预览文件、刷新任务与指标、复制、全屏。执行命令、写文件、删除主机、修改记忆等有副作用的工具在 `_meta.ui.visibility` 中不带 `app`，卡片自身也有白名单拦截，不会从界面上被触发。
 
-`ONESSH_PUBLIC_URL` 为 HTTPS 来源时会额外发布 `_meta.ui.domain`，宿主据此给卡片分配独立沙箱源；HTTP 部署下省略该字段，卡片在部分宿主上可能不渲染。设置 `ONESSH_MCP_APPS=off` 可以完全关闭卡片：工具的 `_meta` 与全部 `ui://` 资源都不再发布，工具本身不受影响。
+设置 `ONESSH_MCP_APPS=off` 可以完全关闭卡片：工具的 `_meta` 与全部 `ui://` 资源都不再发布，工具本身不受影响。
 
 ### 工具清单
 
@@ -333,6 +333,14 @@ go test -count=1 ./...
 python3 -m http.server 8877 --directory internal/mcpserver/apps
 # 打开 http://localhost:8877/preview/
 ```
+
+卡片运行时的协议与安全路径另有一份零依赖的一致性测试，CI 里随前端检查一起跑：
+
+```sh
+node --test internal/mcpserver/apps/runtime.test.mjs
+```
+
+它在 Node 里把 `runtime.js` 真的执行起来，覆盖 `ui/*` 握手与通知的报文形状、只读回调白名单（破坏性工具一律不能由卡片发起）、以及 32 张卡片对真实样例数据在成功态与错误态下的渲染。
 
 画廊会用与 Go 侧完全相同的方式拼装卡片 HTML，并扮演宿主完成 `ui/initialize` 握手、推送 `preview/fixtures/<工具>.json` 里的样例结果、应答卡片发起的只读回调。三个页面各有分工：`preview/index.html` 逐张挑选并切换浅色、深色、错误态与窄屏；`preview/one.html` 用查询参数直接定位一张卡片，便于截图；`preview/sheet.html` 把 32 张一次性铺开做总览。
 

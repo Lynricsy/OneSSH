@@ -4,7 +4,7 @@
     "content": [
       {
         "type": "text",
-        "text": "{\n  \"total\": 327,\n  \"banks\": [\n    {\n      \"bank\": \"global\",\n      \"count\": 58,\n      \"embedded\": 58,\n      \"last_written\": 1788348255\n    },\n    {\n      \"bank\": \"web-01\",\n      \"count\": 94,\n      \"embedded\": 91,\n      \"last_written\": 1788358395\n    },\n    {\n      \"bank\": \"web-02\",\n      \"count\": 76,\n      \"embedded\": 70,\n      \"last_written\": 1788258255\n    },\n    {\n      \"bank\": \"db-main\",\n      \"count\": 81,\n      \"embedded\": 81,\n      \"last_written\": 1787927055\n    },\n    {\n      \"bank\": \"build-runner\",\n      \"count\": 18,\n      \"embedded\": 4,\n      \"last_written\": null\n    }\n  ]\n}"
+        "text": "{\n  \"total\": 327,\n  \"banks\": [\n    {\n      \"bank\": \"global\",\n      \"count\": 58,\n      \"embedded\": 58,\n      \"last_written\": 1788379070\n    },\n    {\n      \"bank\": \"web-01\",\n      \"count\": 94,\n      \"embedded\": 91,\n      \"last_written\": 1788389210\n    },\n    {\n      \"bank\": \"web-02\",\n      \"count\": 76,\n      \"embedded\": 70,\n      \"last_written\": 1788289070\n    },\n    {\n      \"bank\": \"db-main\",\n      \"count\": 81,\n      \"embedded\": 81,\n      \"last_written\": 1787957870\n    },\n    {\n      \"bank\": \"build-runner\",\n      \"count\": 18,\n      \"embedded\": 4,\n      \"last_written\": null\n    }\n  ]\n}"
       }
     ],
     "structuredContent": {
@@ -14,25 +14,25 @@
           "bank": "global",
           "count": 58,
           "embedded": 58,
-          "last_written": 1788348255
+          "last_written": 1788379070
         },
         {
           "bank": "web-01",
           "count": 94,
           "embedded": 91,
-          "last_written": 1788358395
+          "last_written": 1788389210
         },
         {
           "bank": "web-02",
           "count": 76,
           "embedded": 70,
-          "last_written": 1788258255
+          "last_written": 1788289070
         },
         {
           "bank": "db-main",
           "count": 81,
           "embedded": 81,
-          "last_written": 1787927055
+          "last_written": 1787957870
         },
         {
           "bank": "build-runner",
@@ -49,7 +49,7 @@
     "content": [
       {
         "type": "text",
-        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+        "text": "unauthorized"
       }
     ],
     "isError": true

@@ -6,7 +6,7 @@
     "content": [
       {
         "type": "text",
-        "text": "{\n  \"stdout\": \" 14:23:07 up 42 days,  3:11,  2 users,  load average: 0.34, 0.51, 0.48\\n\",\n  \"stderr\": \"\",\n  \"output\": \" 14:23:07 up 42 days,  3:11,  2 users,  load average: 0.34, 0.51, 0.48\",\n  \"exit_code\": 0,\n  \"cwd\": \"/home/deploy\",\n  \"timeout\": false,\n  \"truncated\": false,\n  \"total_lines\": 1,\n  \"total_bytes\": 78,\n  \"stdout_bytes\": 78,\n  \"stderr_bytes\": 0,\n  \"output_recorded\": true\n}"
+        "text": "{\n  \"stdout\": \" 14:23:07 up 42 days,  3:11,  2 users,  load average: 0.34, 0.51, 0.48\\n\",\n  \"stderr\": \"\",\n  \"output\": \" 14:23:07 up 42 days,  3:11,  2 users,  load average: 0.34, 0.51, 0.48\",\n  \"exit_code\": 0,\n  \"cwd\": \"/home/deploy\",\n  \"timeout\": false,\n  \"truncated\": false,\n  \"total_lines\": 1,\n  \"total_bytes\": 71,\n  \"stdout_bytes\": 71,\n  \"stderr_bytes\": 0,\n  \"output_recorded\": true\n}"
       }
     ],
     "structuredContent": {
@@ -18,8 +18,8 @@
       "timeout": false,
       "truncated": false,
       "total_lines": 1,
-      "total_bytes": 78,
-      "stdout_bytes": 78,
+      "total_bytes": 71,
+      "stdout_bytes": 71,
       "stderr_bytes": 0,
       "output_recorded": true
     },
@@ -30,7 +30,7 @@
     "content": [
       {
         "type": "text",
-        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+        "text": "host management not authorized\n该令牌没有 manage_hosts 权限。"
       }
     ],
     "isError": true

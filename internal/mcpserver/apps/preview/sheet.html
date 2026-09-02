@@ -11,6 +11,10 @@ font:13px/1.55 ui-sans-serif,system-ui,"PingFang SC","Microsoft YaHei",sans-seri
 h2{margin:26px 0 10px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:light-dark(#6b7280,#8b94a1)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(430px,1fr));gap:18px;align-items:start}
 .cell{min-width:0}
+/* 卡片申请全屏时把这一格提成盖住整页的浮层。总览页的格子只有 430px 宽，
+   不这么做就等于对卡片撒谎：它切到 fullscreen 排版，外面却纹丝不动。 */
+.cell.full{position:fixed;inset:0;z-index:9;padding:20px;overflow:auto;background:light-dark(#ececf1,#0f1013)}
+.cell.full .shell{border-radius:0}
 .cap{margin:0 0 6px;font:600 11.5px/1.4 ui-monospace,Menlo,Consolas,monospace;color:light-dark(#0d9488,#2dd4bf)}
 .shell{border:1px solid light-dark(#e0e2e8,#2b3038);border-radius:14px;overflow:hidden;
 background:light-dark(#fff,#212121);box-shadow:0 1px 2px #0000000d}
@@ -40,7 +44,14 @@ const VARS={light:{"--color-background-primary":"#ffffff","--color-background-se
  dark:{"--color-background-primary":"#212121","--color-background-secondary":"#2f2f2f",
  "--color-text-primary":"#ececec","--color-text-secondary":"#b4b4b4","--color-border-primary":"#3d3d3d"}}[THEME];
 const frames=new Map();
+const fixtures=Object.create(null);
 let ready=0;
+// 缓存 promise：初始化时每张卡取一次，之后卡片导航过去还会再要同一份。
+function loadFixture(tool){
+  if(!(tool in fixtures))fixtures[tool]=fetch("fixtures/"+tool+".json?t="+Date.now())
+    .then(r=>r.ok?r.json():null).catch(()=>null);
+  return fixtures[tool];
+}
 (async function(){
   const [shell,style,runtime]=await Promise.all(["../shell.html","../style.css","../runtime.js"].map(u=>fetch(u+"?t="+Date.now()).then(r=>r.text())));
   const views={};
@@ -54,7 +65,7 @@ let ready=0;
     const cap=document.createElement("p");cap.className="cap";cap.textContent=tool;cell.append(cap);
     const box=document.createElement("div");box.className="shell";
     const frame=document.createElement("iframe");frame.setAttribute("sandbox","allow-scripts");
-    const fixture=await fetch("fixtures/"+tool+".json?t="+Date.now()).then(r=>r.ok?r.json():null).catch(()=>null);
+    const fixture=await loadFixture(tool);
     frame.srcdoc=shell.replaceAll("{{TOOL}}",tool).replaceAll("{{TITLE}}",(fixture&&fixture.title)||tool)
       .replace("{{STYLE}}",style).replace("{{RUNTIME}}",runtime).replace("{{VIEW}}",views[g]);
     frames.set(frame,{tool,fixture});
@@ -62,7 +73,7 @@ let ready=0;
   }
   window.__sheetTotal=TOOLS.length;
 })();
-window.addEventListener("message",e=>{
+window.addEventListener("message",async e=>{
   let entry=null,frame=null;
   for(const [f,v] of frames) if(f.contentWindow===e.source){entry=v;frame=f;break;}
   if(!entry) return;
@@ -85,8 +96,18 @@ window.addEventListener("message",e=>{
   }
   if(m.method==="ui/notifications/size-changed"){frame.style.height=Math.max(60,m.params.height)+"px";return;}
   if(m.method==="tools/call"){
-    const canned=(entry.fixture&&entry.fixture.calls&&entry.fixture.calls[m.params.name])||null;
-    send({jsonrpc:"2.0",id:m.id,result:canned||{content:[{type:"text",text:"预览没有该调用的数据"}],isError:true}});
+    // 刷新请求的是卡片自己的工具，导航请求的是另一个只读工具（file_list → file_read 只是其中一例）。
+    // 两种都先看当前 fixture 写死的 calls，没有就回退去加载被请求工具自己的 fixture。
+    const canned=(entry.fixture&&entry.fixture.calls&&entry.fixture.calls[m.params.name])||await loadFixture(m.params.name);
+    send({jsonrpc:"2.0",id:m.id,result:canned?(canned.result||canned)
+      :{content:[{type:"text",text:"预览没有 "+m.params.name+" 的样例数据"}],isError:true}});
+    return;
+  }
+  if(m.method==="ui/request-display-mode"){
+    const mode=m.params&&m.params.mode==="fullscreen"?"fullscreen":"inline";
+    const cell=frame.closest(".cell");
+    if(cell)cell.classList.toggle("full",mode==="fullscreen");
+    send({jsonrpc:"2.0",id:m.id,result:{mode:mode}});
     return;
   }
   if(m.id!==undefined) send({jsonrpc:"2.0",id:m.id,result:{}});

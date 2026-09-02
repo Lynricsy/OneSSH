@@ -18,7 +18,7 @@
     "content": [
       {
         "type": "text",
-        "text": "{\n  \"id\": 4,\n  \"name\": \"cache-01\",\n  \"addr\": \"10.0.2.21\",\n  \"port\": 22,\n  \"username\": \"redis\",\n  \"auth_type\": \"key\",\n  \"key_id\": 3,\n  \"hostkey_fp\": null,\n  \"jump_host\": null,\n  \"monitor_enabled\": true,\n  \"tags\": [\n    \"prod\",\n    \"redis\",\n    \"tls\"\n  ],\n  \"created_at\": 1782915855,\n  \"online\": false\n}"
+        "text": "{\n  \"id\": 4,\n  \"name\": \"cache-01\",\n  \"addr\": \"10.0.2.21\",\n  \"port\": 22,\n  \"username\": \"redis\",\n  \"auth_type\": \"key\",\n  \"key_id\": 3,\n  \"hostkey_fp\": null,\n  \"jump_host\": null,\n  \"monitor_enabled\": true,\n  \"tags\": [\n    \"prod\",\n    \"redis\",\n    \"tls\"\n  ],\n  \"created_at\": 1782946670,\n  \"online\": false\n}"
       }
     ],
     "structuredContent": {
@@ -37,7 +37,7 @@
         "redis",
         "tls"
       ],
-      "created_at": 1782915855,
+      "created_at": 1782946670,
       "online": false
     },
     "isError": false
@@ -47,7 +47,7 @@
     "content": [
       {
         "type": "text",
-        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+        "text": "host management not authorized\n该令牌没有 manage_hosts 权限。"
       }
     ],
     "isError": true
