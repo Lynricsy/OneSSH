@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>OneSSH · {{TITLE}}</title>
+<style>
+{{STYLE}}
+</style>
+</head>
+<body>
+<main id="root" class="root" data-state="waiting" aria-live="polite">
+  <div class="waiting">
+    <span class="waiting-dot"></span><span class="waiting-dot"></span><span class="waiting-dot"></span>
+    <span class="waiting-text">等待工具结果…</span>
+  </div>
+</main>
+<script>
+{{RUNTIME}}
+{{VIEW}}
+OneSSH.boot("{{TOOL}}");
+</script>
+</body>
+</html>

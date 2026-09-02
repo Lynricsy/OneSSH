@@ -35,6 +35,7 @@ type Server struct {
 	Jobs        *jobs.Manager
 	Monitor     *monitor.Manager
 	Memory      *memoryx.Engine
+	apps        *appCatalog
 }
 
 const serverInstructions = `OneSSH 是受主机权限控制的 SSH 运维网关：通过它连接远程主机、执行命令、读写文件、跑后台任务、看资源指标，并在跨会话的记忆库里积累运维知识。
@@ -55,7 +56,7 @@ const serverInstructions = `OneSSH 是受主机权限控制的 SSH 运维网关�
 
 // New 的 publicURL 必须是已规范化的来源地址（无尾斜杠、无路径），由 oauthserver.New 校验后传入；
 // 这里不再做第二次归一，避免同一份规则出现两套实现。
-func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanager.Manager, memory *memoryx.Engine, dataDir, publicURL string, pollInterval time.Duration, searchHelper bool) *Server {
+func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanager.Manager, memory *memoryx.Engine, dataDir, publicURL string, pollInterval time.Duration, searchHelper, mcpApps bool) *Server {
 	s := &Server{Store: st, Pool: pool, Events: bus, HostManager: hosts, Memory: memory, Exec: execx.New(dataDir)}
 	if err := st.RecoverInterruptedCommandRuns(context.Background(), time.Now().UnixMilli()); err != nil {
 		log.Printf("恢复中断的命令执行记录失败: %v", err)
@@ -64,6 +65,12 @@ func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanage
 	s.Files = files.New(pool, s.Exec)
 	s.Monitor = monitor.New(st, pool, s.Exec, pollInterval)
 	s.MCP = newProtocolServer(publicURL)
+	// 卡片资产在编译期内嵌，组装失败只可能是资产本身有问题，属于必须立刻暴露的构建错误。
+	apps, err := newAppCatalog(publicURL, mcpApps)
+	if err != nil {
+		log.Fatalf("组装 MCP Apps 卡片失败: %v", err)
+	}
+	s.apps = apps
 	s.registerHosts()
 	s.registerExec(s.Exec)
 	s.registerJobs(s.Jobs)
@@ -73,6 +80,7 @@ func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanage
 	s.registerImage(s.Files)
 	s.registerMonitor(s.Monitor)
 	s.registerFanout()
+	s.apps.registerResources(s.MCP)
 	s.Monitor.Start(context.Background())
 	return s
 }
@@ -112,6 +120,7 @@ func errorResult(message string) *mcp.CallToolResult {
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: message}}, IsError: true}
 }
 func register[In, Out any](s *Server, tool *mcp.Tool, handler mcp.ToolHandlerFor[In, Out]) {
+	s.apps.decorate(tool)
 	mcp.AddTool(s.MCP, tool, func(ctx context.Context, req *mcp.CallToolRequest, in In) (result *mcp.CallToolResult, out Out, err error) {
 		started := time.Now()
 		result, out, err = handler(ctx, req, in)
