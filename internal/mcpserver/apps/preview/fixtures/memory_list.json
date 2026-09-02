@@ -8,7 +8,7 @@
     "content": [
       {
         "type": "text",
-        "text": "{\n  \"memories\": [\n    {\n      \"id\": 184,\n      \"content\": \"web-01 的 nginx 配置在 /etc/nginx，reload 用 systemctl reload nginx，不要用 restart（会断掉长连接）。\",\n      \"source\": \"mcp\",\n      \"importance\": 0.8,\n      \"veracity\": \"tool\",\n      \"created_at\": 1788389750,\n      \"updated_at\": 1788389750,\n      \"recall_count\": 6\n    },\n    {\n      \"id\": 151,\n      \"content\": \"web-01 与 web-02 前面有 LB，改配置要两台同时改，否则会出现 50% 请求失败。\",\n      \"source\": \"mcp\",\n      \"importance\": 0.75,\n      \"veracity\": \"stated\",\n      \"created_at\": 1787612270,\n      \"updated_at\": 1787785070,\n      \"recall_count\": 3\n    },\n    {\n      \"id\": 130,\n      \"content\": \"web-01 的证书由 certbot 自动续期，cron 在每周日 03:15，续期后会自动 reload nginx。\",\n      \"source\": \"mcp\",\n      \"importance\": 0.6,\n      \"veracity\": \"tool\",\n      \"created_at\": 1782946670,\n      \"updated_at\": 1782946670,\n      \"recall_count\": 1\n    },\n    {\n      \"id\": 118,\n      \"content\": \"web-01 磁盘 /var 只有 20G，access.log 每天涨 1.5G，logrotate 保留 7 天。\",\n      \"source\": \"mcp\",\n      \"importance\": 0.55,\n      \"veracity\": \"tool\",\n      \"created_at\": 1785538670,\n      \"updated_at\": 1785538670,\n      \"recall_count\": 0\n    }\n  ],\n  \"bank\": \"web-01\"\n}"
+        "text": "{\n  \"memories\": [\n    {\n      \"id\": 184,\n      \"content\": \"web-01 的 nginx 配置在 /etc/nginx，reload 用 systemctl reload nginx，不要用 restart（会断掉长连接）。\",\n      \"source\": \"mcp\",\n      \"importance\": 0.8,\n      \"veracity\": \"tool\",\n      \"created_at\": 1788392744,\n      \"updated_at\": 1788392744,\n      \"recall_count\": 6\n    },\n    {\n      \"id\": 151,\n      \"content\": \"web-01 与 web-02 前面有 LB，改配置要两台同时改，否则会出现 50% 请求失败。\",\n      \"source\": \"mcp\",\n      \"importance\": 0.75,\n      \"veracity\": \"stated\",\n      \"created_at\": 1787615264,\n      \"updated_at\": 1787788064,\n      \"recall_count\": 3\n    },\n    {\n      \"id\": 130,\n      \"content\": \"web-01 的证书由 certbot 自动续期，cron 在每周日 03:15，续期后会自动 reload nginx。\",\n      \"source\": \"mcp\",\n      \"importance\": 0.6,\n      \"veracity\": \"tool\",\n      \"created_at\": 1782949664,\n      \"updated_at\": 1782949664,\n      \"recall_count\": 1\n    },\n    {\n      \"id\": 118,\n      \"content\": \"web-01 磁盘 /var 只有 20G，access.log 每天涨 1.5G，logrotate 保留 7 天。\",\n      \"source\": \"mcp\",\n      \"importance\": 0.55,\n      \"veracity\": \"tool\",\n      \"created_at\": 1785541664,\n      \"updated_at\": 1785541664,\n      \"recall_count\": 0\n    }\n  ],\n  \"bank\": \"web-01\"\n}"
       }
     ],
     "structuredContent": {
@@ -19,8 +19,8 @@
           "source": "mcp",
           "importance": 0.8,
           "veracity": "tool",
-          "created_at": 1788389750,
-          "updated_at": 1788389750,
+          "created_at": 1788392744,
+          "updated_at": 1788392744,
           "recall_count": 6
         },
         {
@@ -29,8 +29,8 @@
           "source": "mcp",
           "importance": 0.75,
           "veracity": "stated",
-          "created_at": 1787612270,
-          "updated_at": 1787785070,
+          "created_at": 1787615264,
+          "updated_at": 1787788064,
           "recall_count": 3
         },
         {
@@ -39,8 +39,8 @@
           "source": "mcp",
           "importance": 0.6,
           "veracity": "tool",
-          "created_at": 1782946670,
-          "updated_at": 1782946670,
+          "created_at": 1782949664,
+          "updated_at": 1782949664,
           "recall_count": 1
         },
         {
@@ -49,8 +49,8 @@
           "source": "mcp",
           "importance": 0.55,
           "veracity": "tool",
-          "created_at": 1785538670,
-          "updated_at": 1785538670,
+          "created_at": 1785541664,
+          "updated_at": 1785541664,
           "recall_count": 0
         }
       ],
@@ -63,7 +63,7 @@
     "content": [
       {
         "type": "text",
-        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+        "text": "host not authorized: web-09"
       }
     ],
     "isError": true

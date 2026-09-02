@@ -88,7 +88,7 @@ window.addEventListener("message",async e=>{
   }
   if(m.method==="ui/notifications/initialized"){
     if(!entry.fixture){ready++;return;}
-    send({jsonrpc:"2.0",method:"ui/notifications/tool-input",params:{arguments:entry.fixture.input||{}}});
+    send({jsonrpc:"2.0",method:"ui/notifications/tool-input",params:{arguments:(ERROR&&entry.fixture.error_input)||entry.fixture.input||{}}});
     const result=ERROR?(entry.fixture.error||{content:[{type:"text",text:"host not authorized"}],isError:true}):entry.fixture.result;
     send({jsonrpc:"2.0",method:"ui/notifications/tool-result",params:result});
     ready++;

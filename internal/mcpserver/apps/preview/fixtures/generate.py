@@ -95,8 +95,8 @@ for n in range(30):
 long_out = "\n".join(head + tail_lines)
 
 F["exec"] = {"input":{"host":"web-01","command":"systemctl status nginx --no-pager -l","session":"deploy","timeout_s":60,"max_lines":200},
-             "result": sc({"run_id":"run_01K4M7X2QF","stdout":long_out+"\n","stderr":"","output":long_out,"exit_code":0,
-                           "cwd":"/etc/nginx","timeout":False,"truncated":True,"artifact_id":"art_9f2c1b7e",
+             "result": sc({"run_id":"a31f6c05-2e74-4b8d-9c16-0d5847ef23ba","stdout":long_out+"\n","stderr":"","output":long_out,"exit_code":0,
+                           "cwd":"/etc/nginx","timeout":False,"truncated":True,"artifact_id":"0f2c1b7e-6d41-4a19-9b2e-58c7a1d4e930",
                            "total_lines":1842,"total_bytes":186432,"stdout_bytes":186432,"stderr_bytes":0,"output_recorded":True})}
 F["exec"]["error"] = {"content":[{"type":"text","text":"host not authorized: web-09"}],"isError":True}
 
@@ -110,19 +110,19 @@ art = []
 for n in range(401, 481):
     art.append('%d:2026-09-02T09:%02d:%02d web-01 nginx[1184]: 10.0.1.%d - - "GET /api/v1/items?page=%d HTTP/1.1" 200 %d'
                % (n, n % 60, (n * 7) % 60, n % 250, n, 300 + n))
-F["output_read"] = {"input":{"artifact_id":"art_9f2c1b7e","offset":401,"limit":80},
+F["output_read"] = {"input":{"artifact_id":"0f2c1b7e-6d41-4a19-9b2e-58c7a1d4e930","offset":401,"limit":80},
                     "result": sc({"content":"\n".join(art),"total_lines":1842})}
 
 F["exec_many"] = {"input":{"hosts":["web-01","web-02","db-main","cache-01","build-runner"],"command":"nginx -v 2>&1 || true","timeout_s":30},
                   "result": sc({"results":[
-                    {"host":"web-01","run_id":"run_A1","exit_code":0,"timeout":False,"output":"nginx version: nginx/1.24.0 (Ubuntu)"},
-                    {"host":"web-02","run_id":"run_A2","exit_code":0,"timeout":False,"output":"nginx version: nginx/1.24.0 (Ubuntu)"},
-                    {"host":"db-main","run_id":"run_A3","exit_code":127,"timeout":False,"output":"bash: line 1: nginx: command not found"},
+                    {"host":"web-01","run_id":"c1d05e8a-3b47-4629-8f10-92e6a7c4b035","exit_code":0,"timeout":False,"output":"nginx version: nginx/1.24.0 (Ubuntu)"},
+                    {"host":"web-02","run_id":"d27b91f4-6c08-4a53-b7e9-1f30d85a6c92","exit_code":0,"timeout":False,"output":"nginx version: nginx/1.24.0 (Ubuntu)"},
+                    {"host":"db-main","run_id":"e93c47a0-8d15-4f26-a0b3-57ce18d942f6","exit_code":127,"timeout":False,"output":"bash: line 1: nginx: command not found"},
                     {"host":"cache-01","run_id":"","exit_code":-1,"timeout":False,"output":"","error":"dial tcp 10.0.2.21:22: connect: connection refused"},
-                    {"host":"build-runner","run_id":"run_A5","exit_code":-1,"timeout":True,"output":"（命令在 30 秒后被中断）"}]})}
+                    {"host":"build-runner","run_id":"f04e28b7-9a36-4c81-bd52-6708e3f1a4d9","exit_code":-1,"timeout":True,"output":"（命令在 30 秒后被中断）"}]})}
 
 F["job_start"] = {"input":{"host":"build-runner","command":"make release VERSION=v0.2.0","cwd":"/srv/onessh"},
-                  "result": sc({"job_id":"job_7cf3a91e","run_id":"run_01K4M8ZZ01","pid":48213})}
+                  "result": sc({"job_id":"7cf3a91e-1b2d-4f60-8a35-c9e07d41b862","run_id":"b8402d19-5f63-47ae-91c0-6e2a3d905f47","pid":48213})}
 
 def job(idx, jid, status, cmd, exit_code=None, fin=None, logb=0):
     return {"job":{"id":jid,"host_id":5,"command":cmd,"cwd":"/srv/onessh","pid":48000+idx,"used_setsid":True,
@@ -130,14 +130,14 @@ def job(idx, jid, status, cmd, exit_code=None, fin=None, logb=0):
             "log_bytes":logb}
 
 F["job_list"] = {"input":{}, "result": sc({"jobs":[
-    job(1,"job_7cf3a91e","running","make release VERSION=v0.2.0",None,None,182934),
-    job(2,"job_2b81dd40","exited","tar -czf /backup/db-$(date +%F).tar.gz /var/lib/postgresql",0,ago(2*HOUR),412),
-    job(3,"job_ee09c517","exited","rsync -a --delete /srv/assets/ backup:/srv/assets/",23,ago(90*MIN),88231),
-    job(4,"job_51ac7f23","lost","tcpdump -i eth0 -w /tmp/cap.pcap",None,None,0),
-    job(5,"job_9d4e12ab","killed","python3 -u train.py --epochs 200",None,ago(35*MIN),1490233),
+    job(1,"7cf3a91e-1b2d-4f60-8a35-c9e07d41b862","running","make release VERSION=v0.2.0",None,None,182934),
+    job(2,"2b81dd40-9e14-4c72-b6a8-3f5d0e97ca11","exited","tar -czf /backup/db-$(date +%F).tar.gz /var/lib/postgresql",0,ago(2*HOUR),412),
+    job(3,"ee09c517-4a8b-4d33-95e1-7c206fb8d54a","exited","rsync -a --delete /srv/assets/ backup:/srv/assets/",23,ago(90*MIN),88231),
+    job(4,"51ac7f23-08d6-4b1f-a742-e35c9b016dd8","lost","tcpdump -i eth0 -w /tmp/cap.pcap",None,None,0),
+    job(5,"9d4e12ab-73c5-4e08-8fd1-2a6b490c7e35","killed","python3 -u train.py --epochs 200",None,ago(35*MIN),1490233),
 ]})}
-F["job_status"] = {"input":{"job_id":"job_7cf3a91e"},
-                   "result": sc(job(1,"job_7cf3a91e","running","make release VERSION=v0.2.0",None,None,182934))}
+F["job_status"] = {"input":{"job_id":"7cf3a91e-1b2d-4f60-8a35-c9e07d41b862"},
+                   "result": sc(job(1,"7cf3a91e-1b2d-4f60-8a35-c9e07d41b862","running","make release VERSION=v0.2.0",None,None,182934))}
 
 pack = []
 for n, target in enumerate(["linux_amd64","linux_arm64","darwin_amd64","darwin_arm64","freebsd_amd64","freebsd_arm64"]):
@@ -150,8 +150,8 @@ joblog = "\n".join([
  "go: downloading github.com/modelcontextprotocol/go-sdk v1.7.0",
  "go: downloading golang.org/x/crypto v0.44.0",
 ] + pack + ["sha256sum ./*.tar.gz > checksums.txt", "make: *** [Makefile:31: verify] Error 1"])
-F["job_logs"] = {"input":{"job_id":"job_7cf3a91e","tail_lines":100}, "result": sc({"output":joblog})}
-F["job_kill"] = {"input":{"job_id":"job_51ac7f23","signal":"TERM"}, "result": sc({"ok":True})}
+F["job_logs"] = {"input":{"job_id":"7cf3a91e-1b2d-4f60-8a35-c9e07d41b862","tail_lines":100}, "result": sc({"output":joblog})}
+F["job_kill"] = {"input":{"job_id":"51ac7f23-08d6-4b1f-a742-e35c9b016dd8","signal":"TERM"}, "result": sc({"ok":True})}
 
 conf = "\n".join([
  "user  www-data;","worker_processes  auto;","pid /run/nginx.pid;","","events {","    worker_connections  4096;",
@@ -184,7 +184,7 @@ diff = "\n".join([
  "     include /etc/nginx/sites-enabled/*;"])
 F["file_edit"] = {"input":{"host":"web-01","path":"/etc/nginx/nginx.conf",
                            "edits":[{"old_text":"access_log  /var/log/nginx/access.log;","new_text":"access_log  /var/log/nginx/access.log combined buffer=32k flush=5s;"}],
-                           "expected_sha256":"3b1f0c9a77d4e5628f14b0a9c3e7d215884ab6f0c9d3e71a25b8f4c60d97ea31"},
+                           "expected_sha256":hashlib.sha256((conf + "\n").encode()).hexdigest()},
                   "result": sc({"sha256":"c47a0e9b13d2f68501ba7cd394e2f8016d5b93ca27e40f8a16b3d97c25ea0f43","bytes":901,"diff":diff})}
 entries = [
  {"name":"conf.d","size":4096,"mode":"drwxr-xr-x","mtime":ago(6*HOUR),"directory":True},
@@ -306,8 +306,8 @@ TITLES = {
 
 # 错误态要用该工具**真的会返回**的那句话，否则画廊里演示的是一个不可能出现的失败。
 # 取值都对照 internal/mcpserver/auth.go、jobs.go、memory.go 与 execx/runner.go 的原文。
-HOST_DENIED = "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
-MANAGE_DENIED = "host management not authorized\n该令牌没有 manage_hosts 权限。"
+HOST_DENIED = "host not authorized: web-09"
+MANAGE_DENIED = "host management not authorized"
 ERRORS = {
     "hosts_list": "unauthorized",
     "hosts_manage_list": MANAGE_DENIED,
@@ -318,13 +318,14 @@ ERRORS = {
     "host_delete": MANAGE_DENIED,
     "exec": HOST_DENIED,
     "session_env": HOST_DENIED,
-    "output_read": "artifact 已过期或不存在",
+    "output_read": "artifact_id 无效",
     "exec_many": "hosts 不能为空",
     "job_start": HOST_DENIED,
     "job_list": HOST_DENIED,
-    "job_status": "unknown job: job_7cf3a91e",
-    "job_logs": "job not authorized: job_7cf3a91e",
-    "job_kill": "unknown job: job_51ac7f23",
+    "job_status": "unknown job: 7cf3a91e-1b2d-4f60-8a35-c9e07d41b862",
+    
+    "job_logs": "job not authorized: 7cf3a91e-1b2d-4f60-8a35-c9e07d41b862",
+    "job_kill": "unknown job: 51ac7f23-08d6-4b1f-a742-e35c9b016dd8",
     "file_read": HOST_DENIED,
     "file_write": HOST_DENIED,
     "file_edit": HOST_DENIED,
@@ -343,8 +344,19 @@ ERRORS = {
     "image_view": HOST_DENIED,
 }
 
+# 有些错误只在特定入参下才可能发生（hosts 为空、fresh=false、主机未授权），
+# 拿成功态那份入参去演示它们，等于在画廊里摆一个真实调用永远走不到的组合。
+ERROR_INPUTS = {
+    "exec_many": {"hosts": [], "command": "nginx -v 2>&1 || true"},
+    "job_list": {"host": "web-09"},
+    "host_status": {"host": "web-09", "fresh": False},
+    "output_read": {"artifact_id": "not-a-uuid", "offset": 1, "limit": 80},
+}
+
 for tool, data in F.items():
     data["title"] = TITLES[tool]
+    if tool in ERROR_INPUTS:
+        data["error_input"] = ERROR_INPUTS[tool]
     data.setdefault("error", {"content":[{"type":"text","text":ERRORS[tool]}],"isError":True})
     with open(os.path.join(out, tool + ".json"), "w", encoding="utf-8") as fh:
         json.dump(data, fh, ensure_ascii=False, indent=2)

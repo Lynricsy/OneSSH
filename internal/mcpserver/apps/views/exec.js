@@ -14,11 +14,11 @@
   var ARTIFACT_FOLD = 40;   // artifact 本身就是翻页看的，折叠阈值给大一些
   var FANOUT_FOLD = 12;     // 批量执行按主机分块，每块只留一个概览的高度
 
-  /* 手绘终端块要自己复刻 ui.terminal 的两道防卡死闸门：字符上限 + 分页追加。
-     runtime 没把 TEXT_LIMIT / TERM_PAGE 导出，只能照同一量级在这里再写一遍；
-     数值有意与 runtime.js 保持一致，改一边就得改另一边。 */
-  var TEXT_CAP = 200000;
-  var TERM_PAGE = 500;
+  /* 手绘终端块要复刻 ui.terminal 的两道防卡死闸门：字符上限 + 分页追加。
+     直接取 runtime 导出的那份，别再抄一遍数值——抄一份就意味着改一边忘另一边时，
+     这条分支会悄无声息地退回到没有保护的状态。 */
+  var TEXT_CAP = OneSSH.limits.text;
+  var TERM_PAGE = OneSSH.limits.page;
 
   /* ------------------------------------------------------------------ *
    * 取值：exit_code 0、timeout false、空字符串都是有效结果，

@@ -50,6 +50,12 @@ function contextify(env) {
 
 const settle = () => new Promise(r => setTimeout(r, 0));
 
+/* runtime.js 的 INIT_TIMEOUT_MS 是 3000：宿主不应答握手时，它要等满这段时间
+   才进入降级模式并放行积压的通知。浏览器 IIFE 没法把常量导出来，所以这里留一份
+   带余量的副本；哪天那个值调大了，这条断言会直接失败而不是变成时快时慢的竞态。 */
+const INIT_TIMEOUT_MS = 3000;
+const DEGRADE_WAIT_MS = INIT_TIMEOUT_MS + 400;
+
 // 起一张卡片：装载运行时（可选装载视图），完成握手，返回操作句柄。
 // 必须是 async：握手结果是 Promise 兑现的，同步断言会跑在 initialized 发出之前。
 async function boot(tool, { view = true, hostCapabilities = { serverTools: {} }, hostContext = {} } = {}) {
@@ -167,6 +173,17 @@ test('非 JSON-RPC 帧一律忽略，不会被原型链上的成员骗到', asyn
   assert.equal(card.root.getAttribute('data-state'), 'waiting');
 });
 
+test('非宿主帧发来的消息一律不信', async () => {
+  const card = await boot('exec');
+  const before = card.sent.length;
+  // 同一页面上的其他 iframe 也能往这里发消息，只有 window.parent 才是宿主
+  card.deliver({ jsonrpc: '2.0', method: 'ui/notifications/tool-result', params: fixture('exec').result },
+    { name: 'another-frame' });
+  assert.equal(card.root.getAttribute('data-state'), 'waiting', '非宿主帧不该能渲染内容');
+  card.deliver({ jsonrpc: '2.0', id: 77, method: 'ping', params: {} }, { name: 'another-frame' });
+  assert.equal(card.sent.length, before, '非宿主帧不该能拿到任何回包');
+});
+
 test('只读白名单：破坏性工具一律不能从卡片发起', async () => {
   const card = await boot('file_list');
   const ctx = await card.ctx();
@@ -221,7 +238,7 @@ test('握手失败也要渲染后到的结果', async () => {
   // 宿主不应答 ui/initialize，直接推结果：运行时会先把通知压在队列里，
   // 等握手超时进入降级模式后再统一放行，所以这里必须等过那个窗口。
   env.deliver({ jsonrpc: '2.0', method: 'ui/notifications/tool-result', params: fixture('exec').result });
-  await new Promise(r => setTimeout(r, 3400));
+  await new Promise(r => setTimeout(r, DEGRADE_WAIT_MS));
   assert.ok(env.root.querySelector('.card'), '宿主不握手时也必须把结果渲染出来');
 });
 

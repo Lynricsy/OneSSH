@@ -78,8 +78,9 @@
      「显式传 .」指的是同一个目录：卡片也必须当成同一个，否则从子目录退回起始目录之后，
      标题会从「起始目录」变成一个孤零零的 "."。 */
   function isHomePath(pathText) {
-    var raw = strOf(pathText);
-    return raw === "" || raw === ".";
+    var raw = strOf(pathText).trim();
+    // "." 与 "./" 都是「登录起始目录」的合法写法，只认前者会让标题退化成一个孤零零的点
+    return raw === "" || raw === "." || raw === "./";
   }
 
   /* 面包屑：每一段都要能单独还原成一个可用的目录路径。

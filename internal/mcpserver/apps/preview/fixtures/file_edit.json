@@ -8,7 +8,7 @@
         "new_text": "access_log  /var/log/nginx/access.log combined buffer=32k flush=5s;"
       }
     ],
-    "expected_sha256": "3b1f0c9a77d4e5628f14b0a9c3e7d215884ab6f0c9d3e71a25b8f4c60d97ea31"
+    "expected_sha256": "a417a4ef7329ec3215574d63106d51192141234669531168183c6cd7a1ae64fc"
   },
   "result": {
     "content": [
@@ -29,7 +29,7 @@
     "content": [
       {
         "type": "text",
-        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+        "text": "host not authorized: web-09"
       }
     ],
     "isError": true

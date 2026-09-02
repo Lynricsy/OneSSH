@@ -71,7 +71,7 @@ const HOST_VARS = {
          "--color-text-secondary":"#b4b4b4","--color-border-primary":"#3d3d3d","--border-radius-md":"12px"},
 };
 const el = id => document.getElementById(id);
-const state = {tool:null, theme:"light", error:false, fixtures:{}, assets:null, seq:0, resultTimer:null};
+const state = {tool:null, theme:"light", error:false, fixtures:Object.create(null), assets:null, seq:0, resultTimer:null};
 
 function logLine(text){ const box=el("log"); box.textContent += text+"\n"; box.scrollTop = box.scrollHeight; }
 
@@ -136,7 +136,9 @@ window.addEventListener("message", async event => {
     // 连点两次工具时，这次 await 完全可能在新卡片装好之后才 resolve。
     if (seq !== state.seq || frame.contentWindow !== win) return;
     if (!data) { logLine("！缺少 fixtures/"+tool+".json"); return; }
-    notify("ui/notifications/tool-input", {arguments: data.input || {}});
+    // 错误态优先用样例自带的入参：有些错误只在特定入参下才可能发生
+    notify("ui/notifications/tool-input",
+      {arguments: (state.error && data.error_input) || data.input || {}});
     // 这 500ms 是故意留的「工具执行中」窗口，用来验收等待态；但它跨越了用户切卡片的时机，
     // 到点时必须确认台上还是同一张卡，不然推过去的就是上一个工具的结果。
     state.resultTimer = setTimeout(() => {
@@ -178,8 +180,15 @@ async function show(tool){
   el("current").textContent = tool + " · " + entry[2];
   for (const node of document.querySelectorAll(".item")) node.classList.toggle("active", node.dataset.tool === tool);
   el("log").textContent = "";
-  const frame = el("frame");
+  /* 整块换掉 iframe，而不是改同一个元素的 srcdoc：iframe 导航不会换掉 WindowProxy，
+     旧文档在切换瞬间发出的消息照样能通过 `event.source === frame.contentWindow`，
+     于是上一张卡的 tools/call 会被当成新卡的请求应答过去。换元素才能让来源判断真的分得开。 */
+  const old = el("frame");
+  const frame = document.createElement("iframe");
+  frame.id = "frame";
+  frame.setAttribute("sandbox", "allow-scripts");
   frame.style.height = "120px";
+  old.replaceWith(frame);
   el("wrap").style.maxWidth = "";       // 新卡片从 inline 起步，容器也得跟着退出上一张卡的全屏
   const data = await fixture(tool);
   if (seq !== state.seq) return;        // 期间又点了别的工具，交给最新那次去写 srcdoc
@@ -216,7 +225,7 @@ function boot(){
     wrap.dataset.width = narrow ? "mobile" : "";
     el("width").setAttribute("aria-pressed", String(narrow));
   });
-  el("reload").addEventListener("click", async () => { state.assets = await loadAssets(); state.fixtures = {}; show(state.tool); });
+  el("reload").addEventListener("click", async () => { state.assets = await loadAssets(); state.fixtures = Object.create(null); show(state.tool); });
 }
 
 loadAssets().then(assets => { state.assets = assets; boot(); show(TOOLS[0][0]); })

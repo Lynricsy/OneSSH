@@ -4,7 +4,7 @@
     "content": [
       {
         "type": "text",
-        "text": "{\n  \"hosts\": [\n    {\n      \"id\": 1,\n      \"name\": \"web-01\",\n      \"addr\": \"10.0.1.11\",\n      \"port\": 22,\n      \"username\": \"deploy\",\n      \"auth_type\": \"key\",\n      \"key_id\": 3,\n      \"hostkey_fp\": \"SHA256:8Qk1v0oR2mZpN4xTfLcYs7WbJdEuHgAiKq3RnVe5Xy0\",\n      \"jump_host\": \"bastion\",\n      \"monitor_enabled\": true,\n      \"tags\": [\n        \"prod\",\n        \"nginx\"\n      ],\n      \"created_at\": 1780009070,\n      \"online\": true\n    },\n    {\n      \"id\": 2,\n      \"name\": \"web-02\",\n      \"addr\": \"10.0.1.12\",\n      \"port\": 22,\n      \"username\": \"deploy\",\n      \"auth_type\": \"key\",\n      \"key_id\": 3,\n      \"hostkey_fp\": \"SHA256:pR7dLm2Qw9XcVb1NkFgYt6HsJuAeZoIx4Cn0RvUy8Tq\",\n      \"jump_host\": \"bastion\",\n      \"monitor_enabled\": true,\n      \"tags\": [\n        \"prod\",\n        \"nginx\"\n      ],\n      \"created_at\": 1780009190,\n      \"online\": true\n    },\n    {\n      \"id\": 3,\n      \"name\": \"db-main\",\n      \"addr\": \"10.0.2.10\",\n      \"port\": 22,\n      \"username\": \"postgres\",\n      \"auth_type\": \"key\",\n      \"key_id\": 4,\n      \"hostkey_fp\": \"SHA256:Zx4Cv8Bn2Mq7Kj1Hg5Fd9Sa3Pl6Wo0Ei7Ru2Ty4Ui8Op\",\n      \"jump_host\": null,\n      \"monitor_enabled\": true,\n      \"tags\": [\n        \"prod\",\n        \"postgres\"\n      ],\n      \"created_at\": 1778713070,\n      \"online\": true\n    },\n    {\n      \"id\": 4,\n      \"name\": \"cache-01\",\n      \"addr\": \"10.0.2.21\",\n      \"port\": 22,\n      \"username\": \"redis\",\n      \"auth_type\": \"password\",\n      \"key_id\": null,\n      \"hostkey_fp\": null,\n      \"jump_host\": null,\n      \"monitor_enabled\": false,\n      \"tags\": [\n        \"prod\",\n        \"redis\"\n      ],\n      \"created_at\": 1782946670,\n      \"online\": false\n    },\n    {\n      \"id\": 5,\n      \"name\": \"build-runner\",\n      \"addr\": \"192.168.30.7\",\n      \"port\": 2222,\n      \"username\": \"ci\",\n      \"auth_type\": \"key\",\n      \"key_id\": 7,\n      \"hostkey_fp\": \"SHA256:Nm3Bv6Cx9Zl2Ka5Jh8Gf1Ds4Ap7Qw0Er3Ty6Ui9Op2Ls\",\n      \"jump_host\": null,\n      \"monitor_enabled\": true,\n      \"tags\": [\n        \"staging\",\n        \"ci\"\n      ],\n      \"created_at\": 1784847470,\n      \"online\": true\n    },\n    {\n      \"id\": 6,\n      \"name\": \"bastion\",\n      \"addr\": \"203.0.113.9\",\n      \"port\": 22,\n      \"username\": \"jump\",\n      \"auth_type\": \"key\",\n      \"key_id\": 3,\n      \"hostkey_fp\": \"SHA256:Qw8Er2Ty5Ui1Op4As7Df0Gh3Jk6Lz9Xc2Vb5Nm8Qp1\",\n      \"jump_host\": null,\n      \"monitor_enabled\": false,\n      \"tags\": [],\n      \"created_at\": 1778021870,\n      \"online\": true\n    }\n  ]\n}"
+        "text": "{\n  \"hosts\": [\n    {\n      \"id\": 1,\n      \"name\": \"web-01\",\n      \"addr\": \"10.0.1.11\",\n      \"port\": 22,\n      \"username\": \"deploy\",\n      \"auth_type\": \"key\",\n      \"key_id\": 3,\n      \"hostkey_fp\": \"SHA256:8Qk1v0oR2mZpN4xTfLcYs7WbJdEuHgAiKq3RnVe5Xy0\",\n      \"jump_host\": \"bastion\",\n      \"monitor_enabled\": true,\n      \"tags\": [\n        \"prod\",\n        \"nginx\"\n      ],\n      \"created_at\": 1780012064,\n      \"online\": true\n    },\n    {\n      \"id\": 2,\n      \"name\": \"web-02\",\n      \"addr\": \"10.0.1.12\",\n      \"port\": 22,\n      \"username\": \"deploy\",\n      \"auth_type\": \"key\",\n      \"key_id\": 3,\n      \"hostkey_fp\": \"SHA256:pR7dLm2Qw9XcVb1NkFgYt6HsJuAeZoIx4Cn0RvUy8Tq\",\n      \"jump_host\": \"bastion\",\n      \"monitor_enabled\": true,\n      \"tags\": [\n        \"prod\",\n        \"nginx\"\n      ],\n      \"created_at\": 1780012184,\n      \"online\": true\n    },\n    {\n      \"id\": 3,\n      \"name\": \"db-main\",\n      \"addr\": \"10.0.2.10\",\n      \"port\": 22,\n      \"username\": \"postgres\",\n      \"auth_type\": \"key\",\n      \"key_id\": 4,\n      \"hostkey_fp\": \"SHA256:Zx4Cv8Bn2Mq7Kj1Hg5Fd9Sa3Pl6Wo0Ei7Ru2Ty4Ui8Op\",\n      \"jump_host\": null,\n      \"monitor_enabled\": true,\n      \"tags\": [\n        \"prod\",\n        \"postgres\"\n      ],\n      \"created_at\": 1778716064,\n      \"online\": true\n    },\n    {\n      \"id\": 4,\n      \"name\": \"cache-01\",\n      \"addr\": \"10.0.2.21\",\n      \"port\": 22,\n      \"username\": \"redis\",\n      \"auth_type\": \"password\",\n      \"key_id\": null,\n      \"hostkey_fp\": null,\n      \"jump_host\": null,\n      \"monitor_enabled\": false,\n      \"tags\": [\n        \"prod\",\n        \"redis\"\n      ],\n      \"created_at\": 1782949664,\n      \"online\": false\n    },\n    {\n      \"id\": 5,\n      \"name\": \"build-runner\",\n      \"addr\": \"192.168.30.7\",\n      \"port\": 2222,\n      \"username\": \"ci\",\n      \"auth_type\": \"key\",\n      \"key_id\": 7,\n      \"hostkey_fp\": \"SHA256:Nm3Bv6Cx9Zl2Ka5Jh8Gf1Ds4Ap7Qw0Er3Ty6Ui9Op2Ls\",\n      \"jump_host\": null,\n      \"monitor_enabled\": true,\n      \"tags\": [\n        \"staging\",\n        \"ci\"\n      ],\n      \"created_at\": 1784850464,\n      \"online\": true\n    },\n    {\n      \"id\": 6,\n      \"name\": \"bastion\",\n      \"addr\": \"203.0.113.9\",\n      \"port\": 22,\n      \"username\": \"jump\",\n      \"auth_type\": \"key\",\n      \"key_id\": 3,\n      \"hostkey_fp\": \"SHA256:Qw8Er2Ty5Ui1Op4As7Df0Gh3Jk6Lz9Xc2Vb5Nm8Qp1\",\n      \"jump_host\": null,\n      \"monitor_enabled\": false,\n      \"tags\": [],\n      \"created_at\": 1778024864,\n      \"online\": true\n    }\n  ]\n}"
       }
     ],
     "structuredContent": {
@@ -24,7 +24,7 @@
             "prod",
             "nginx"
           ],
-          "created_at": 1780009070,
+          "created_at": 1780012064,
           "online": true
         },
         {
@@ -42,7 +42,7 @@
             "prod",
             "nginx"
           ],
-          "created_at": 1780009190,
+          "created_at": 1780012184,
           "online": true
         },
         {
@@ -60,7 +60,7 @@
             "prod",
             "postgres"
           ],
-          "created_at": 1778713070,
+          "created_at": 1778716064,
           "online": true
         },
         {
@@ -78,7 +78,7 @@
             "prod",
             "redis"
           ],
-          "created_at": 1782946670,
+          "created_at": 1782949664,
           "online": false
         },
         {
@@ -96,7 +96,7 @@
             "staging",
             "ci"
           ],
-          "created_at": 1784847470,
+          "created_at": 1784850464,
           "online": true
         },
         {
@@ -111,7 +111,7 @@
           "jump_host": null,
           "monitor_enabled": false,
           "tags": [],
-          "created_at": 1778021870,
+          "created_at": 1778024864,
           "online": true
         }
       ]
@@ -123,7 +123,7 @@
     "content": [
       {
         "type": "text",
-        "text": "host management not authorized\n该令牌没有 manage_hosts 权限。"
+        "text": "host management not authorized"
       }
     ],
     "isError": true

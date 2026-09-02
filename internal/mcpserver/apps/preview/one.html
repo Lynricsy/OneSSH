@@ -36,7 +36,10 @@ function load(tool){
 // 免得降级分支永远推成功态，出现「选了错误态却渲染成功卡片」这种只在降级下才露头的假象。
 const payload=fx=>ERROR?(fx.error||{content:[{type:"text",text:"host not authorized: web-01"}],isError:true}):fx.result;
 function pushResult(fx){
-  send({jsonrpc:"2.0",method:"ui/notifications/tool-input",params:{arguments:fx.input||{}}});
+  // 有些错误只在特定入参下才可能发生（hosts 为空、fresh=false、artifact_id 不是 UUID），
+  // 错误态就用样例自带的那份入参，免得画廊摆出一个真实调用永远走不到的组合。
+  send({jsonrpc:"2.0",method:"ui/notifications/tool-input",
+    params:{arguments:(ERROR&&fx.error_input)||fx.input||{}}});
   send({jsonrpc:"2.0",method:"ui/notifications/tool-result",params:payload(fx)});
 }
 window.addEventListener("message",async e=>{

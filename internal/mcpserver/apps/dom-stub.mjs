@@ -113,10 +113,24 @@ class Node {
     const i = list.indexOf(fn);
     if (i >= 0) list.splice(i, 1);
   }
+  /* 真实浏览器里事件会沿 parentNode 冒泡，卡片头的折叠正是靠这一点工作的，
+     而头部内部的按钮又靠 stopPropagation 把它拦住。替身不模拟冒泡的话，
+     这两条相互制衡的逻辑在测试里都跑不到。 */
   dispatch(type, event) {
-    (this.listeners.get(type) || []).slice().forEach(fn => fn.call(this, event || { type, target: this, preventDefault() {}, stopPropagation() {} }));
+    const ev = event || { type, target: this };
+    if (!ev.target) ev.target = this;
+    let stopped = false;
+    ev.stopPropagation = () => { stopped = true; };
+    if (typeof ev.preventDefault !== 'function') ev.preventDefault = () => { ev.defaultPrevented = true; };
+    let node = this;
+    while (node) {
+      (node.listeners.get(type) || []).slice().forEach(fn => fn.call(node, ev));
+      if (stopped) return ev;
+      node = node.parentNode;
+    }
+    return ev;
   }
-  click() { this.dispatch('click', { type: 'click', target: this, preventDefault() {}, stopPropagation() {} }); }
+  click() { this.dispatch('click', { type: 'click', target: this }); }
   get textContent() {
     if (this.nodeType === 3) return this._text;
     return this.childNodes.map(c => c.textContent).join('') || this._text;
@@ -187,7 +201,10 @@ export function createEnvironment({ title = 'OneSSH · 测试', tool = 'exec' } 
   window.parent = { postMessage(msg) { sent.push(msg); } };
   window.self = window;
 
-  const deliver = msg => (window._on.message || []).forEach(fn => fn({ source: window.parent, data: msg }));
+  /* source 可指定：卡片只信任 window.parent，安全测试需要能伪装成另一个 iframe。
+     默认仍是宿主帧，绝大多数用例不用关心这个参数。 */
+  const deliver = (msg, source) =>
+    (window._on.message || []).forEach(fn => fn({ source: source || window.parent, data: msg }));
 
   return { window, document, root, documentElement, sent, deliver, tool };
 }

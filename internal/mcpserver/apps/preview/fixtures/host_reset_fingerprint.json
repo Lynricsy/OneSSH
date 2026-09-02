@@ -19,7 +19,7 @@
     "content": [
       {
         "type": "text",
-        "text": "host management not authorized\n该令牌没有 manage_hosts 权限。"
+        "text": "host management not authorized"
       }
     ],
     "isError": true

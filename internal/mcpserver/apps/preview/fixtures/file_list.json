@@ -7,7 +7,7 @@
     "content": [
       {
         "type": "text",
-        "text": "{\n  \"entries\": [\n    {\n      \"name\": \"conf.d\",\n      \"size\": 4096,\n      \"mode\": \"drwxr-xr-x\",\n      \"mtime\": 1788368270,\n      \"directory\": true\n    },\n    {\n      \"name\": \"sites-available\",\n      \"size\": 4096,\n      \"mode\": \"drwxr-xr-x\",\n      \"mtime\": 1786575470,\n      \"directory\": true\n    },\n    {\n      \"name\": \"sites-enabled\",\n      \"size\": 4096,\n      \"mode\": \"drwxr-xr-x\",\n      \"mtime\": 1786575470,\n      \"directory\": true\n    },\n    {\n      \"name\": \"snippets\",\n      \"size\": 4096,\n      \"mode\": \"drwxr-xr-x\",\n      \"mtime\": 1776293870,\n      \"directory\": true\n    },\n    {\n      \"name\": \"fastcgi.conf\",\n      \"size\": 1077,\n      \"mode\": \"-rw-r--r--\",\n      \"mtime\": 1768258670,\n      \"directory\": false\n    },\n    {\n      \"name\": \"mime.types\",\n      \"size\": 5349,\n      \"mode\": \"-rw-r--r--\",\n      \"mtime\": 1768258670,\n      \"directory\": false\n    },\n    {\n      \"name\": \"nginx.conf\",\n      \"size\": 901,\n      \"mode\": \"-rw-r--r--\",\n      \"mtime\": 1788389330,\n      \"directory\": false\n    },\n    {\n      \"name\": \"proxy_params\",\n      \"size\": 355,\n      \"mode\": \"-rw-r--r--\",\n      \"mtime\": 1768258670,\n      \"directory\": false\n    },\n    {\n      \"name\": \"ssl.conf\",\n      \"size\": 214,\n      \"mode\": \"lrwxrwxrwx\",\n      \"mtime\": 1785106670,\n      \"directory\": false,\n      \"symlink_target\": \"/etc/letsencrypt/options-ssl-nginx.conf\"\n    },\n    {\n      \"name\": \"scgi_params\",\n      \"size\": 636,\n      \"mode\": \"-rw-r--r--\",\n      \"mtime\": 1768258670,\n      \"directory\": false\n    }\n  ]\n}"
+        "text": "{\n  \"entries\": [\n    {\n      \"name\": \"conf.d\",\n      \"size\": 4096,\n      \"mode\": \"drwxr-xr-x\",\n      \"mtime\": 1788371264,\n      \"directory\": true\n    },\n    {\n      \"name\": \"sites-available\",\n      \"size\": 4096,\n      \"mode\": \"drwxr-xr-x\",\n      \"mtime\": 1786578464,\n      \"directory\": true\n    },\n    {\n      \"name\": \"sites-enabled\",\n      \"size\": 4096,\n      \"mode\": \"drwxr-xr-x\",\n      \"mtime\": 1786578464,\n      \"directory\": true\n    },\n    {\n      \"name\": \"snippets\",\n      \"size\": 4096,\n      \"mode\": \"drwxr-xr-x\",\n      \"mtime\": 1776296864,\n      \"directory\": true\n    },\n    {\n      \"name\": \"fastcgi.conf\",\n      \"size\": 1077,\n      \"mode\": \"-rw-r--r--\",\n      \"mtime\": 1768261664,\n      \"directory\": false\n    },\n    {\n      \"name\": \"mime.types\",\n      \"size\": 5349,\n      \"mode\": \"-rw-r--r--\",\n      \"mtime\": 1768261664,\n      \"directory\": false\n    },\n    {\n      \"name\": \"nginx.conf\",\n      \"size\": 901,\n      \"mode\": \"-rw-r--r--\",\n      \"mtime\": 1788392324,\n      \"directory\": false\n    },\n    {\n      \"name\": \"proxy_params\",\n      \"size\": 355,\n      \"mode\": \"-rw-r--r--\",\n      \"mtime\": 1768261664,\n      \"directory\": false\n    },\n    {\n      \"name\": \"ssl.conf\",\n      \"size\": 214,\n      \"mode\": \"lrwxrwxrwx\",\n      \"mtime\": 1785109664,\n      \"directory\": false,\n      \"symlink_target\": \"/etc/letsencrypt/options-ssl-nginx.conf\"\n    },\n    {\n      \"name\": \"scgi_params\",\n      \"size\": 636,\n      \"mode\": \"-rw-r--r--\",\n      \"mtime\": 1768261664,\n      \"directory\": false\n    }\n  ]\n}"
       }
     ],
     "structuredContent": {
@@ -16,63 +16,63 @@
           "name": "conf.d",
           "size": 4096,
           "mode": "drwxr-xr-x",
-          "mtime": 1788368270,
+          "mtime": 1788371264,
           "directory": true
         },
         {
           "name": "sites-available",
           "size": 4096,
           "mode": "drwxr-xr-x",
-          "mtime": 1786575470,
+          "mtime": 1786578464,
           "directory": true
         },
         {
           "name": "sites-enabled",
           "size": 4096,
           "mode": "drwxr-xr-x",
-          "mtime": 1786575470,
+          "mtime": 1786578464,
           "directory": true
         },
         {
           "name": "snippets",
           "size": 4096,
           "mode": "drwxr-xr-x",
-          "mtime": 1776293870,
+          "mtime": 1776296864,
           "directory": true
         },
         {
           "name": "fastcgi.conf",
           "size": 1077,
           "mode": "-rw-r--r--",
-          "mtime": 1768258670,
+          "mtime": 1768261664,
           "directory": false
         },
         {
           "name": "mime.types",
           "size": 5349,
           "mode": "-rw-r--r--",
-          "mtime": 1768258670,
+          "mtime": 1768261664,
           "directory": false
         },
         {
           "name": "nginx.conf",
           "size": 901,
           "mode": "-rw-r--r--",
-          "mtime": 1788389330,
+          "mtime": 1788392324,
           "directory": false
         },
         {
           "name": "proxy_params",
           "size": 355,
           "mode": "-rw-r--r--",
-          "mtime": 1768258670,
+          "mtime": 1768261664,
           "directory": false
         },
         {
           "name": "ssl.conf",
           "size": 214,
           "mode": "lrwxrwxrwx",
-          "mtime": 1785106670,
+          "mtime": 1785109664,
           "directory": false,
           "symlink_target": "/etc/letsencrypt/options-ssl-nginx.conf"
         },
@@ -80,7 +80,7 @@
           "name": "scgi_params",
           "size": 636,
           "mode": "-rw-r--r--",
-          "mtime": 1768258670,
+          "mtime": 1768261664,
           "directory": false
         }
       ]
@@ -109,7 +109,7 @@
     "content": [
       {
         "type": "text",
-        "text": "host not authorized: web-09\n可用主机请先调用 hosts_list 确认。"
+        "text": "host not authorized: web-09"
       }
     ],
     "isError": true

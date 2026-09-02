@@ -9,6 +9,15 @@
 
   var ui = OneSSH.ui, fmt = OneSSH.fmt, h = OneSSH.h, t = OneSSH.t;
 
+  var TEST_FOLD = 20;   // 与 .term-body 的可视行数一致：超出的部分由终端块自己的展开按钮负责
+
+  // 服务端只对合并流做了截断，单独取出的 stdout 要自己收口，否则一条卡片能吐出几百 KiB
+  function capLines(text, limit) {
+    var lines = fmt.lines(text);
+    if (lines.length <= limit * 40) return text;   // 留足余量：这里防的是失控的量级，不是精确裁到 N 行
+    return lines.slice(0, limit * 40).join("\n") + "\n… 输出过长，已截断";
+  }
+
   // id / port / key_id / exit_code / total_lines 都可能是 null，而 0 是合法值，
   // 所以统一走「是不是有限数值」的判断，绝不用 falsy 顺手把 0 丢掉。
   function numOf(value) {
@@ -330,7 +339,10 @@
     // 行数截断，用它才和上面那个「输出行数」以及「已截断」提示对得上。
     // data.stdout 兜底是防御性的：万一网关只填了 stdout 没填 output，别把有内容说成空。
     var merged = textOf(data.output);
-    var stdout = stderr ? textOf(data.stdout) : (merged || textOf(data.stdout));
+    /* 有 stderr 时才需要拿未截断的 data.stdout 来还原「纯标准输出」，
+       但它没走过服务端的 max_lines 截断，直接渲染最多能吐出 256 KiB，
+       还会和卡片上那句「输出已截断」自相矛盾。这里按同样的行数收一刀。 */
+    var stdout = stderr ? capLines(textOf(data.stdout), TEST_FOLD) : (merged || textOf(data.stdout));
 
     var status;
     if (timeout) status = ui.pill("warn", t("超时", "Timed out"));

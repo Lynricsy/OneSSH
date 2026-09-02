@@ -15,7 +15,7 @@
     "content": [
       {
         "type": "text",
-        "text": "{\n  \"id\": 9,\n  \"name\": \"cache-02\",\n  \"addr\": \"10.0.2.22\",\n  \"port\": 22,\n  \"username\": \"redis\",\n  \"auth_type\": \"key\",\n  \"key_id\": 3,\n  \"hostkey_fp\": null,\n  \"jump_host\": null,\n  \"monitor_enabled\": true,\n  \"tags\": [\n    \"prod\",\n    \"redis\"\n  ],\n  \"created_at\": 1788389750,\n  \"online\": false\n}"
+        "text": "{\n  \"id\": 9,\n  \"name\": \"cache-02\",\n  \"addr\": \"10.0.2.22\",\n  \"port\": 22,\n  \"username\": \"redis\",\n  \"auth_type\": \"key\",\n  \"key_id\": 3,\n  \"hostkey_fp\": null,\n  \"jump_host\": null,\n  \"monitor_enabled\": true,\n  \"tags\": [\n    \"prod\",\n    \"redis\"\n  ],\n  \"created_at\": 1788392744,\n  \"online\": false\n}"
       }
     ],
     "structuredContent": {
@@ -33,7 +33,7 @@
         "prod",
         "redis"
       ],
-      "created_at": 1788389750,
+      "created_at": 1788392744,
       "online": false
     },
     "isError": false
@@ -43,7 +43,7 @@
     "content": [
       {
         "type": "text",
-        "text": "host management not authorized\n该令牌没有 manage_hosts 权限。"
+        "text": "host management not authorized"
       }
     ],
     "isError": true

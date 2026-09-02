@@ -7,12 +7,12 @@
     "content": [
       {
         "type": "text",
-        "text": "{\n  \"host_id\": 1,\n  \"ts\": 1788389830,\n  \"cpu_pct\": 37.4,\n  \"mem_used_kb\": 6094848,\n  \"mem_total_kb\": 8126464,\n  \"load1\": 1.27,\n  \"disks\": [\n    {\n      \"mount\": \"/\",\n      \"used_kb\": 38914048,\n      \"total_kb\": 51609600\n    },\n    {\n      \"mount\": \"/var\",\n      \"used_kb\": 19398656,\n      \"total_kb\": 20971520\n    },\n    {\n      \"mount\": \"/boot\",\n      \"used_kb\": 198656,\n      \"total_kb\": 1046528\n    },\n    {\n      \"mount\": \"/srv/assets\",\n      \"used_kb\": 104857600,\n      \"total_kb\": 524288000\n    }\n  ]\n}"
+        "text": "{\n  \"host_id\": 1,\n  \"ts\": 1788392824,\n  \"cpu_pct\": 37.4,\n  \"mem_used_kb\": 6094848,\n  \"mem_total_kb\": 8126464,\n  \"load1\": 1.27,\n  \"disks\": [\n    {\n      \"mount\": \"/\",\n      \"used_kb\": 38914048,\n      \"total_kb\": 51609600\n    },\n    {\n      \"mount\": \"/var\",\n      \"used_kb\": 19398656,\n      \"total_kb\": 20971520\n    },\n    {\n      \"mount\": \"/boot\",\n      \"used_kb\": 198656,\n      \"total_kb\": 1046528\n    },\n    {\n      \"mount\": \"/srv/assets\",\n      \"used_kb\": 104857600,\n      \"total_kb\": 524288000\n    }\n  ]\n}"
       }
     ],
     "structuredContent": {
       "host_id": 1,
-      "ts": 1788389830,
+      "ts": 1788392824,
       "cpu_pct": 37.4,
       "mem_used_kb": 6094848,
       "mem_total_kb": 8126464,
@@ -43,6 +43,10 @@
     "isError": false
   },
   "title": "资源指标",
+  "error_input": {
+    "host": "web-09",
+    "fresh": false
+  },
   "error": {
     "content": [
       {

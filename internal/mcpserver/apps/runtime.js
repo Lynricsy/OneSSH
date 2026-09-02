@@ -1041,7 +1041,6 @@
 
   function canFullscreen() {
     // 宿主只会授予我们声明过的模式，所以先看自己的声明，再跟宿主给的清单取交集。
-    if (APP_DISPLAY_MODES.indexOf("fullscreen") < 0) return false;
     if (Array.isArray(state.displayModes) && state.displayModes.length) {
       return state.displayModes.indexOf("fullscreen") >= 0 || isFullscreen();
     }
@@ -1498,5 +1497,10 @@
     handshake();
   }
 
-  window.OneSSH = { boot: boot, view: view, ui: ui, fmt: fmt, t: t, h: h };
+  /* limits 导出的是两道防卡死闸门：极少数视图（grep 的非连续行号）必须自己搭终端块，
+     以前它们只能照抄一份数值，改一边忘另一边就等于悄悄绕开了保护。 */
+  window.OneSSH = {
+    boot: boot, view: view, ui: ui, fmt: fmt, t: t, h: h,
+    limits: { text: TEXT_LIMIT, page: TERM_PAGE, fold: TERM_LINES }
+  };
 })();

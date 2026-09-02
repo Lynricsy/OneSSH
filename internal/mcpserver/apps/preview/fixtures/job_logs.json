@@ -1,6 +1,6 @@
 {
   "input": {
-    "job_id": "job_7cf3a91e",
+    "job_id": "7cf3a91e-1b2d-4f60-8a35-c9e07d41b862",
     "tail_lines": 100
   },
   "result": {
@@ -20,7 +20,7 @@
     "content": [
       {
         "type": "text",
-        "text": "job not authorized: job_7cf3a91e"
+        "text": "job not authorized: 7cf3a91e-1b2d-4f60-8a35-c9e07d41b862"
       }
     ],
     "isError": true

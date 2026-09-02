@@ -1,6 +1,6 @@
 {
   "input": {
-    "artifact_id": "art_9f2c1b7e",
+    "artifact_id": "0f2c1b7e-6d41-4a19-9b2e-58c7a1d4e930",
     "offset": 401,
     "limit": 80
   },
@@ -18,11 +18,16 @@
     "isError": false
   },
   "title": "截断输出",
+  "error_input": {
+    "artifact_id": "not-a-uuid",
+    "offset": 1,
+    "limit": 80
+  },
   "error": {
     "content": [
       {
         "type": "text",
-        "text": "artifact 已过期或不存在"
+        "text": "artifact_id 无效"
       }
     ],
     "isError": true

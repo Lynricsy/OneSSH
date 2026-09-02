@@ -1,17 +1,17 @@
 {
   "input": {
-    "job_id": "job_7cf3a91e"
+    "job_id": "7cf3a91e-1b2d-4f60-8a35-c9e07d41b862"
   },
   "result": {
     "content": [
       {
         "type": "text",
-        "text": "{\n  \"job\": {\n    \"id\": \"job_7cf3a91e\",\n    \"host_id\": 5,\n    \"command\": \"make release VERSION=v0.2.0\",\n    \"cwd\": \"/srv/onessh\",\n    \"pid\": 48001,\n    \"used_setsid\": true,\n    \"status\": \"running\",\n    \"exit_code\": null,\n    \"started_at\": 1788379160,\n    \"finished_at\": null\n  },\n  \"log_bytes\": 182934\n}"
+        "text": "{\n  \"job\": {\n    \"id\": \"7cf3a91e-1b2d-4f60-8a35-c9e07d41b862\",\n    \"host_id\": 5,\n    \"command\": \"make release VERSION=v0.2.0\",\n    \"cwd\": \"/srv/onessh\",\n    \"pid\": 48001,\n    \"used_setsid\": true,\n    \"status\": \"running\",\n    \"exit_code\": null,\n    \"started_at\": 1788382154,\n    \"finished_at\": null\n  },\n  \"log_bytes\": 182934\n}"
       }
     ],
     "structuredContent": {
       "job": {
-        "id": "job_7cf3a91e",
+        "id": "7cf3a91e-1b2d-4f60-8a35-c9e07d41b862",
         "host_id": 5,
         "command": "make release VERSION=v0.2.0",
         "cwd": "/srv/onessh",
@@ -19,7 +19,7 @@
         "used_setsid": true,
         "status": "running",
         "exit_code": null,
-        "started_at": 1788379160,
+        "started_at": 1788382154,
         "finished_at": null
       },
       "log_bytes": 182934
@@ -31,7 +31,7 @@
     "content": [
       {
         "type": "text",
-        "text": "unknown job: job_7cf3a91e"
+        "text": "unknown job: 7cf3a91e-1b2d-4f60-8a35-c9e07d41b862"
       }
     ],
     "isError": true

@@ -1,6 +1,6 @@
 {
   "input": {
-    "job_id": "job_51ac7f23",
+    "job_id": "51ac7f23-08d6-4b1f-a742-e35c9b016dd8",
     "signal": "TERM"
   },
   "result": {
@@ -20,7 +20,7 @@
     "content": [
       {
         "type": "text",
-        "text": "unknown job: job_51ac7f23"
+        "text": "unknown job: 51ac7f23-08d6-4b1f-a742-e35c9b016dd8"
       }
     ],
     "isError": true
