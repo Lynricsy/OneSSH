@@ -144,8 +144,9 @@ func TestAppsExposeResourceForEveryTool(t *testing.T) {
 			t.Errorf("%s 的 resourceUri = %q，不符合内容版本化格式", name, uri)
 			continue
 		}
-		if legacy, _ := tool.Meta[appLegacyTemplateKey].(string); legacy != uri {
-			t.Errorf("%s 的旧版 outputTemplate = %q，应与 resourceUri 一致", name, legacy)
+		legacy, _ := tool.Meta[appLegacyTemplateKey].(string)
+		if !strings.HasPrefix(legacy, appLegacyPrefix) || !strings.HasSuffix(legacy, "/"+name) {
+			t.Errorf("%s 的旧版 outputTemplate = %q，应指向 skybridge 版本", name, legacy)
 		}
 		visibility := metaStrings(ui["visibility"])
 		if len(visibility) == 0 || visibility[0] != "model" {
@@ -275,8 +276,15 @@ func TestAppWidgetDomainRequiresBareHTTPSOrigin(t *testing.T) {
 	cases := map[string]string{
 		"https://ssh.example.com":      "https://ssh.example.com",
 		"https://ssh.example.com:8443": "https://ssh.example.com:8443",
+		"https://ssh.example.com/":     "https://ssh.example.com",
 		"http://127.0.0.1:8866":        "",
 		"https://ssh.example.com/mcp":  "",
+		"https://ssh.example.com?x=1":  "",
+		"https://ssh.example.com#frag": "",
+		"https://user@ssh.example.com": "",
+		"https://ssh.example.com?":     "",
+		"ftp://ssh.example.com":        "",
+		"ssh.example.com":              "",
 		"":                             "",
 	}
 	for input, want := range cases {
@@ -305,5 +313,46 @@ func TestAppResourceURIIsStableForSameContent(t *testing.T) {
 func TestAssembleAppHTMLRejectsUnknownView(t *testing.T) {
 	if _, err := assembleAppHTML(appBinding{Tool: "ghost", View: "nope"}); err == nil {
 		t.Fatal("未知视图应当组装失败")
+	}
+}
+
+// 只认 openai/outputTemplate 的旧客户端要求它指向的资源用 skybridge MIME。
+// 这份资源走 URI 模板：能按 URI 读到，但不会把 resources/list 刷成两倍长。
+func TestLegacyWidgetResourceServesSkybridgeMIME(t *testing.T) {
+	session := newAppTestSession(t, "https://ssh.example.com", true)
+	tools := listAppTools(t, session)
+	standard := listAppResources(t, session)
+	if len(standard) != len(tools) {
+		t.Fatalf("resources/list = %d，应仍只列标准资源 %d 条", len(standard), len(tools))
+	}
+	for name, tool := range tools {
+		legacy, _ := tool.Meta[appLegacyTemplateKey].(string)
+		if standard[legacy] != nil {
+			t.Errorf("旧版资源 %s 不应出现在 resources/list 中", legacy)
+		}
+		read, err := session.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: legacy})
+		if err != nil {
+			t.Fatalf("ReadResource(%s) 出错: %v", legacy, err)
+		}
+		if len(read.Contents) != 1 || read.Contents[0].MIMEType != appLegacyMIMEType {
+			t.Fatalf("旧版资源 %s 的内容 = %#v", legacy, read.Contents)
+		}
+		if !strings.Contains(read.Contents[0].Text, `OneSSH.boot("`+name+`")`) {
+			t.Errorf("旧版资源 %s 的正文不是 %s 的卡片", legacy, name)
+		}
+		ui, _ := tool.Meta["ui"].(map[string]any)
+		standardURI, _ := ui["resourceUri"].(string)
+		modern, err := session.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: standardURI})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if modern.Contents[0].Text != read.Contents[0].Text {
+			t.Errorf("%s 的新旧两份正文不一致", name)
+		}
+	}
+	// 版本对不上说明宿主用的是缓存里的旧地址，此时应当报未找到而不是回一份新正文。
+	stale := appLegacyPrefix + "00000000/exec"
+	if _, err := session.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: stale}); err == nil {
+		t.Fatal("过期的旧版 URI 应当读取失败")
 	}
 }

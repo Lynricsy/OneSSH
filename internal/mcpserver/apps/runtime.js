@@ -8,7 +8,11 @@
 
   var PROTOCOL_VERSION = "2026-01-26";
   var INIT_TIMEOUT_MS = 3000;
-  var CALL_TIMEOUT_MS = 20000;
+  /* 卡片发起的只读调用要覆盖服务端真实的执行边界，而不是凭感觉给一个短值：
+     host_status 的现场采样带一秒静置、job_list 会逐台刷新任务，主机一多就远超 20 秒。
+     超时太短的后果是服务端明明还在正常处理，卡片却已经报「宿主没有响应」并丢弃了回包。
+     这里只用来兜住「宿主永远不回」导致 busy 卡死，所以给足余量。 */
+  var CALL_TIMEOUT_MS = 180000;
   var TEXT_LIMIT = 200000;   // 终端块单次渲染上限：再长的输出对人已无意义，却足以让 iframe 卡住
   var TERM_LINES = 24;
   var TERM_PAGE = 500;       // 展开时每次追加的行数：一次铺完上万行会让 iframe 卡住
@@ -1405,7 +1409,10 @@
   }
 
   function render(result) {
-    var key = stringify(result);
+    /* 去重键要同时含参数：宿主复用同一个 iframe 发起第二次调用时，两次结果完全可能
+       字节级相同（连着列两个空目录都是 {"entries":[]}），只比结果就会跳过重建，
+       卡片仍挂着上一次的路径/主机，看起来却像是这次调用的结果。 */
+    var key = stringify([state.input, result]);
     // 宿主在同一次调用里可能重复推送同一份结果；重渲染会导致折叠态丢失和高度抖动。
     // 但 tool-input 会先把状态切成 running，直接早退就再没人把它切回去，
     // 「参数 → 内容相同的结果」这条常见重放序列会让卡片永远停在执行中。

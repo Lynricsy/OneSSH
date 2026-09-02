@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -19,6 +20,10 @@ import (
 // 因此 style.css / runtime.js / views/*.js 在启动时被拼进一份 HTML，而不是按 URL 引用。
 const (
 	appMIMEType = "text/html;profile=mcp-app"
+	// 旧版 ChatGPT 只认 openai/outputTemplate，并且要求它指向的资源用 skybridge MIME。
+	// 光发别名字段不发对应 MIME，旧客户端会直接拒绝渲染，等于白给了一个兼容承诺。
+	appLegacyMIMEType = "text/html+skybridge"
+	appLegacyPrefix   = "ui://onessh/legacy/"
 	// 旧版 ChatGPT Apps SDK 的别名字段，与标准 ui.* 并存；只认标准字段的宿主会忽略它们。
 	appLegacyTemplateKey    = "openai/outputTemplate"
 	appLegacyAccessibleKey  = "openai/widgetAccessible"
@@ -90,9 +95,10 @@ var appBindings = []appBinding{
 }
 
 type appEntry struct {
-	binding appBinding
-	uri     string
-	html    string
+	binding   appBinding
+	uri       string
+	legacyURI string
+	html      string
 }
 
 type appCatalog struct {
@@ -116,7 +122,10 @@ func newAppCatalog(publicURL string, enabled bool) (*appCatalog, error) {
 		if len(html) > appHTMLLimit {
 			return nil, fmt.Errorf("卡片 %s 的 HTML 为 %d 字节，超过 %d 上限", binding.Tool, len(html), appHTMLLimit)
 		}
-		catalog.entries[binding.Tool] = appEntry{binding: binding, uri: appResourceURI(binding.Tool, html), html: html}
+		uri := appResourceURI(binding.Tool, html)
+		catalog.entries[binding.Tool] = appEntry{
+			binding: binding, uri: uri, legacyURI: appLegacyResourceURI(binding.Tool, uri), html: html,
+		}
 		catalog.order = append(catalog.order, binding.Tool)
 	}
 	return catalog, nil
@@ -141,12 +150,18 @@ func appResourceMeta(publicURL string) mcp.Meta {
 	return meta
 }
 
+// 宿主拿 domain 去分配独立沙箱源，它必须是一个纯 origin。
+// 逐字符判前缀太容易漏：https://a.example?x=1 里没有斜杠，却已经不是 origin 了。
+// 交给 url.Parse 逐项排除路径、查询、片段和用户信息，宁可不发布也不发一个宿主解析不了的值。
 func appWidgetDomain(publicURL string) string {
-	trimmed := strings.TrimSpace(publicURL)
-	if !strings.HasPrefix(trimmed, "https://") || strings.Contains(strings.TrimPrefix(trimmed, "https://"), "/") {
+	parsed, err := url.Parse(strings.TrimSpace(publicURL))
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" ||
+		parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery ||
+		parsed.Fragment != "" || parsed.RawFragment != "" ||
+		(parsed.Path != "" && parsed.Path != "/") {
 		return ""
 	}
-	return trimmed
+	return "https://" + parsed.Host
 }
 
 // appResourceURI 把 HTML 内容哈希写进 URI。宿主按 URI 缓存卡片正文，
@@ -154,6 +169,16 @@ func appWidgetDomain(publicURL string) string {
 func appResourceURI(tool, html string) string {
 	sum := sha256.Sum256([]byte(html))
 	return "ui://onessh/" + tool + "?v=" + hex.EncodeToString(sum[:])[:8]
+}
+
+// 旧版 URI 把版本放进路径而不是查询串：它要由一条 URI 模板来匹配，
+// 而模板变量不吃 "?"，带查询的地址会匹配不上。
+func appLegacyResourceURI(tool, uri string) string {
+	version := uri
+	if index := strings.LastIndex(uri, "?v="); index >= 0 {
+		version = uri[index+3:]
+	}
+	return appLegacyPrefix + version + "/" + tool
 }
 
 func assembleAppHTML(binding appBinding) (string, error) {
@@ -206,8 +231,10 @@ func (c *appCatalog) decorate(tool *mcp.Tool) {
 		visibility = append(visibility, "app")
 	}
 	meta := mcp.Meta{
-		"ui":                   map[string]any{"resourceUri": entry.uri, "visibility": visibility},
-		appLegacyTemplateKey:   entry.uri,
+		"ui": map[string]any{"resourceUri": entry.uri, "visibility": visibility},
+		// 指向 skybridge 那一份：认标准字段的宿主走上面的 ui.resourceUri，
+		// 只认旧字段的宿主读到的资源 MIME 也和它的预期一致。
+		appLegacyTemplateKey:   entry.legacyURI,
 		appLegacyAccessibleKey: entry.binding.Callable,
 	}
 	if entry.binding.Invoking != "" {
@@ -226,6 +253,7 @@ func (c *appCatalog) registerResources(server *mcp.Server) {
 	if c == nil || !c.enabled || server == nil {
 		return
 	}
+	c.registerLegacyTemplate(server)
 	for _, tool := range c.order {
 		entry := c.entries[tool]
 		server.AddResource(&mcp.Resource{
@@ -250,4 +278,48 @@ func (c *appCatalog) AppHTML(tool string) (string, bool) {
 	}
 	entry, ok := c.entries[tool]
 	return entry.html, ok
+}
+
+// 旧版卡片走 URI 模板而不是 32 个资源条目：模板可以按 URI 读取，却不会出现在
+// resources/list 里。这样只认旧字段的宿主仍能取到 skybridge 版本，而标准宿主
+// 看到的资源清单还是干干净净的 32 条，不会被同一批卡片刷两遍。
+func (c *appCatalog) registerLegacyTemplate(server *mcp.Server) {
+	server.AddResourceTemplate(&mcp.ResourceTemplate{
+		URITemplate: appLegacyPrefix + "{version}/{tool}",
+		Name:        "onessh-app-legacy",
+		Title:       "OneSSH 卡片（旧版 skybridge）",
+		Description: "与 ui://onessh/<工具名> 同一份正文，供只认 openai/outputTemplate 的客户端读取",
+		MIMEType:    appLegacyMIMEType,
+		Meta:        c.uiMeta,
+	}, func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		uri := ""
+		if req != nil && req.Params != nil {
+			uri = req.Params.URI
+		}
+		entry, ok := c.legacyEntry(uri)
+		if !ok {
+			return nil, mcp.ResourceNotFoundError(uri)
+		}
+		return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{
+			URI: entry.legacyURI, MIMEType: appLegacyMIMEType, Text: entry.html, Meta: c.uiMeta,
+		}}}, nil
+	})
+}
+
+// legacyEntry 只接受与当前正文哈希完全一致的旧版 URI：
+// 版本对不上说明宿主拿的是缓存里的旧地址，此时返回未找到比回一份新正文更诚实。
+func (c *appCatalog) legacyEntry(uri string) (appEntry, bool) {
+	rest := strings.TrimPrefix(uri, appLegacyPrefix)
+	if rest == uri {
+		return appEntry{}, false
+	}
+	index := strings.Index(rest, "/")
+	if index < 0 {
+		return appEntry{}, false
+	}
+	entry, ok := c.entries[rest[index+1:]]
+	if !ok || entry.legacyURI != uri {
+		return appEntry{}, false
+	}
+	return entry, true
 }

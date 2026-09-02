@@ -213,7 +213,8 @@ OneSSH 为**全部 32 个工具**各提供一张 [MCP Apps](https://modelcontext
 
 实现方式是标准的三件套，不依赖任何厂商私有协议：
 
-- 每个工具在 `tools/list` 里带 `_meta.ui.resourceUri`，指向 `ui://onessh/<工具名>?v=<内容哈希>`；同时附带旧版 `openai/outputTemplate` 别名，兼容尚未升级的 ChatGPT 版本。
+- 每个工具在 `tools/list` 里带 `_meta.ui.resourceUri`，指向 `ui://onessh/<工具名>?v=<内容哈希>`。
+- 同时附带旧版 `openai/outputTemplate` 别名，指向同一份正文的 `text/html+skybridge` 版本，供只认旧字段的 ChatGPT 版本读取。这份旧版资源走 URI 模板发布：按 URI 能读到，但不会出现在 `resources/list` 里，标准客户端看到的仍是干净的 32 条。
 - 对应资源以 `text/html;profile=mcp-app` 返回一份**完全自包含**的 HTML：样式与脚本全部内联，`_meta.ui.csp` 声明不访问任何外部域，宿主据此把 iframe 的 CSP 收到最紧。
 - 卡片通过 `postMessage` 上的 JSON-RPC 与宿主通信：`ui/initialize` 握手、`ui/notifications/tool-result` 接收结果、`ui/notifications/size-changed` 自适应高度，并跟随宿主下发的主题与设计令牌自动切换深浅色。
 
