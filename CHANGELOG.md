@@ -4,6 +4,10 @@
 
 ## [未发布]
 
+### 修复
+
+- 将 OAuth refresh token 消费、新 access token 与替代 refresh token 的签发合并为单个立即写事务；瞬时 SQLite 写冲突会整体回滚并返回可重试的 5xx，不再永久烧毁客户端授权。
+
 ## [0.1.15] - 2026-09-03
 
 ### 新增

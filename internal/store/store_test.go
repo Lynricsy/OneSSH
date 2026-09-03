@@ -101,21 +101,16 @@ func TestOpenWaitsForConcurrentWriter(t *testing.T) {
 	defer st.Close()
 
 	ctx := context.Background()
-	first, err := st.DB.Conn(ctx)
+	tx, err := st.DB.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer first.Close()
+	defer tx.Rollback()
 	second, err := st.DB.Conn(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer second.Close()
-
-	if _, err = first.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		t.Fatal(err)
-	}
-	defer first.ExecContext(ctx, `ROLLBACK`)
 
 	result := make(chan error, 1)
 	go func() {
@@ -128,7 +123,7 @@ func TestOpenWaitsForConcurrentWriter(t *testing.T) {
 		t.Fatalf("并发写入未等待锁释放: %v", err)
 	case <-time.After(100 * time.Millisecond):
 	}
-	if _, err = first.ExecContext(ctx, `ROLLBACK`); err != nil {
+	if err = tx.Rollback(); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -785,7 +780,12 @@ func TestDeleteHostRevokesRestrictedOAuthRefreshToken(t *testing.T) {
 	if err = st.DeleteHost(ctx, host.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = st.UseOAuthRefreshToken(ctx, "refresh-hash", client.ClientID, "http://localhost/mcp", time.Now().Unix()); !errors.Is(err, sql.ErrNoRows) {
+	if _, err = st.RotateOAuthRefreshToken(ctx, OAuthRefreshTokenRotation{
+		TokenHash: "refresh-hash",
+		ClientID:  client.ClientID,
+		Resource:  "http://localhost/mcp",
+		Now:       time.Now().Unix(),
+	}); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("删除主机后受限刷新授权仍存在: %v", err)
 	}
 }

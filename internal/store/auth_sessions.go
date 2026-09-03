@@ -33,7 +33,17 @@ func (s *Store) CreateToken(ctx context.Context, in TokenCreate) (Token, error) 
 		return Token{}, err
 	}
 	defer tx.Rollback()
-	now := time.Now().Unix()
+	token, err := createTokenTx(ctx, tx, in, time.Now().Unix())
+	if err != nil {
+		return Token{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return Token{}, err
+	}
+	return token, nil
+}
+
+func createTokenTx(ctx context.Context, tx *sql.Tx, in TokenCreate, now int64) (Token, error) {
 	source := in.Source
 	if source == "" {
 		source = "manual"
@@ -46,14 +56,14 @@ func (s *Store) CreateToken(ctx context.Context, in TokenCreate) (Token, error) 
 	if err != nil {
 		return Token{}, err
 	}
-	id, _ := res.LastInsertId()
-	for _, hid := range in.HostIDs {
-		if _, err = tx.ExecContext(ctx, `INSERT INTO token_hosts(token_id,host_id) VALUES(?,?)`, id, hid); err != nil {
+	id, err := res.LastInsertId()
+	if err != nil {
+		return Token{}, err
+	}
+	for _, hostID := range in.HostIDs {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO token_hosts(token_id,host_id) VALUES(?,?)`, id, hostID); err != nil {
 			return Token{}, err
 		}
-	}
-	if err = tx.Commit(); err != nil {
-		return Token{}, err
 	}
 	token := Token{ID: id, Name: in.Name, AllHosts: in.AllHosts, ManageHosts: in.ManageHosts, Source: source, CreatedAt: now}
 	token.ExpiresAt = sql.NullInt64{Int64: in.ExpiresAt, Valid: in.ExpiresAt > 0}

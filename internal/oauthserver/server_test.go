@@ -179,6 +179,86 @@ func TestOAuthAuthorizationCodeFlowPreservesPermissionsAndAudience(t *testing.T)
 	}
 }
 
+func TestOAuthRefreshFailureRollsBackRotation(t *testing.T) {
+	server, st := newTestServer(t)
+	ctx := context.Background()
+	const (
+		clientID          = "rotation-client"
+		resource          = "http://localhost:8866/mcp"
+		plainRefreshToken = "osh_refresh_retryable"
+	)
+	if _, err := st.CreateOAuthClient(ctx, store.OAuthClient{
+		ClientID:     clientID,
+		ClientName:   "Rotation test",
+		RedirectURIs: []string{"http://localhost/callback"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	accessToken, err := st.CreateToken(ctx, store.TokenCreate{
+		Name:      "OAuth rotation seed",
+		Hash:      "seed-access-hash",
+		AllHosts:  true,
+		Source:    "oauth",
+		ExpiresAt: time.Now().Add(time.Hour).Unix(),
+		Resource:  resource,
+		ClientID:  clientID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = st.CreateOAuthRefreshToken(ctx, store.OAuthRefreshToken{
+		TokenHash:     store.TokenHash(plainRefreshToken),
+		GrantID:       "rotation-grant",
+		AccessTokenID: accessToken.ID,
+		ClientID:      clientID,
+		Resource:      resource,
+		Scope:         "mcp",
+		AllHosts:      true,
+		ExpiresAt:     time.Now().Add(time.Hour).Unix(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = st.DB.ExecContext(ctx, `CREATE TRIGGER fail_oauth_refresh_insert BEFORE INSERT ON oauth_refresh_tokens BEGIN SELECT RAISE(FAIL, 'forced refresh failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	refresh := func() *httptest.ResponseRecorder {
+		t.Helper()
+		form := url.Values{
+			"grant_type":    {"refresh_token"},
+			"client_id":     {clientID},
+			"refresh_token": {plainRefreshToken},
+			"resource":      {resource},
+		}
+		request := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := httptest.NewRecorder()
+		server.Token(response, request)
+		return response
+	}
+
+	failed := refresh()
+	if failed.Code != http.StatusInternalServerError || !strings.Contains(failed.Body.String(), `"server_error"`) {
+		t.Fatalf("轮换写入失败未返回可重试服务端错误: %d %s", failed.Code, failed.Body.String())
+	}
+	var activeRefreshTokens, accessTokens int
+	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM oauth_refresh_tokens WHERE token_hash=? AND used_at IS NULL AND revoked_at IS NULL`, store.TokenHash(plainRefreshToken)).Scan(&activeRefreshTokens); err != nil {
+		t.Fatal(err)
+	}
+	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM tokens WHERE client_id=?`, clientID).Scan(&accessTokens); err != nil {
+		t.Fatal(err)
+	}
+	if activeRefreshTokens != 1 || accessTokens != 1 {
+		t.Fatalf("失败轮换未完整回滚: active refresh=%d access=%d", activeRefreshTokens, accessTokens)
+	}
+	if _, err = st.DB.ExecContext(ctx, `DROP TRIGGER fail_oauth_refresh_insert`); err != nil {
+		t.Fatal(err)
+	}
+	retry := refresh()
+	if retry.Code != http.StatusOK {
+		t.Fatalf("旧 refresh token 无法重试: %d %s", retry.Code, retry.Body.String())
+	}
+}
+
 func TestOAuthRejectsUnsafeRedirectAndInvalidPKCE(t *testing.T) {
 	server, _ := newTestServer(t)
 	unsafe := httptest.NewRecorder()
