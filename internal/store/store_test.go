@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 func TestOpenCreatesSchema(t *testing.T) {
@@ -101,21 +104,16 @@ func TestOpenWaitsForConcurrentWriter(t *testing.T) {
 	defer st.Close()
 
 	ctx := context.Background()
-	first, err := st.DB.Conn(ctx)
+	tx, err := st.DB.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer first.Close()
+	defer tx.Rollback()
 	second, err := st.DB.Conn(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer second.Close()
-
-	if _, err = first.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		t.Fatal(err)
-	}
-	defer first.ExecContext(ctx, `ROLLBACK`)
 
 	result := make(chan error, 1)
 	go func() {
@@ -128,7 +126,7 @@ func TestOpenWaitsForConcurrentWriter(t *testing.T) {
 		t.Fatalf("并发写入未等待锁释放: %v", err)
 	case <-time.After(100 * time.Millisecond):
 	}
-	if _, err = first.ExecContext(ctx, `ROLLBACK`); err != nil {
+	if err = tx.Rollback(); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -138,6 +136,58 @@ func TestOpenWaitsForConcurrentWriter(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("锁释放后并发写入仍未完成")
+	}
+}
+
+// TestBeginTxTakesWriteLockBeforeFirstRead 锁定 issue #18 的触发条件：
+// 写事务必须以 BEGIN IMMEDIATE 开启，先取得写锁再读取，
+// 否则「先读后写」的事务在 WAL 下遇到并发提交会立即得到 SQLITE_BUSY_SNAPSHOT，
+// 且 busy_timeout 对该错误完全无效。
+func TestBeginTxTakesWriteLockBeforeFirstRead(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	ctx := context.Background()
+	tx, err := st.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	// 与所有 store 事务一样：先读后写。
+	var metrics int
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM metrics`).Scan(&metrics); err != nil {
+		t.Fatal(err)
+	}
+
+	other, err := st.DB.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	// busy_timeout=0 让竞争立即失败，避免测试依赖计时。
+	if _, err = other.ExecContext(ctx, `PRAGMA busy_timeout=0`); err != nil {
+		t.Fatal(err)
+	}
+
+	// 事务已持有写锁，并发写入必须立刻拿到 SQLITE_BUSY 而不是抢先提交。
+	_, err = other.ExecContext(ctx, `INSERT INTO metrics(host_id,ts) VALUES(1,1)`)
+	var sqliteErr *sqlite.Error
+	if !errors.As(err, &sqliteErr) || sqliteErr.Code()&0xff != sqlite3.SQLITE_BUSY {
+		t.Fatalf("写事务未在读取前取得写锁，并发写入结果: %v", err)
+	}
+
+	// 事务自身的写入与提交不得被过期读快照打断。
+	if _, err = tx.ExecContext(ctx, `INSERT INTO metrics(host_id,ts) VALUES(2,2)`); err != nil {
+		t.Fatalf("写事务在读取后写入失败: %v", err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatalf("写事务提交失败: %v", err)
+	}
+	if _, err = other.ExecContext(ctx, `INSERT INTO metrics(host_id,ts) VALUES(1,1)`); err != nil {
+		t.Fatalf("锁释放后并发写入失败: %v", err)
 	}
 }
 
@@ -785,7 +835,12 @@ func TestDeleteHostRevokesRestrictedOAuthRefreshToken(t *testing.T) {
 	if err = st.DeleteHost(ctx, host.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = st.UseOAuthRefreshToken(ctx, "refresh-hash", client.ClientID, "http://localhost/mcp", time.Now().Unix()); !errors.Is(err, sql.ErrNoRows) {
+	if _, err = st.RotateOAuthRefreshToken(ctx, OAuthRefreshTokenRotation{
+		TokenHash: "refresh-hash",
+		ClientID:  client.ClientID,
+		Resource:  "http://localhost/mcp",
+		Now:       time.Now().Unix(),
+	}); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("删除主机后受限刷新授权仍存在: %v", err)
 	}
 }

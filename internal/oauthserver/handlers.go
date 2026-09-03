@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -113,11 +114,13 @@ func (s *Server) RegisterClient(w http.ResponseWriter, r *http.Request) {
 	}
 	clientID, err := randomValue("osc_", 24)
 	if err != nil {
+		log.Printf("OAuth 动态注册失败: 无法生成客户端标识: %v", err)
 		oauthJSONError(w, http.StatusInternalServerError, "server_error", "无法生成客户端标识")
 		return
 	}
 	client, err := s.Store.CreateOAuthClient(r.Context(), store.OAuthClient{ClientID: clientID, ClientName: input.ClientName, ClientURI: input.ClientURI, RedirectURIs: redirectURIs})
 	if err != nil {
+		log.Printf("OAuth 动态注册失败: 无法保存客户端: %v", err)
 		oauthJSONError(w, http.StatusInternalServerError, "server_error", "无法保存客户端")
 		return
 	}
@@ -255,16 +258,6 @@ func (s *Server) Token(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type tokenGrant struct {
-	GrantID     string
-	ClientID    string
-	Resource    string
-	Scope       string
-	AllHosts    bool
-	ManageHosts bool
-	HostIDs     []int64
-}
-
 func (s *Server) exchangeAuthorizationCode(w http.ResponseWriter, r *http.Request) {
 	plainCode := r.PostForm.Get("code")
 	verifier := r.PostForm.Get("code_verifier")
@@ -281,17 +274,17 @@ func (s *Server) exchangeAuthorizationCode(w http.ResponseWriter, r *http.Reques
 	}
 	plainToken, err := randomValue("osh_oauth_", 32)
 	if err != nil {
-		oauthTokenError(w, "server_error", "无法生成访问令牌")
+		oauthServerError(w, "authorization_code", "无法生成访问令牌", err)
 		return
 	}
 	plainRefreshToken, err := randomValue("osh_refresh_", 48)
 	if err != nil {
-		oauthTokenError(w, "server_error", "无法生成刷新令牌")
+		oauthServerError(w, "authorization_code", "无法生成刷新令牌", err)
 		return
 	}
 	grantID, err := randomValue("osg_", 24)
 	if err != nil {
-		oauthTokenError(w, "server_error", "无法生成授权标识")
+		oauthServerError(w, "authorization_code", "无法生成授权标识", err)
 		return
 	}
 	now := s.now()
@@ -310,7 +303,7 @@ func (s *Server) exchangeAuthorizationCode(w http.ResponseWriter, r *http.Reques
 		RefreshExpiresAt: now.Add(refreshLifetime).Unix(),
 	})
 	if err != nil {
-		oauthTokenError(w, "invalid_grant", "授权码无效、已使用、被撤销或已过期")
+		writeGrantError(w, "authorization_code", err, "授权码无效、已使用、被撤销或已过期")
 		return
 	}
 	writeTokenResponse(w, plainToken, plainRefreshToken, code.Scope)
@@ -323,74 +316,33 @@ func (s *Server) refreshAccessToken(w http.ResponseWriter, r *http.Request) {
 		oauthTokenError(w, "invalid_grant", "refresh_token 或 resource 无效")
 		return
 	}
-	refreshToken, err := s.Store.UseOAuthRefreshToken(r.Context(), store.TokenHash(plainRefreshToken), r.PostForm.Get("client_id"), resource, s.now().Unix())
-	if err != nil {
-		oauthTokenError(w, "invalid_grant", "refresh_token 无效、已使用、被撤销或已过期")
-		return
-	}
-	s.issueTokens(w, r, tokenGrant{
-		GrantID:     refreshToken.GrantID,
-		ClientID:    refreshToken.ClientID,
-		Resource:    refreshToken.Resource,
-		Scope:       refreshToken.Scope,
-		AllHosts:    refreshToken.AllHosts,
-		ManageHosts: refreshToken.ManageHosts,
-		HostIDs:     refreshToken.HostIDs,
-	})
-}
-
-func (s *Server) issueTokens(w http.ResponseWriter, r *http.Request, grant tokenGrant) {
 	plainToken, err := randomValue("osh_oauth_", 32)
 	if err != nil {
-		oauthTokenError(w, "server_error", "无法生成访问令牌")
+		oauthServerError(w, "refresh_token", "无法生成访问令牌", err)
 		return
 	}
-	plainRefreshToken, err := randomValue("osh_refresh_", 48)
+	plainRotatedRefreshToken, err := randomValue("osh_refresh_", 48)
 	if err != nil {
-		oauthTokenError(w, "server_error", "无法生成刷新令牌")
+		oauthServerError(w, "refresh_token", "无法生成刷新令牌", err)
 		return
 	}
-	if grant.GrantID == "" {
-		grant.GrantID, err = randomValue("osg_", 24)
-		if err != nil {
-			oauthTokenError(w, "server_error", "无法生成授权标识")
-			return
-		}
-	}
-	tokenSuffix := plainToken[len(plainToken)-8:]
-	expiresAt := s.now().Add(tokenLifetime).Unix()
-	accessToken, err := s.Store.CreateToken(r.Context(), store.TokenCreate{
-		Name:        fmt.Sprintf("OAuth · %s · %s", grant.ClientID, tokenSuffix),
-		Hash:        store.TokenHash(plainToken),
-		AllHosts:    grant.AllHosts,
-		ManageHosts: grant.ManageHosts,
-		HostIDs:     grant.HostIDs,
-		Source:      "oauth",
-		ExpiresAt:   expiresAt,
-		Resource:    grant.Resource,
-		ClientID:    grant.ClientID,
+	now := s.now()
+	refreshToken, err := s.Store.RotateOAuthRefreshToken(r.Context(), store.OAuthRefreshTokenRotation{
+		TokenHash:        store.TokenHash(plainRefreshToken),
+		ClientID:         r.PostForm.Get("client_id"),
+		Resource:         resource,
+		AccessTokenName:  fmt.Sprintf("OAuth · %s · %s", r.PostForm.Get("client_id"), plainToken[len(plainToken)-8:]),
+		AccessTokenHash:  store.TokenHash(plainToken),
+		RefreshTokenHash: store.TokenHash(plainRotatedRefreshToken),
+		Now:              now.Unix(),
+		AccessExpiresAt:  now.Add(tokenLifetime).Unix(),
+		RefreshExpiresAt: now.Add(refreshLifetime).Unix(),
 	})
 	if err != nil {
-		oauthTokenError(w, "server_error", "无法保存访问令牌")
+		writeGrantError(w, "refresh_token", err, "refresh_token 无效、已使用、被撤销或已过期")
 		return
 	}
-	if err = s.Store.CreateOAuthRefreshToken(r.Context(), store.OAuthRefreshToken{
-		GrantID:       grant.GrantID,
-		AccessTokenID: accessToken.ID,
-		TokenHash:     store.TokenHash(plainRefreshToken),
-		ClientID:      grant.ClientID,
-		Resource:      grant.Resource,
-		Scope:         grant.Scope,
-		AllHosts:      grant.AllHosts,
-		ManageHosts:   grant.ManageHosts,
-		HostIDs:       grant.HostIDs,
-		ExpiresAt:     s.now().Add(refreshLifetime).Unix(),
-	}); err != nil {
-		_ = s.Store.DeleteToken(r.Context(), accessToken.ID)
-		oauthTokenError(w, "server_error", "无法保存刷新令牌")
-		return
-	}
-	writeTokenResponse(w, plainToken, plainRefreshToken, grant.Scope)
+	writeTokenResponse(w, plainToken, plainRotatedRefreshToken, refreshToken.Scope)
 }
 
 func writeTokenResponse(w http.ResponseWriter, plainToken, plainRefreshToken, scope string) {
@@ -414,7 +366,28 @@ func oauthJSONError(w http.ResponseWriter, status int, code, description string)
 }
 
 func oauthTokenError(w http.ResponseWriter, code, description string) {
-	oauthJSONError(w, http.StatusBadRequest, code, description)
+	status := http.StatusBadRequest
+	if code == "server_error" {
+		status = http.StatusInternalServerError
+	}
+	oauthJSONError(w, status, code, description)
+}
+
+// oauthServerError 记录服务端内部错误并以 500 server_error 返回，
+// 让客户端退避重试而不是把瞬时故障判定为凭据永久失效。
+func oauthServerError(w http.ResponseWriter, grantType, description string, err error) {
+	log.Printf("OAuth 令牌端点内部错误 (grant_type=%s): %s: %v", grantType, description, err)
+	oauthTokenError(w, "server_error", description)
+}
+
+// writeGrantError 把 store 错误映射为令牌端点响应：
+// 协议级拒绝返回 400 invalid_grant，其余按内部错误返回 500 并记录日志。
+func writeGrantError(w http.ResponseWriter, grantType string, err error, invalidGrantDescription string) {
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, store.ErrOAuthRefreshReuse) || errors.Is(err, store.ErrOAuthAuthorizationCodeReuse) {
+		oauthTokenError(w, "invalid_grant", invalidGrantDescription)
+		return
+	}
+	oauthServerError(w, grantType, "令牌签发失败，请稍后重试", err)
 }
 
 func oauthAPIError(w http.ResponseWriter, status int, description string) {

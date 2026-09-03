@@ -65,6 +65,8 @@ func sqliteDSN(dbPath string) (string, error) {
 	}
 	query := url.Values{}
 	query.Add("_pragma", "busy_timeout(5000)")
+	// 写事务在读取前取得写锁，避免 WAL 读快照升级时触发 SQLITE_BUSY_SNAPSHOT。
+	query.Add("_txlock", "immediate")
 	query.Add("_pragma", "foreign_keys(ON)")
 	return (&url.URL{Scheme: "file", Path: uriPath, RawQuery: query.Encode()}).String(), nil
 }
