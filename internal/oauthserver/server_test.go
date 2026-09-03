@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -179,15 +180,16 @@ func TestOAuthAuthorizationCodeFlowPreservesPermissionsAndAudience(t *testing.T)
 	}
 }
 
-func TestOAuthRefreshFailureRollsBackRotation(t *testing.T) {
-	server, st := newTestServer(t)
+// seedRefreshGrant 建立一个受限于单台主机的 OAuth 授权，返回可用于轮换的刷新令牌明文。
+// 受限授权（AllHosts=false）会让轮换事务同时写入 tokens 与 token_hosts，覆盖完整的写入路径。
+func seedRefreshGrant(t *testing.T, st *store.Store, clientID, resource, plainRefreshToken string) {
+	t.Helper()
 	ctx := context.Background()
-	const (
-		clientID          = "rotation-client"
-		resource          = "http://localhost:8866/mcp"
-		plainRefreshToken = "osh_refresh_retryable"
-	)
-	if _, err := st.CreateOAuthClient(ctx, store.OAuthClient{
+	host, err := st.CreateHost(ctx, store.Host{Name: "rotation-host", Addr: "127.0.0.1", Port: 22, Username: "runner", AuthType: "password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = st.CreateOAuthClient(ctx, store.OAuthClient{
 		ClientID:     clientID,
 		ClientName:   "Rotation test",
 		RedirectURIs: []string{"http://localhost/callback"},
@@ -197,7 +199,7 @@ func TestOAuthRefreshFailureRollsBackRotation(t *testing.T) {
 	accessToken, err := st.CreateToken(ctx, store.TokenCreate{
 		Name:      "OAuth rotation seed",
 		Hash:      "seed-access-hash",
-		AllHosts:  true,
+		HostIDs:   []int64{host.ID},
 		Source:    "oauth",
 		ExpiresAt: time.Now().Add(time.Hour).Unix(),
 		Resource:  resource,
@@ -213,49 +215,166 @@ func TestOAuthRefreshFailureRollsBackRotation(t *testing.T) {
 		ClientID:      clientID,
 		Resource:      resource,
 		Scope:         "mcp",
-		AllHosts:      true,
+		HostIDs:       []int64{host.ID},
 		ExpiresAt:     time.Now().Add(time.Hour).Unix(),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = st.DB.ExecContext(ctx, `CREATE TRIGGER fail_oauth_refresh_insert BEFORE INSERT ON oauth_refresh_tokens BEGIN SELECT RAISE(FAIL, 'forced refresh failure'); END`); err != nil {
+}
+
+// postRefresh 用给定刷新令牌调用 /oauth/token 的 refresh_token 授权。
+func postRefresh(t *testing.T, server *Server, clientID, resource, plainRefreshToken string) *httptest.ResponseRecorder {
+	t.Helper()
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {clientID},
+		"refresh_token": {plainRefreshToken},
+		"resource":      {resource},
+	}
+	request := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+	server.Token(response, request)
+	return response
+}
+
+func countRows(t *testing.T, st *store.Store, query string, args ...any) int {
+	t.Helper()
+	var count int
+	if err := st.DB.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	refresh := func() *httptest.ResponseRecorder {
-		t.Helper()
-		form := url.Values{
-			"grant_type":    {"refresh_token"},
-			"client_id":     {clientID},
-			"refresh_token": {plainRefreshToken},
-			"resource":      {resource},
-		}
-		request := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
-		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		response := httptest.NewRecorder()
-		server.Token(response, request)
-		return response
+	return count
+}
+
+// TestOAuthRefreshFailureRollsBackRotation 覆盖 issue #18 的验收条件 1 与 2：
+// 轮换事务中任意一步写入失败都必须整体回滚，旧刷新令牌保持可用、不留下孤儿访问令牌，
+// 且故障消失后客户端用同一枚旧令牌重试即可自愈。
+func TestOAuthRefreshFailureRollsBackRotation(t *testing.T) {
+	const (
+		clientID          = "rotation-client"
+		resource          = "http://localhost:8866/mcp"
+		plainRefreshToken = "osh_refresh_retryable"
+	)
+	// RAISE(FAIL) 只中止当前语句并保持事务打开，由 Go 侧 defer tx.Rollback() 整体回滚；
+	// 换成 RAISE(ROLLBACK) 会让 SQLite 自行结束事务，从而掩盖被测行为。
+	cases := []struct {
+		name    string
+		trigger string
+		drop    string
+	}{
+		{
+			name:    "刷新令牌写入失败",
+			trigger: `CREATE TRIGGER fail_oauth_refresh_insert BEFORE INSERT ON oauth_refresh_tokens BEGIN SELECT RAISE(FAIL, 'forced refresh failure'); END`,
+			drop:    `DROP TRIGGER fail_oauth_refresh_insert`,
+		},
+		{
+			name:    "访问令牌写入失败",
+			trigger: `CREATE TRIGGER fail_oauth_access_insert BEFORE INSERT ON tokens WHEN NEW.source='oauth' BEGIN SELECT RAISE(FAIL, 'forced access failure'); END`,
+			drop:    `DROP TRIGGER fail_oauth_access_insert`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server, st := newTestServer(t)
+			ctx := context.Background()
+			seedRefreshGrant(t, st, clientID, resource, plainRefreshToken)
+			if _, err := st.DB.ExecContext(ctx, tc.trigger); err != nil {
+				t.Fatal(err)
+			}
+
+			failed := postRefresh(t, server, clientID, resource, plainRefreshToken)
+			if failed.Code != http.StatusInternalServerError || !strings.Contains(failed.Body.String(), `"server_error"`) {
+				t.Fatalf("轮换写入失败未返回可重试服务端错误: %d %s", failed.Code, failed.Body.String())
+			}
+			if active := countRows(t, st, `SELECT count(*) FROM oauth_refresh_tokens WHERE token_hash=? AND used_at IS NULL AND revoked_at IS NULL`, store.TokenHash(plainRefreshToken)); active != 1 {
+				t.Fatalf("失败轮换烧毁了旧刷新令牌: 可用刷新令牌=%d", active)
+			}
+			if orphans := countRows(t, st, `SELECT count(*) FROM tokens t WHERE t.source='oauth' AND NOT EXISTS (SELECT 1 FROM oauth_refresh_tokens r WHERE r.access_token_id=t.id)`); orphans != 0 {
+				t.Fatalf("失败轮换残留孤儿访问令牌: %d", orphans)
+			}
+			if issued := countRows(t, st, `SELECT count(*) FROM tokens WHERE source='oauth'`); issued != 1 {
+				t.Fatalf("失败轮换未回滚访问令牌写入: oauth 令牌=%d", issued)
+			}
+
+			if _, err := st.DB.ExecContext(ctx, tc.drop); err != nil {
+				t.Fatal(err)
+			}
+			retry := postRefresh(t, server, clientID, resource, plainRefreshToken)
+			if retry.Code != http.StatusOK {
+				t.Fatalf("旧 refresh token 无法重试: %d %s", retry.Code, retry.Body.String())
+			}
+			var rotated struct {
+				RefreshToken string `json:"refresh_token"`
+			}
+			if err := json.NewDecoder(retry.Body).Decode(&rotated); err != nil {
+				t.Fatal(err)
+			}
+			if rotated.RefreshToken == "" || rotated.RefreshToken == plainRefreshToken {
+				t.Fatalf("重试未轮换出新的刷新令牌: %q", rotated.RefreshToken)
+			}
+			replay := postRefresh(t, server, clientID, resource, plainRefreshToken)
+			if replay.Code != http.StatusBadRequest {
+				t.Fatalf("成功轮换后旧刷新令牌仍可用: %d %s", replay.Code, replay.Body.String())
+			}
+		})
+	}
+}
+
+// TestOAuthRefreshRotationSucceedsUnderConcurrentMetricWrites 覆盖 issue #18 的验收条件 3：
+// 监控采样持续并发写入 metrics 时，刷新令牌轮换必须全部成功，不得出现 database is locked。
+func TestOAuthRefreshRotationSucceedsUnderConcurrentMetricWrites(t *testing.T) {
+	const (
+		clientID          = "concurrent-client"
+		resource          = "http://localhost:8866/mcp"
+		plainRefreshToken = "osh_refresh_concurrent"
+	)
+	server, st := newTestServer(t)
+	seedRefreshGrant(t, st, clientID, resource, plainRefreshToken)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 4)
+	var wg sync.WaitGroup
+	// 与 monitor 的 maxConcurrentSamples 同量级：多个采样 goroutine 持续写入 metrics。
+	for worker := 1; worker <= 4; worker++ {
+		wg.Add(1)
+		go func(hostID int64) {
+			defer wg.Done()
+			for ts := int64(1); ctx.Err() == nil; ts++ {
+				if err := st.AddMetric(ctx, store.Metric{HostID: hostID, Ts: ts}); err != nil && ctx.Err() == nil {
+					errCh <- err
+					return
+				}
+				// 采样之间留出间隔：真实监控每轮 60s、单轮最多 5 个 worker，
+				// 这里的写入频率已远高于生产，但不会把写锁彻底占满。
+				time.Sleep(10 * time.Millisecond)
+			}
+		}(int64(worker))
 	}
 
-	failed := refresh()
-	if failed.Code != http.StatusInternalServerError || !strings.Contains(failed.Body.String(), `"server_error"`) {
-		t.Fatalf("轮换写入失败未返回可重试服务端错误: %d %s", failed.Code, failed.Body.String())
+	current := plainRefreshToken
+	for i := 0; i < 30; i++ {
+		response := postRefresh(t, server, clientID, resource, current)
+		if response.Code != http.StatusOK {
+			cancel()
+			wg.Wait()
+			t.Fatalf("第 %d 次轮换在并发写入下失败: %d %s", i+1, response.Code, response.Body.String())
+		}
+		var rotated struct {
+			RefreshToken string `json:"refresh_token"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&rotated); err != nil {
+			cancel()
+			wg.Wait()
+			t.Fatal(err)
+		}
+		current = rotated.RefreshToken
 	}
-	var activeRefreshTokens, accessTokens int
-	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM oauth_refresh_tokens WHERE token_hash=? AND used_at IS NULL AND revoked_at IS NULL`, store.TokenHash(plainRefreshToken)).Scan(&activeRefreshTokens); err != nil {
-		t.Fatal(err)
-	}
-	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM tokens WHERE client_id=?`, clientID).Scan(&accessTokens); err != nil {
-		t.Fatal(err)
-	}
-	if activeRefreshTokens != 1 || accessTokens != 1 {
-		t.Fatalf("失败轮换未完整回滚: active refresh=%d access=%d", activeRefreshTokens, accessTokens)
-	}
-	if _, err = st.DB.ExecContext(ctx, `DROP TRIGGER fail_oauth_refresh_insert`); err != nil {
-		t.Fatal(err)
-	}
-	retry := refresh()
-	if retry.Code != http.StatusOK {
-		t.Fatalf("旧 refresh token 无法重试: %d %s", retry.Code, retry.Body.String())
+	cancel()
+	wg.Wait()
+	close(errCh)
+	if err := <-errCh; err != nil {
+		t.Fatalf("并发 metrics 写入失败: %v", err)
 	}
 }
 
