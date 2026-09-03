@@ -180,7 +180,7 @@ func TestOAuthAuthorizationCodeFlowPreservesPermissionsAndAudience(t *testing.T)
 	}
 }
 
-// seedRefreshGrant 建立一个受限于单台主机的 OAuth 授权，返回可用于轮换的刷新令牌明文。
+// seedRefreshGrant 用调用方给定的刷新令牌明文建立一个受限于单台主机的 OAuth 授权。
 // 受限授权（AllHosts=false）会让轮换事务同时写入 tokens 与 token_hosts，覆盖完整的写入路径。
 func seedRefreshGrant(t *testing.T, st *store.Store, clientID, resource, plainRefreshToken string) {
 	t.Helper()
