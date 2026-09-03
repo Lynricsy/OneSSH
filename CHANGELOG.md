@@ -7,6 +7,7 @@
 ### 修复
 
 - 将 OAuth refresh token 消费、新 access token 与替代 refresh token 的签发合并为单个立即写事务；瞬时 SQLite 写冲突会整体回滚并返回可重试的 5xx，不再永久烧毁客户端授权。
+- `/oauth/token` 的服务端内部错误现在写入日志（含 grant_type 与底层错误），此前这类故障在服务端不留任何痕迹；OAuth 动态注册失败同样补上日志。
 
 ## [0.1.15] - 2026-09-03
 
