@@ -4,9 +4,14 @@
 
 ## [未发布]
 
+## [0.1.16] - 2026-09-03
+
 ### 修复
 
-- 将 OAuth refresh token 消费、新 access token 与替代 refresh token 的签发合并为单个立即写事务；瞬时 SQLite 写冲突会整体回滚并返回可重试的 5xx，不再永久烧毁客户端授权。
+- 修复长期在线的 MCP 客户端（如 ChatGPT connector）在 access token 到期刷新时可能被永久踢下线的问题（[#18](https://github.com/Lynricsy/OneSSH/issues/18)）：
+  - 将 OAuth refresh token 消费、新 access token 与替代 refresh token 的签发合并为单个立即写事务；任何一步失败都整体回滚，旧 refresh token 保持可用，客户端重试即可自愈，不再出现凭据被烧毁却没有替代品的情况。
+  - 所有数据库写事务改用 `BEGIN IMMEDIATE`（`_txlock=immediate`）：先取写锁再读取，消除 WAL 下「先读后写」事务因读快照过期立即失败的 `SQLITE_BUSY_SNAPSHOT`，该错误不受 `busy_timeout` 保护。此前监控采样等并发写入随时可能撞上刷新流程。
+  - `/oauth/token` 的服务端内部错误改以 5xx 返回，与 `invalid_grant` 等协议级 4xx 区分开，客户端据此退避重试而不是判定凭据永久失效。
 - `/oauth/token` 的服务端内部错误现在写入日志（含 grant_type 与底层错误），此前这类故障在服务端不留任何痕迹；OAuth 动态注册失败同样补上日志。
 
 ## [0.1.15] - 2026-09-03
