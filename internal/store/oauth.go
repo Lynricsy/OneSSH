@@ -174,7 +174,19 @@ func (s *Store) ExchangeOAuthAuthorizationCode(ctx context.Context, in OAuthAuth
 	if err != nil {
 		return OAuthAuthorizationCode{}, err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(token_hash,grant_id,access_token_id,client_id,resource,scope,all_hosts,manage_hosts,host_ids_json,expires_at,created_at,used_at,revoked_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,NULL,NULL)`, in.RefreshTokenHash, in.GrantID, accessToken.ID, code.ClientID, code.Resource, code.Scope, boolInt(code.AllHosts), boolInt(code.ManageHosts), rawHostIDs, in.RefreshExpiresAt, in.Now); err != nil {
+	if err = insertOAuthRefreshTokenTx(ctx, tx, OAuthRefreshToken{
+		TokenHash:     in.RefreshTokenHash,
+		GrantID:       in.GrantID,
+		AccessTokenID: accessToken.ID,
+		ClientID:      code.ClientID,
+		Resource:      code.Resource,
+		Scope:         code.Scope,
+		AllHosts:      code.AllHosts,
+		ManageHosts:   code.ManageHosts,
+		HostIDs:       code.HostIDs,
+		ExpiresAt:     in.RefreshExpiresAt,
+		CreatedAt:     in.Now,
+	}); err != nil {
 		return OAuthAuthorizationCode{}, err
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE oauth_authorization_codes SET used_at=?,grant_id=? WHERE code_hash=? AND used_at IS NULL`, in.Now, in.GrantID, in.CodeHash)
@@ -196,10 +208,6 @@ func (s *Store) ExchangeOAuthAuthorizationCode(ctx context.Context, in OAuthAuth
 	return code, nil
 }
 func (s *Store) CreateOAuthRefreshToken(ctx context.Context, token OAuthRefreshToken) error {
-	rawHostIDs, err := json.Marshal(token.HostIDs)
-	if err != nil {
-		return err
-	}
 	if token.GrantID == "" {
 		return errors.New("OAuth grant ID 不能为空")
 	}
@@ -218,8 +226,7 @@ func (s *Store) CreateOAuthRefreshToken(ctx context.Context, token OAuthRefreshT
 	if revoked != 0 {
 		return ErrOAuthGrantRevoked
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(token_hash,grant_id,access_token_id,client_id,resource,scope,all_hosts,manage_hosts,host_ids_json,expires_at,created_at,used_at,revoked_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, token.TokenHash, token.GrantID, token.AccessTokenID, token.ClientID, token.Resource, token.Scope, boolInt(token.AllHosts), boolInt(token.ManageHosts), string(rawHostIDs), token.ExpiresAt, token.CreatedAt, nullInt(token.UsedAt), nullInt(token.RevokedAt))
-	if err != nil {
+	if err = insertOAuthRefreshTokenTx(ctx, tx, token); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -281,7 +288,19 @@ func (s *Store) RotateOAuthRefreshToken(ctx context.Context, in OAuthRefreshToke
 	if err != nil {
 		return OAuthRefreshToken{}, err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(token_hash,grant_id,access_token_id,client_id,resource,scope,all_hosts,manage_hosts,host_ids_json,expires_at,created_at,used_at,revoked_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,NULL,NULL)`, in.RefreshTokenHash, token.GrantID, accessToken.ID, token.ClientID, token.Resource, token.Scope, boolInt(token.AllHosts), boolInt(token.ManageHosts), rawHostIDs, in.RefreshExpiresAt, in.Now); err != nil {
+	if err = insertOAuthRefreshTokenTx(ctx, tx, OAuthRefreshToken{
+		TokenHash:     in.RefreshTokenHash,
+		GrantID:       token.GrantID,
+		AccessTokenID: accessToken.ID,
+		ClientID:      token.ClientID,
+		Resource:      token.Resource,
+		Scope:         token.Scope,
+		AllHosts:      token.AllHosts,
+		ManageHosts:   token.ManageHosts,
+		HostIDs:       token.HostIDs,
+		ExpiresAt:     in.RefreshExpiresAt,
+		CreatedAt:     in.Now,
+	}); err != nil {
 		return OAuthRefreshToken{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -289,6 +308,17 @@ func (s *Store) RotateOAuthRefreshToken(ctx context.Context, in OAuthRefreshToke
 	}
 	token.UsedAt = sql.NullInt64{Int64: in.Now, Valid: true}
 	return token, nil
+}
+
+// insertOAuthRefreshTokenTx 在事务内写入一条刷新令牌记录。
+// 由授权码交换、刷新令牌轮换与直接创建三处共用，确保列顺序与序列化方式一致。
+func insertOAuthRefreshTokenTx(ctx context.Context, tx *sql.Tx, token OAuthRefreshToken) error {
+	rawHostIDs, err := json.Marshal(token.HostIDs)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(token_hash,grant_id,access_token_id,client_id,resource,scope,all_hosts,manage_hosts,host_ids_json,expires_at,created_at,used_at,revoked_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, token.TokenHash, token.GrantID, token.AccessTokenID, token.ClientID, token.Resource, token.Scope, boolInt(token.AllHosts), boolInt(token.ManageHosts), string(rawHostIDs), token.ExpiresAt, token.CreatedAt, nullInt(token.UsedAt), nullInt(token.RevokedAt))
+	return err
 }
 
 func revokeOAuthGrantTx(ctx context.Context, tx *sql.Tx, grantID string, now int64) error {
