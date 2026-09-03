@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>单卡片预览</title>
+<style>
+:root{color-scheme:light}html[data-sheet="dark"]{color-scheme:dark}
+body{margin:0;padding:24px;background:light-dark(#ececf1,#0f1013);font:13px/1.5 ui-sans-serif,system-ui,sans-serif}
+.shell{max-width:var(--w,720px);margin:0 auto;border:1px solid light-dark(#e0e2e8,#2b3038);border-radius:14px;
+overflow:hidden;background:light-dark(#fff,#212121)}
+/* 宿主宣告了 fullscreen 就得真的放大容器：只改卡片内部状态而外框还卡在 720px，
+   验收看到的全屏是假的，反而会把卡片本身的排版判成有问题。 */
+body[data-mode="fullscreen"]{padding:0}
+body[data-mode="fullscreen"] .shell{max-width:none;border:0;border-radius:0;min-height:100vh}
+iframe{display:block;width:100%;border:0;height:90px;background:transparent}
+</style></head><body>
+<div class="shell"><iframe id="f" sandbox="allow-scripts"></iframe></div>
+<script>
+const p=new URLSearchParams(location.search);
+const TOOL=p.get("tool"),GROUP=p.get("group"),THEME=p.get("theme")==="dark"?"dark":"light";
+const ERROR=p.get("state")==="error";
+if(p.get("w"))document.body.style.setProperty("--w",p.get("w")+"px");
+document.documentElement.dataset.sheet=THEME;
+const VARS={light:{"--color-background-primary":"#ffffff","--color-background-secondary":"#f7f7f8",
+ "--color-text-primary":"#0d0d0d","--color-text-secondary":"#5d5d5d","--color-border-primary":"#e5e5e5"},
+ dark:{"--color-background-primary":"#212121","--color-background-secondary":"#2f2f2f",
+ "--color-text-primary":"#ececec","--color-text-secondary":"#b4b4b4","--color-border-primary":"#3d3d3d"}}[THEME];
+let fixture=null;
+const cache=Object.create(null);
+const f=document.getElementById("f");
+const send=o=>f.contentWindow.postMessage(o,"*");
+// 缓存的是 promise 而不是结果：同一个工具被连着请求两次时只发一次网络请求。
+function load(tool){
+  if(!(tool in cache))cache[tool]=fetch("fixtures/"+tool+".json?t="+Date.now())
+    .then(r=>r.ok?r.json():null).catch(()=>null);
+  return cache[tool];
+}
+// ?state=error 的取舍只写一处：握手成功与握手失败两条路径共用，
+// 免得降级分支永远推成功态，出现「选了错误态却渲染成功卡片」这种只在降级下才露头的假象。
+const payload=fx=>ERROR?(fx.error||{content:[{type:"text",text:"host not authorized: web-01"}],isError:true}):fx.result;
+function pushResult(fx){
+  // 有些错误只在特定入参下才可能发生（hosts 为空、fresh=false、artifact_id 不是 UUID），
+  // 错误态就用样例自带的那份入参，免得画廊摆出一个真实调用永远走不到的组合。
+  send({jsonrpc:"2.0",method:"ui/notifications/tool-input",
+    params:{arguments:(ERROR&&fx.error_input)||fx.input||{}}});
+  send({jsonrpc:"2.0",method:"ui/notifications/tool-result",params:payload(fx)});
+}
+window.addEventListener("message",async e=>{
+  if(e.source!==f.contentWindow)return;const m=e.data;if(!m||m.jsonrpc!=="2.0")return;
+  // ?nohandshake=1 模拟握手失败的宿主：卡片应当走降级路径，照样把后到的结果渲染出来
+  if(m.method==="ui/initialize"){
+    if(p.get("nohandshake")==="1"){
+      setTimeout(()=>{if(fixture)pushResult(fixture);},4200);
+      return;
+    }
+    send({jsonrpc:"2.0",id:m.id,result:{protocolVersion:"2026-01-26",
+    hostInfo:{name:"one",version:"1"},hostCapabilities:{serverTools:{},updateModelContext:{}},
+    hostContext:{theme:THEME,displayMode:"inline",availableDisplayModes:["inline","fullscreen"],
+      locale:"zh-CN",platform:"web",styles:{variables:VARS}}}});return;}
+  if(m.method==="ui/notifications/initialized"){
+    if(!fixture)return;
+    pushResult(fixture);
+    return;}
+  if(m.method==="ui/notifications/size-changed"){f.style.height=Math.max(60,m.params.height)+"px";return;}
+  if(m.method==="tools/call"){
+    // 卡片可以导航到另一个只读工具（job_list 的行点开 job_status）。当前 fixture 的 calls
+    // 里没有并不代表预览没有数据：回退去加载被请求工具自己的 fixture，链路才走得通。
+    const fx=(fixture&&fixture.calls&&fixture.calls[m.params.name])||await load(m.params.name);
+    send({jsonrpc:"2.0",id:m.id,result:fx?(fx.result||fx)
+      :{content:[{type:"text",text:"预览没有 "+m.params.name+" 的样例数据"}],isError:true}});return;}
+  if(m.method==="ui/request-display-mode"){
+    const mode=m.params&&m.params.mode==="fullscreen"?"fullscreen":"inline";
+    // 先放大外层再回执：卡片收到回执后立刻重新上报高度，容器得已经是全屏尺寸。
+    document.body.dataset.mode=mode;
+    send({jsonrpc:"2.0",id:m.id,result:{mode:mode}});return;}
+  if(m.id!==undefined)send({jsonrpc:"2.0",id:m.id,result:{}});
+});
+(async()=>{
+  const [shell,style,runtime,view]=await Promise.all([
+    fetch("../shell.html?t="+Date.now()).then(r=>r.text()),fetch("../style.css?t="+Date.now()).then(r=>r.text()),
+    fetch("../runtime.js?t="+Date.now()).then(r=>r.text()),fetch("../views/"+GROUP+".js?t="+Date.now()).then(r=>r.text())]);
+  fixture=await load(TOOL);
+  if(!fixture){document.body.textContent="缺少 fixtures/"+TOOL+".json";return;}
+  f.srcdoc=shell.replaceAll("{{TOOL}}",TOOL).replaceAll("{{TITLE}}",fixture.title||TOOL)
+    .replace("{{STYLE}}",style).replace("{{RUNTIME}}",runtime).replace("{{VIEW}}",view);
+})();
+</script></body></html>

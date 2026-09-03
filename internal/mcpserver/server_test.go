@@ -34,7 +34,7 @@ func TestToolCatalogGivesAgentsEnoughContext(t *testing.T) {
 	}
 	pool := sshpool.New(st, box)
 	defer pool.Close()
-	server := New(st, pool, events.New(), hostmanager.New(st, box, pool), memoryx.New(st, memoryx.EmbeddingConfig{}), dir, "", 0, true)
+	server := New(st, pool, events.New(), hostmanager.New(st, box, pool), memoryx.New(st, memoryx.EmbeddingConfig{}), dir, "", 0, true, true)
 	defer server.Close()
 
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()

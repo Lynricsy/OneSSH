@@ -1,0 +1,76 @@
+{
+  "input": {
+    "hosts": [
+      "web-01",
+      "web-02",
+      "db-main",
+      "cache-01",
+      "build-runner"
+    ],
+    "command": "nginx -v 2>&1 || true",
+    "timeout_s": 30
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"results\": [\n    {\n      \"host\": \"web-01\",\n      \"run_id\": \"c1d05e8a-3b47-4629-8f10-92e6a7c4b035\",\n      \"exit_code\": 0,\n      \"timeout\": false,\n      \"output\": \"nginx version: nginx/1.24.0 (Ubuntu)\"\n    },\n    {\n      \"host\": \"web-02\",\n      \"run_id\": \"d27b91f4-6c08-4a53-b7e9-1f30d85a6c92\",\n      \"exit_code\": 0,\n      \"timeout\": false,\n      \"output\": \"nginx version: nginx/1.24.0 (Ubuntu)\"\n    },\n    {\n      \"host\": \"db-main\",\n      \"run_id\": \"e93c47a0-8d15-4f26-a0b3-57ce18d942f6\",\n      \"exit_code\": 127,\n      \"timeout\": false,\n      \"output\": \"bash: line 1: nginx: command not found\"\n    },\n    {\n      \"host\": \"cache-01\",\n      \"run_id\": \"\",\n      \"exit_code\": -1,\n      \"timeout\": false,\n      \"output\": \"\",\n      \"error\": \"dial tcp 10.0.2.21:22: connect: connection refused\"\n    },\n    {\n      \"host\": \"build-runner\",\n      \"run_id\": \"f04e28b7-9a36-4c81-bd52-6708e3f1a4d9\",\n      \"exit_code\": -1,\n      \"timeout\": true,\n      \"output\": \"（命令在 30 秒后被中断）\"\n    }\n  ]\n}"
+      }
+    ],
+    "structuredContent": {
+      "results": [
+        {
+          "host": "web-01",
+          "run_id": "c1d05e8a-3b47-4629-8f10-92e6a7c4b035",
+          "exit_code": 0,
+          "timeout": false,
+          "output": "nginx version: nginx/1.24.0 (Ubuntu)"
+        },
+        {
+          "host": "web-02",
+          "run_id": "d27b91f4-6c08-4a53-b7e9-1f30d85a6c92",
+          "exit_code": 0,
+          "timeout": false,
+          "output": "nginx version: nginx/1.24.0 (Ubuntu)"
+        },
+        {
+          "host": "db-main",
+          "run_id": "e93c47a0-8d15-4f26-a0b3-57ce18d942f6",
+          "exit_code": 127,
+          "timeout": false,
+          "output": "bash: line 1: nginx: command not found"
+        },
+        {
+          "host": "cache-01",
+          "run_id": "",
+          "exit_code": -1,
+          "timeout": false,
+          "output": "",
+          "error": "dial tcp 10.0.2.21:22: connect: connection refused"
+        },
+        {
+          "host": "build-runner",
+          "run_id": "f04e28b7-9a36-4c81-bd52-6708e3f1a4d9",
+          "exit_code": -1,
+          "timeout": true,
+          "output": "（命令在 30 秒后被中断）"
+        }
+      ]
+    },
+    "isError": false
+  },
+  "title": "批量执行",
+  "error_input": {
+    "hosts": [],
+    "command": "nginx -v 2>&1 || true"
+  },
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "hosts 不能为空"
+      }
+    ],
+    "isError": true
+  }
+}

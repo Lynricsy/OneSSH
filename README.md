@@ -207,6 +207,21 @@ Authorization: Bearer osh_...
 
 用 PNG 而非 SVG 是为了互操作性：规范只要求支持渲染图标的客户端必须认 `image/png` 与 `image/jpeg`，SVG 与 WebP 仅为 SHOULD。`src` 必须是绝对 URI，而 `initialize` 时拿不到请求上下文推导地址，所以未配置 `ONESSH_PUBLIC_URL` 时不发布图标。客户端是否渲染由客户端决定。
 
+### 交互卡片（MCP Apps）
+
+OneSSH 为**全部 32 个工具**各提供一张 [MCP Apps](https://modelcontextprotocol.io/) 交互卡片。支持该扩展的客户端（ChatGPT 网页版、Claude 网页版与桌面版、MCPJam Inspector 等）会把工具结果直接渲染成卡片，而不是一大段 JSON：命令输出带行号与折叠、文件编辑显示彩色 diff、目录可以点进去、资源指标画成用量条、图片直接显示。
+
+实现方式是标准的三件套，不依赖任何厂商私有协议：
+
+- 每个工具在 `tools/list` 里带 `_meta.ui.resourceUri`，指向 `ui://onessh/<工具名>?v=<内容哈希>`。
+- 同时附带旧版 `openai/outputTemplate` 别名，指向同一份正文的 `text/html+skybridge` 版本，供只认旧字段的 ChatGPT 版本读取。这份旧版资源走 URI 模板发布：按 URI 能读到，但不会出现在 `resources/list` 里，标准客户端看到的仍是干净的 32 条。
+- 对应资源以 `text/html;profile=mcp-app` 返回一份**完全自包含**的 HTML：样式与脚本全部内联，`_meta.ui.csp` 声明不访问任何外部域，宿主据此把 iframe 的 CSP 收到最紧。卡片不申请专用沙箱源（不发布 `ui.domain`）：正文自包含、不读写任何存储，没有需要稳定独立来源的理由。
+- 卡片通过 `postMessage` 上的 JSON-RPC 与宿主通信：`ui/initialize` 握手、`ui/notifications/tool-result` 接收结果、`ui/notifications/size-changed` 自适应高度，并跟随宿主下发的主题与设计令牌自动切换深浅色。
+
+卡片内的交互**只做只读导航**：翻页、进入子目录、预览文件、刷新任务与指标、复制、全屏。执行命令、写文件、删除主机、修改记忆等有副作用的工具在 `_meta.ui.visibility` 中不带 `app`，卡片自身也有白名单拦截，不会从界面上被触发。
+
+设置 `ONESSH_MCP_APPS=off` 可以完全关闭卡片：工具的 `_meta` 与全部 `ui://` 资源都不再发布，工具本身不受影响。
+
 ### 工具清单
 
 | 类别 | 工具 |
@@ -271,6 +286,7 @@ WebUI 的「活动」页会为每次 `exec`、`job_start`，以及 `exec_many` �
 | `ONESSH_PUBLIC_URL` | | 按请求推导 | 对外访问来源，如 `https://ssh.example.com`；生产 OAuth 部署应显式设置，同时决定是否发布 MCP 服务器图标 |
 | `ONESSH_DATA_DIR` | | `/data` | SQLite 与 artifact 数据目录 |
 | `ONESSH_POLL_INTERVAL` | | `60` | 监控轮询秒数，设为 `0` 关闭；单轮最多并发采样 5 台，上一轮未结束时跳过新一轮 |
+| `ONESSH_MCP_APPS` | | `on` | `on` 为全部工具发布 MCP Apps 交互卡片资源与 `_meta.ui`；`off` 完全关闭卡片 |
 | `ONESSH_SEARCH_HELPER` | | `auto` | `auto` 在 Linux amd64/arm64 上启用临时搜索 helper；`off` 强制使用原生工具或纯 SFTP |
 | `ONESSH_EMBEDDING_API_URL` | | — | OpenAI 兼容 API 根地址，如 `https://api.example.com/v1`；需同时设置模型才启用 |
 | `ONESSH_EMBEDDING_API_KEY` | | — | embedding 服务 Bearer 密钥；服务不需要鉴权时可留空 |
@@ -310,6 +326,31 @@ export ONESSH_DATA_DIR="$PWD/data"
 go test -count=1 ./...
 (cd web && npm run build)
 ```
+
+卡片预览画廊（不依赖 Go 与宿主，直接在浏览器里逐张验收 32 张卡片的浅色、深色、错误态与窄屏表现）：
+
+```sh
+python3 -m http.server 8877 --directory internal/mcpserver/apps
+# 打开 http://localhost:8877/preview/
+```
+
+卡片运行时的协议与安全路径另有一份零依赖的一致性测试，CI 里随前端检查一起跑：
+
+```sh
+node --test internal/mcpserver/apps/runtime.test.mjs
+```
+
+它在 Node 里把 `runtime.js` 真的执行起来，覆盖 `ui/*` 握手与通知的报文形状、只读回调白名单（破坏性工具一律不能由卡片发起）、以及 32 张卡片对真实样例数据在成功态与错误态下的渲染。
+
+画廊会用与 Go 侧完全相同的方式拼装卡片 HTML，并扮演宿主完成 `ui/initialize` 握手、推送 `preview/fixtures/<工具>.json` 里的样例结果、应答卡片发起的只读回调。三个页面各有分工：`preview/index.html` 逐张挑选并切换浅色、深色、错误态与窄屏；`preview/one.html` 用查询参数直接定位一张卡片，便于截图；`preview/sheet.html` 把 32 张一次性铺开做总览。
+
+样例数据里的时间戳按「相对现在」生成，放久了「3 小时前」会退化成绝对日期，重跑一次即可贴回当下：
+
+```sh
+python3 internal/mcpserver/apps/preview/fixtures/generate.py
+```
+
+预览目录不参与 `go:embed`（`internal/mcpserver/apps.go` 里的嵌入清单只列了 `shell.html`、`style.css`、`runtime.js` 和 `views/*.js`），不会进入二进制。
 
 <details>
 <summary><b>四主机端到端测试</b></summary>

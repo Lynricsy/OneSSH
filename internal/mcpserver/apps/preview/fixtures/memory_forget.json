@@ -1,0 +1,27 @@
+{
+  "input": {
+    "id": 118
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"deleted\": true\n}"
+      }
+    ],
+    "structuredContent": {
+      "deleted": true
+    },
+    "isError": false
+  },
+  "title": "删除记忆",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "memory 不存在: 118"
+      }
+    ],
+    "isError": true
+  }
+}

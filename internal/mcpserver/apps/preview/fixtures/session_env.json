@@ -1,0 +1,39 @@
+{
+  "input": {
+    "host": "build-runner",
+    "session": "ci",
+    "set": {
+      "NODE_ENV": "production"
+    }
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"env\": {\n    \"NODE_ENV\": \"production\",\n    \"PATH\": \"/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin\",\n    \"GOFLAGS\": \"-mod=readonly\",\n    \"HTTPS_PROXY\": \"http://10.0.0.8:3128\",\n    \"LANG\": \"C.UTF-8\",\n    \"CGO_ENABLED\": \"0\",\n    \"TZ\": \"Asia/Shanghai\"\n  }\n}"
+      }
+    ],
+    "structuredContent": {
+      "env": {
+        "NODE_ENV": "production",
+        "PATH": "/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin",
+        "GOFLAGS": "-mod=readonly",
+        "HTTPS_PROXY": "http://10.0.0.8:3128",
+        "LANG": "C.UTF-8",
+        "CGO_ENABLED": "0",
+        "TZ": "Asia/Shanghai"
+      }
+    },
+    "isError": false
+  },
+  "title": "会话环境变量",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09"
+      }
+    ],
+    "isError": true
+  }
+}

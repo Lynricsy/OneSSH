@@ -21,6 +21,7 @@ type Config struct {
 	EmbeddingAPIKey string
 	EmbeddingModel  string
 	SearchHelper    bool
+	MCPApps         bool
 }
 
 func Load() (Config, error) {
@@ -47,6 +48,13 @@ func Load() (Config, error) {
 	case "off":
 	default:
 		return cfg, errors.New("ONESSH_SEARCH_HELPER 只接受 auto 或 off")
+	}
+	switch envDefault("ONESSH_MCP_APPS", "on") {
+	case "on":
+		cfg.MCPApps = true
+	case "off":
+	default:
+		return cfg, errors.New("ONESSH_MCP_APPS 只接受 on 或 off")
 	}
 	seconds, err := strconv.Atoi(envDefault("ONESSH_POLL_INTERVAL", "60"))
 	if err != nil || seconds < 0 {

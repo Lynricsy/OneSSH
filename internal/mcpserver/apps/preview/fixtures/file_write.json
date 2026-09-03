@@ -1,0 +1,33 @@
+{
+  "input": {
+    "host": "web-01",
+    "path": "/etc/nginx/conf.d/gzip.conf",
+    "content": "gzip_comp_level 5;\n",
+    "mode": "0644"
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"sha256\": \"9c1d7e4a02b58f36ad91c0e7452b8d9f31607ca4de82b195f0c73a6e8d24b7f5\",\n  \"bytes\": 19,\n  \"non_atomic\": true,\n  \"warning\": \"目标文件系统不支持覆盖 rename，已退化为先删后写\"\n}"
+      }
+    ],
+    "structuredContent": {
+      "sha256": "9c1d7e4a02b58f36ad91c0e7452b8d9f31607ca4de82b195f0c73a6e8d24b7f5",
+      "bytes": 19,
+      "non_atomic": true,
+      "warning": "目标文件系统不支持覆盖 rename，已退化为先删后写"
+    },
+    "isError": false
+  },
+  "title": "文件写入",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09"
+      }
+    ],
+    "isError": true
+  }
+}

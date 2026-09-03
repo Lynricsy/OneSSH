@@ -1,0 +1,57 @@
+{
+  "input": {},
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"total\": 327,\n  \"banks\": [\n    {\n      \"bank\": \"global\",\n      \"count\": 58,\n      \"embedded\": 58,\n      \"last_written\": 1788382064\n    },\n    {\n      \"bank\": \"web-01\",\n      \"count\": 94,\n      \"embedded\": 91,\n      \"last_written\": 1788392204\n    },\n    {\n      \"bank\": \"web-02\",\n      \"count\": 76,\n      \"embedded\": 70,\n      \"last_written\": 1788292064\n    },\n    {\n      \"bank\": \"db-main\",\n      \"count\": 81,\n      \"embedded\": 81,\n      \"last_written\": 1787960864\n    },\n    {\n      \"bank\": \"build-runner\",\n      \"count\": 18,\n      \"embedded\": 4,\n      \"last_written\": null\n    }\n  ]\n}"
+      }
+    ],
+    "structuredContent": {
+      "total": 327,
+      "banks": [
+        {
+          "bank": "global",
+          "count": 58,
+          "embedded": 58,
+          "last_written": 1788382064
+        },
+        {
+          "bank": "web-01",
+          "count": 94,
+          "embedded": 91,
+          "last_written": 1788392204
+        },
+        {
+          "bank": "web-02",
+          "count": 76,
+          "embedded": 70,
+          "last_written": 1788292064
+        },
+        {
+          "bank": "db-main",
+          "count": 81,
+          "embedded": 81,
+          "last_written": 1787960864
+        },
+        {
+          "bank": "build-runner",
+          "count": 18,
+          "embedded": 4,
+          "last_written": null
+        }
+      ]
+    },
+    "isError": false
+  },
+  "title": "记忆统计",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "unauthorized"
+      }
+    ],
+    "isError": true
+  }
+}

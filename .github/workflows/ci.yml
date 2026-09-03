@@ -224,6 +224,13 @@ jobs:
       - name: Type-check and build
         run: npm run build
 
+      # 卡片运行时是纯浏览器代码，Go 测试够不到它自己跑起来之后的行为。
+      # 这份一致性测试在 Node 里把 runtime.js 真的执行一遍，覆盖 ui/* 协议报文、
+      # 只读回调白名单和 32 张卡片对真实样例的渲染，零依赖，不需要装任何东西。
+      - name: MCP Apps card runtime conformance
+        working-directory: .
+        run: node --test internal/mcpserver/apps/runtime.test.mjs
+
   e2e:
     name: Docker end-to-end
     runs-on: ubuntu-latest

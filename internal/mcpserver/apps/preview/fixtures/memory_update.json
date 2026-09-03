@@ -1,0 +1,29 @@
+{
+  "input": {
+    "id": 184,
+    "importance": 0.9
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"id\": 184,\n  \"embedded\": true\n}"
+      }
+    ],
+    "structuredContent": {
+      "id": 184,
+      "embedded": true
+    },
+    "isError": false
+  },
+  "title": "更新记忆",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "memory 不存在: 184"
+      }
+    ],
+    "isError": true
+  }
+}

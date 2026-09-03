@@ -1,0 +1,33 @@
+{
+  "input": {
+    "src_host": "web-01",
+    "src_path": "/var/log/nginx/access.log.1",
+    "dst_host": "build-runner",
+    "dst_path": "/tmp/access.log.1"
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"bytes\": 48213904,\n  \"source_sha256\": \"71f0a2c9b8d34e56a70f12c8b943de507a1c6f8b02d94e73a5c108bf42e7d961\",\n  \"destination_sha256\": \"71f0a2c9b8d34e56a70f12c8b943de507a1c6f8b02d94e73a5c108bf42e7d961\",\n  \"verified\": true\n}"
+      }
+    ],
+    "structuredContent": {
+      "bytes": 48213904,
+      "source_sha256": "71f0a2c9b8d34e56a70f12c8b943de507a1c6f8b02d94e73a5c108bf42e7d961",
+      "destination_sha256": "71f0a2c9b8d34e56a70f12c8b943de507a1c6f8b02d94e73a5c108bf42e7d961",
+      "verified": true
+    },
+    "isError": false
+  },
+  "title": "文件传输",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host not authorized: web-09"
+      }
+    ],
+    "isError": true
+  }
+}
