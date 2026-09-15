@@ -36,10 +36,16 @@ type ConsentFormValues = {
   all_hosts: boolean
   manage_hosts: boolean
   host_ids: number[]
+  disabled_tools: string[]
 }
 
 /** 与令牌创建保持同一套默认值：先给最宽的执行范围，管理权限必须显式打开 */
-const defaultValues: ConsentFormValues = { all_hosts: true, manage_hosts: false, host_ids: [] }
+const defaultValues: ConsentFormValues = {
+  all_hosts: true,
+  manage_hosts: false,
+  host_ids: [],
+  disabled_tools: [],
+}
 
 /** 后端目前只签发 mcp 一种范围；未知范围原样展示，不编造语义 */
 const SCOPE_HINTS: Record<string, string> = {
@@ -222,6 +228,7 @@ export function OAuthAuthorizePage() {
       all_hosts: values.all_hosts,
       manage_hosts: values.manage_hosts,
       host_ids: values.all_hosts ? undefined : values.host_ids,
+      disabled_tools: values.disabled_tools,
     }
     try {
       const result = await post<OAuthDecisionResult>('/oauth/authorization', payload)
@@ -486,6 +493,32 @@ export function OAuthAuthorizePage() {
                         )}
                       </AnimatePresence>
                     </div>
+                  </Section>
+
+                  <Section title="MCP 工具组">
+                    <Field
+                      label="禁用工具组"
+                      hint="与 ONESSH_DISABLED_TOOLS 同一套分组；对该客户端隐藏并拒绝调用"
+                    >
+                      {(id) => (
+                        <Controller
+                          name="disabled_tools"
+                          control={control}
+                          render={({ field }) => (
+                            <MultiSelect
+                              id={id}
+                              value={field.value}
+                              onChange={field.onChange}
+                              placeholder="不禁用（全部可用）"
+                              options={(info.tool_groups ?? []).map((group) => ({
+                                value: group.name,
+                                label: group.name,
+                              }))}
+                            />
+                          )}
+                        />
+                      )}
+                    </Field>
                   </Section>
 
                   <div className="border-t border-border px-5 py-4 sm:px-6">

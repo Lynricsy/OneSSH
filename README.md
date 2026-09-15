@@ -240,7 +240,7 @@ OneSSH 为**全部 32 个工具**各提供一张 [MCP Apps](https://modelcontext
 
 常用编码工具是完整对齐的：`file_read`、`file_write`、`file_edit`、`exec`、`grep`、`find`、`file_list` 分别对应 read、write、edit、bash、grep、find、ls。
 
-Agent 自带记忆系统时，用 `ONESSH_DISABLED_TOOLS=memory` 让网关只做 SSH 运维；关闭仅影响 MCP 暴露面，WebUI 的记忆页与 `/api/v1/memories` 仍可查看与清理既有记忆。
+Agent 自带记忆系统时，用 `ONESSH_DISABLED_TOOLS=memory` 让网关只做 SSH 运维；关闭仅影响 MCP 暴露面，WebUI 的记忆页与 `/api/v1/memories` 仍可查看与清理既有记忆。多 Agent 共用同一实例时，可在令牌创建/更新或 OAuth 同意页按相同工具组再收紧：对该 Bearer 隐藏 `tools/list`、拒绝 `tools/call` 并记审计，无需重启进程；有效禁用为进程级与令牌级的并集。
 
 `file_edit` 支持 `expected_sha256` 乐观锁，冲突时应重新读取。大输出会返回 `artifact_id`，再用 `output_read` 分段读取或正则过滤。
 主机配置支持可选的 `jump_host`（REST/MCP 输入使用跳板主机名，列表输出仍以稳定 ID 关联）。连接会复用连接池中的跳板并通过 SSH TCP 隧道到达目标，对命令、文件、任务、终端和监控工具透明；最多串联 5 级且禁止成环。被其他主机依赖的跳板不能直接删除，需先把依赖者改回直连或切换到其他跳板。

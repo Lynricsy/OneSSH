@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -249,5 +250,48 @@ func TestCommandRunListDetailAndOutput(t *testing.T) {
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/command-runs/"+id+"/output?stream=combined", nil))
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("非法输出流状态码 = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestTokensRejectUnknownDisabledToolGroups(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	box, err := cryptox.New(bytes.Repeat([]byte{8}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := sshpool.New(st, box)
+	defer pool.Close()
+	hosts := hostmanager.New(st, box, pool)
+	api := NewAPI(st, box, pool, hosts, nil, nil, nil, nil, memoryx.New(st, memoryx.EmbeddingConfig{}), nil).Handler()
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		api.ServeHTTP(w, r)
+		return w
+	}
+
+	created := call(http.MethodPost, "/tokens", `{"name":"bad","all_hosts":true,"disabled_tools":["not-a-group"]}`)
+	if created.Code != http.StatusBadRequest {
+		t.Fatalf("POST /tokens 未知分组应 400，实际 %d %s", created.Code, created.Body.String())
+	}
+
+	ok := call(http.MethodPost, "/tokens", `{"name":"ok","all_hosts":true,"disabled_tools":["memory"]}`)
+	if ok.Code != http.StatusCreated {
+		t.Fatalf("POST /tokens 合法分组应 201，实际 %d %s", ok.Code, ok.Body.String())
+	}
+	var tokenOut map[string]any
+	if err := json.Unmarshal(ok.Body.Bytes(), &tokenOut); err != nil {
+		t.Fatal(err)
+	}
+	id := int64(tokenOut["id"].(float64))
+
+	updated := call(http.MethodPut, "/tokens/"+strconv.FormatInt(id, 10), `{"name":"ok","all_hosts":true,"disabled_tools":["still-bad"]}`)
+	if updated.Code != http.StatusBadRequest {
+		t.Fatalf("PUT /tokens 未知分组应 400，实际 %d %s", updated.Code, updated.Body.String())
 	}
 }

@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
-import { Check, Copy, Plus, Ticket, Trash, Warning, WarningCircle } from '@phosphor-icons/react'
+import { Check, Copy, PencilSimple, Plus, Ticket, Trash, Warning, WarningCircle } from '@phosphor-icons/react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
-import { useCreateToken, useDeleteToken, useDeleteTokens, useHosts, useTokens } from '@/api/queries'
+import { useCreateToken, useDeleteToken, useDeleteTokens, useHosts, useTokens, useToolGroups, useUpdateToken } from '@/api/queries'
 import type { Host, Token, TokenPayload } from '@/api/types'
 import { ConfirmDialog } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
@@ -30,6 +30,7 @@ type TokenFormValues = {
   all_hosts: boolean
   manage_hosts: boolean
   host_ids: number[]
+  disabled_tools: string[]
 }
 
 const defaultValues: TokenFormValues = {
@@ -37,6 +38,7 @@ const defaultValues: TokenFormValues = {
   all_hosts: true,
   manage_hosts: false,
   host_ids: [],
+  disabled_tools: [],
 }
 
 /**
@@ -78,10 +80,16 @@ function TokenPermissions({ token, hosts }: { token: Token; hosts: Host[] | unde
     </span>
   )
 
+  const disabled = token.disabled_tools ?? []
   return (
     <div className="flex flex-wrap items-center gap-2">
       {scope}
       {token.manage_hosts && <Badge variant="warning">管理主机</Badge>}
+      {disabled.length > 0 && (
+        <Badge variant="outline" title={`禁用工具组：${disabled.join('、')}`}>
+          禁用 {disabled.length} 组
+        </Badge>
+      )}
     </div>
   )
 }
@@ -90,9 +98,12 @@ export function TokensPage() {
   const tokens = useTokens()
   const hosts = useHosts()
   const createToken = useCreateToken()
+  const updateToken = useUpdateToken()
   const deleteToken = useDeleteToken()
   const deleteTokens = useDeleteTokens()
+  const toolGroups = useToolGroups()
   const [createOpen, setCreateOpen] = useState(false)
+  const [editing, setEditing] = useState<Token | null>(null)
   const [plainToken, setPlainToken] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [deleting, setDeleting] = useState<Token | null>(null)
@@ -121,18 +132,38 @@ export function TokensPage() {
     if (!open) reset(defaultValues)
   }
 
+  const toPayload = (values: TokenFormValues): TokenPayload => ({
+    name: values.name,
+    all_hosts: values.all_hosts,
+    manage_hosts: values.manage_hosts,
+    host_ids: values.all_hosts ? undefined : values.host_ids,
+    disabled_tools: values.disabled_tools,
+  })
+
   const create = async (values: TokenFormValues) => {
-    const payload: TokenPayload = {
-      name: values.name,
-      all_hosts: values.all_hosts,
-      manage_hosts: values.manage_hosts,
-      host_ids: values.all_hosts ? undefined : values.host_ids,
-    }
-    const created = await createToken.mutateAsync(payload)
+    const created = await createToken.mutateAsync(toPayload(values))
     setCreateOpen(false)
     reset(defaultValues)
     setCopied(false)
     setPlainToken(created.token ?? '')
+  }
+
+  const openEdit = (token: Token) => {
+    reset({
+      name: token.name,
+      all_hosts: token.all_hosts,
+      manage_hosts: token.manage_hosts,
+      host_ids: token.host_ids ?? [],
+      disabled_tools: token.disabled_tools ?? [],
+    })
+    setEditing(token)
+  }
+
+  const saveEdit = async (values: TokenFormValues) => {
+    if (!editing) return
+    await updateToken.mutateAsync({ id: editing.id, payload: toPayload(values) })
+    setEditing(null)
+    reset(defaultValues)
   }
 
   const selectPlainToken = () => {
@@ -185,15 +216,26 @@ export function TokensPage() {
       title: '操作',
       className: 'w-16 text-right',
       render: (token) => (
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={`删除令牌 ${token.name}`}
-          title="删除令牌"
-          onClick={() => setDeleting(token)}
-        >
-          <Trash size={16} />
-        </Button>
+        <div className="flex justify-end gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={`编辑令牌 ${token.name}`}
+            title="编辑令牌"
+            onClick={() => openEdit(token)}
+          >
+            <PencilSimple size={16} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={`删除令牌 ${token.name}`}
+            title="删除令牌"
+            onClick={() => setDeleting(token)}
+          >
+            <Trash size={16} />
+          </Button>
+        </div>
       ),
     },
   ]
@@ -412,6 +454,159 @@ export function TokensPage() {
               </motion.div>
             )}
           </AnimatePresence>
+
+          <Field
+            label="禁用 MCP 工具组"
+            hint="与 ONESSH_DISABLED_TOOLS 同一套分组；对该令牌隐藏 tools/list 并拒绝 tools/call"
+          >
+            {(id) => (
+              <Controller
+                name="disabled_tools"
+                control={control}
+                render={({ field }) => (
+                  <MultiSelect
+                    id={id}
+                    value={field.value}
+                    onChange={field.onChange}
+                    placeholder="不禁用（全部可用）"
+                    options={(toolGroups.data ?? []).map((group) => ({
+                      value: group.name,
+                      label: group.name,
+                    }))}
+                  />
+                )}
+              />
+            )}
+          </Field>
+
+        </form>
+      </Dialog>
+
+      <Dialog
+        open={editing !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditing(null)
+            reset(defaultValues)
+          }
+        }}
+        size="md"
+        title="编辑令牌"
+        footer={
+          <>
+            <Button variant="ghost" type="button" onClick={() => { setEditing(null); reset(defaultValues) }}>
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              type="submit"
+              form="edit-token-form"
+              loading={updateToken.isPending}
+            >
+              保存
+            </Button>
+          </>
+        }
+      >
+        <form id="edit-token-form" className="space-y-4" onSubmit={handleSubmit(saveEdit)}>
+          <Field label="名称" required error={errors.name?.message}>
+            {(id) => (
+              <Input
+                id={id}
+                autoFocus
+                placeholder="ci-runner"
+                invalid={Boolean(errors.name)}
+                {...register('name', { required: '请输入名称' })}
+              />
+            )}
+          </Field>
+          <div className="flex items-center justify-between gap-4 rounded-[8px] border border-border bg-surface-2 px-3 py-2.5">
+            <div className="min-w-0">
+              <Label htmlFor="edit-token-all-hosts">允许全部主机</Label>
+              <p className="mt-0.5 text-[12px] text-muted">关闭后只授权选定的主机</p>
+            </div>
+            <Controller
+              name="all_hosts"
+              control={control}
+              render={({ field }) => (
+                <Switch id="edit-token-all-hosts" checked={field.value} onCheckedChange={field.onChange} />
+              )}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4 rounded-[8px] border border-border bg-surface-2 px-3 py-2.5">
+            <div className="min-w-0">
+              <Label htmlFor="edit-token-manage-hosts">允许管理主机</Label>
+              <p className="mt-0.5 text-[12px] text-muted">可新增、编辑、测试和删除全部 SSH 主机</p>
+            </div>
+            <Controller
+              name="manage_hosts"
+              control={control}
+              render={({ field }) => (
+                <Switch id="edit-token-manage-hosts" checked={field.value} onCheckedChange={field.onChange} />
+              )}
+            />
+          </div>
+          <AnimatePresence initial={false}>
+            {!allHosts && (
+              <motion.div
+                key="edit-host-scope"
+                className="overflow-hidden"
+                initial={reduce ? false : { height: 0, opacity: 0, marginTop: 0 }}
+                animate={reduce ? {} : { height: 'auto', opacity: 1, marginTop: 16 }}
+                exit={reduce ? {} : { height: 0, opacity: 0, marginTop: 0 }}
+                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <Field label="允许主机" required={!manageHosts} error={errors.host_ids?.message}>
+                  {(id) => (
+                    <Controller
+                      name="host_ids"
+                      control={control}
+                      rules={{
+                        validate: (value) => manageHosts || value.length > 0 || '请至少选择一台主机',
+                      }}
+                      render={({ field }) => (
+                        <MultiSelect
+                          id={id}
+                          value={field.value}
+                          onChange={field.onChange}
+                          invalid={Boolean(errors.host_ids)}
+                          options={(hosts.data ?? []).map((host) => ({
+                            value: host.id,
+                            label: host.name,
+                          }))}
+                        />
+                      )}
+                    />
+                  )}
+                </Field>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <Field
+            label="禁用 MCP 工具组"
+            hint="与 ONESSH_DISABLED_TOOLS 同一套分组；对该令牌隐藏 tools/list 并拒绝 tools/call"
+          >
+            {(id) => (
+              <Controller
+                name="disabled_tools"
+                control={control}
+                render={({ field }) => (
+                  <MultiSelect
+                    id={id}
+                    value={field.value}
+                    onChange={field.onChange}
+                    placeholder="不禁用（全部可用）"
+                    options={(toolGroups.data ?? []).map((group) => ({
+                      value: group.name,
+                      label: group.name,
+                    }))}
+                  />
+                )}
+              />
+            )}
+          </Field>
+
         </form>
       </Dialog>
 

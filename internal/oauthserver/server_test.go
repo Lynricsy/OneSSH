@@ -540,6 +540,51 @@ func TestOAuthMetadataAdvertisesMCPDiscovery(t *testing.T) {
 	}
 }
 
+func TestOAuthAuthorizationDecisionRejectsUnknownDisabledTools(t *testing.T) {
+	server, st := newTestServer(t)
+	ctx := context.Background()
+	host, err := st.CreateHost(ctx, store.Host{Name: "build", Addr: "127.0.0.1", Port: 22, Username: "runner", AuthType: "password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	registration := `{"client_name":"Claude Code","redirect_uris":["http://127.0.0.1:39123/callback"],"token_endpoint_auth_method":"none","grant_types":["authorization_code"],"response_types":["code"]}`
+	registerRequest := httptest.NewRequest(http.MethodPost, "/oauth/register", strings.NewReader(registration))
+	registerResponse := httptest.NewRecorder()
+	server.RegisterClient(registerResponse, registerRequest)
+	if registerResponse.Code != http.StatusCreated {
+		t.Fatalf("注册状态码 %d: %s", registerResponse.Code, registerResponse.Body.String())
+	}
+	var registered struct {
+		ClientID string `json:"client_id"`
+	}
+	if err = json.NewDecoder(registerResponse.Body).Decode(&registered); err != nil {
+		t.Fatal(err)
+	}
+
+	verifier := strings.Repeat("v", 64)
+	challengeHash := sha256.Sum256([]byte(verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(challengeHash[:])
+	params := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {registered.ClientID},
+		"redirect_uri":          {"http://127.0.0.1:39123/callback"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+		"resource":              {"http://localhost:8866/mcp"},
+		"scope":                 {"mcp"},
+		"state":                 {"state-deny"},
+	}
+	decisionBody := `{"query":` + quoted("?"+params.Encode()) + `,"decision":"approve","all_hosts":false,"manage_hosts":true,"host_ids":[` + fmtInt(host.ID) + `],"disabled_tools":["not-a-group"]}`
+	decisionRequest := httptest.NewRequest(http.MethodPost, "/api/v1/oauth/authorization", strings.NewReader(decisionBody))
+	decisionResponse := httptest.NewRecorder()
+	server.AuthorizationDecision(decisionResponse, decisionRequest)
+	if decisionResponse.Code != http.StatusBadRequest {
+		t.Fatalf("未知工具组应 400，实际 %d: %s", decisionResponse.Code, decisionResponse.Body.String())
+	}
+}
+
+
 func quoted(value string) string {
 	raw, _ := json.Marshal(value)
 	return string(raw)

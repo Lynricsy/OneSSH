@@ -4,6 +4,10 @@
 
 ## [未发布]
 
+### 新增
+
+- 令牌级 MCP 工具组 denylist：手动创建/更新令牌与 OAuth 同意页可选择与 `ONESSH_DISABLED_TOOLS` 相同的工具组；对该 Bearer 主体，`tools/list` 隐藏、`tools/call` 拒绝并记审计，MCP Apps 卡片同步不可见；有效禁用 = 进程级 ∪ 令牌级。WebUI / REST 管理面不受影响。新增 `GET /api/v1/tool-groups`、`PUT /tokens/{id}`。
+
 ## [0.1.17] - 2026-09-11
 
 ### 新增

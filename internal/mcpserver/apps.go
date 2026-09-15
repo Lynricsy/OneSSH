@@ -310,3 +310,31 @@ func (c *appCatalog) legacyEntry(uri string) (appEntry, bool) {
 	}
 	return entry, true
 }
+
+// toolNameForURI 从标准或旧版卡片 URI 还原工具名，供令牌级 denylist 过滤 resources。
+func (c *appCatalog) toolNameForURI(uri string) (string, bool) {
+	if c == nil || uri == "" {
+		return "", false
+	}
+	if entry, ok := c.legacyEntry(uri); ok {
+		return entry.binding.Tool, true
+	}
+	for tool, entry := range c.entries {
+		if entry.uri == uri {
+			return tool, true
+		}
+	}
+	const prefix = "ui://onessh/"
+	if strings.HasPrefix(uri, prefix) {
+		rest := strings.TrimPrefix(uri, prefix)
+		if i := strings.IndexAny(rest, "?/"); i >= 0 {
+			rest = rest[:i]
+		}
+		if rest != "" && rest != "legacy" {
+			if _, ok := c.entries[rest]; ok {
+				return rest, true
+			}
+		}
+	}
+	return "", false
+}

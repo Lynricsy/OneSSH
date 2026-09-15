@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"onessh/internal/store"
+	"onessh/internal/toolgroups"
 )
 
 type clientRegistrationRequest struct {
@@ -25,11 +26,12 @@ type clientRegistrationRequest struct {
 }
 
 type authorizationDecision struct {
-	Query       string  `json:"query"`
-	Decision    string  `json:"decision"`
-	AllHosts    bool    `json:"all_hosts"`
-	ManageHosts bool    `json:"manage_hosts"`
-	HostIDs     []int64 `json:"host_ids"`
+	Query         string   `json:"query"`
+	Decision      string   `json:"decision"`
+	AllHosts      bool     `json:"all_hosts"`
+	ManageHosts   bool     `json:"manage_hosts"`
+	HostIDs       []int64  `json:"host_ids"`
+	DisabledTools []string `json:"disabled_tools"`
 }
 
 func (s *Server) AuthorizationServerMetadata(w http.ResponseWriter, r *http.Request) {
@@ -154,12 +156,20 @@ func (s *Server) AuthorizationInfo(w http.ResponseWriter, r *http.Request) {
 	for _, host := range hosts {
 		hostViews = append(hostViews, host.View())
 	}
+	toolGroups := make([]map[string]any, 0, len(toolgroups.All))
+	for _, def := range toolgroups.All {
+		toolGroups = append(toolGroups, map[string]any{
+			"name":  string(def.Group),
+			"tools": def.Tools,
+		})
+	}
 	jsonResponse(w, http.StatusOK, map[string]any{
 		"client_name":      request.Client.ClientName,
 		"client_uri":       request.Client.ClientURI,
 		"redirect_uri":     request.RedirectURI,
 		"requested_scopes": request.Scopes,
 		"hosts":            hostViews,
+		"tool_groups":      toolGroups,
 	})
 }
 
@@ -201,6 +211,11 @@ func (s *Server) AuthorizationDecision(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	disabledTools, err := toolgroups.NormalizeList(input.DisabledTools)
+	if err != nil {
+		oauthAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	plainCode, err := randomValue("osc_code_", 32)
 	if err != nil {
 		oauthAPIError(w, http.StatusInternalServerError, "无法生成授权码")
@@ -215,6 +230,7 @@ func (s *Server) AuthorizationDecision(w http.ResponseWriter, r *http.Request) {
 		Scope:         request.Scope,
 		AllHosts:      input.AllHosts,
 		ManageHosts:   input.ManageHosts,
+		DisabledTools: disabledTools,
 		HostIDs:       input.HostIDs,
 		ExpiresAt:     s.now().Add(codeLifetime).Unix(),
 	}); err != nil {

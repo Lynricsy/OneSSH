@@ -26,6 +26,7 @@ type OAuthAuthorizationCode struct {
 	Scope         string
 	AllHosts      bool
 	ManageHosts   bool
+	DisabledTools []string
 	HostIDs       []int64
 	ExpiresAt     int64
 	CreatedAt     int64
@@ -56,6 +57,7 @@ type OAuthRefreshToken struct {
 	Scope         string
 	AllHosts      bool
 	ManageHosts   bool
+	DisabledTools []string
 	HostIDs       []int64
 	ExpiresAt     int64
 	CreatedAt     int64
@@ -113,10 +115,15 @@ func (s *Store) CreateOAuthAuthorizationCode(ctx context.Context, code OAuthAuth
 	if err != nil {
 		return err
 	}
+	disabledJSON, disabledTools, err := encodeDisabledTools(code.DisabledTools)
+	if err != nil {
+		return err
+	}
+	code.DisabledTools = disabledTools
 	if code.CreatedAt == 0 {
 		code.CreatedAt = time.Now().Unix()
 	}
-	_, err = s.DB.ExecContext(ctx, `INSERT INTO oauth_authorization_codes(code_hash,client_id,redirect_uri,resource,code_challenge,scope,all_hosts,manage_hosts,host_ids_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, code.CodeHash, code.ClientID, code.RedirectURI, code.Resource, code.CodeChallenge, code.Scope, boolInt(code.AllHosts), boolInt(code.ManageHosts), string(rawHostIDs), code.ExpiresAt, code.CreatedAt)
+	_, err = s.DB.ExecContext(ctx, `INSERT INTO oauth_authorization_codes(code_hash,client_id,redirect_uri,resource,code_challenge,scope,all_hosts,manage_hosts,host_ids_json,disabled_tools_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, code.CodeHash, code.ClientID, code.RedirectURI, code.Resource, code.CodeChallenge, code.Scope, boolInt(code.AllHosts), boolInt(code.ManageHosts), string(rawHostIDs), disabledJSON, code.ExpiresAt, code.CreatedAt)
 	return err
 }
 
@@ -129,14 +136,18 @@ func (s *Store) ExchangeOAuthAuthorizationCode(ctx context.Context, in OAuthAuth
 
 	var code OAuthAuthorizationCode
 	var allHosts, manageHosts int
-	var rawHostIDs string
-	err = tx.QueryRowContext(ctx, `SELECT code_hash,client_id,redirect_uri,resource,code_challenge,scope,all_hosts,manage_hosts,host_ids_json,expires_at,created_at,used_at,grant_id FROM oauth_authorization_codes WHERE code_hash=?`, in.CodeHash).Scan(&code.CodeHash, &code.ClientID, &code.RedirectURI, &code.Resource, &code.CodeChallenge, &code.Scope, &allHosts, &manageHosts, &rawHostIDs, &code.ExpiresAt, &code.CreatedAt, &code.UsedAt, &code.GrantID)
+	var rawHostIDs, disabledJSON string
+	err = tx.QueryRowContext(ctx, `SELECT code_hash,client_id,redirect_uri,resource,code_challenge,scope,all_hosts,manage_hosts,host_ids_json,disabled_tools_json,expires_at,created_at,used_at,grant_id FROM oauth_authorization_codes WHERE code_hash=?`, in.CodeHash).Scan(&code.CodeHash, &code.ClientID, &code.RedirectURI, &code.Resource, &code.CodeChallenge, &code.Scope, &allHosts, &manageHosts, &rawHostIDs, &disabledJSON, &code.ExpiresAt, &code.CreatedAt, &code.UsedAt, &code.GrantID)
 	if err != nil {
 		return OAuthAuthorizationCode{}, err
 	}
 	code.AllHosts = allHosts != 0
 	code.ManageHosts = manageHosts != 0
 	if err = json.Unmarshal([]byte(rawHostIDs), &code.HostIDs); err != nil {
+		return OAuthAuthorizationCode{}, err
+	}
+	code.DisabledTools, err = decodeDisabledTools(disabledJSON)
+	if err != nil {
 		return OAuthAuthorizationCode{}, err
 	}
 	valid := subtle.ConstantTimeCompare([]byte(code.CodeChallenge), []byte(in.CodeChallenge)) == 1 &&
@@ -161,15 +172,16 @@ func (s *Store) ExchangeOAuthAuthorizationCode(ctx context.Context, in OAuthAuth
 	}
 
 	accessToken, err := createTokenTx(ctx, tx, TokenCreate{
-		Name:        in.AccessTokenName,
-		Hash:        in.AccessTokenHash,
-		AllHosts:    code.AllHosts,
-		ManageHosts: code.ManageHosts,
-		HostIDs:     code.HostIDs,
-		Source:      "oauth",
-		ExpiresAt:   in.AccessExpiresAt,
-		Resource:    code.Resource,
-		ClientID:    code.ClientID,
+		Name:          in.AccessTokenName,
+		Hash:          in.AccessTokenHash,
+		AllHosts:      code.AllHosts,
+		ManageHosts:   code.ManageHosts,
+		DisabledTools: code.DisabledTools,
+		HostIDs:       code.HostIDs,
+		Source:        "oauth",
+		ExpiresAt:     in.AccessExpiresAt,
+		Resource:      code.Resource,
+		ClientID:      code.ClientID,
 	}, in.Now)
 	if err != nil {
 		return OAuthAuthorizationCode{}, err
@@ -183,6 +195,7 @@ func (s *Store) ExchangeOAuthAuthorizationCode(ctx context.Context, in OAuthAuth
 		Scope:         code.Scope,
 		AllHosts:      code.AllHosts,
 		ManageHosts:   code.ManageHosts,
+		DisabledTools: code.DisabledTools,
 		HostIDs:       code.HostIDs,
 		ExpiresAt:     in.RefreshExpiresAt,
 		CreatedAt:     in.Now,
@@ -241,14 +254,18 @@ func (s *Store) RotateOAuthRefreshToken(ctx context.Context, in OAuthRefreshToke
 
 	var token OAuthRefreshToken
 	var allHosts, manageHosts int
-	var rawHostIDs string
-	err = tx.QueryRowContext(ctx, `SELECT token_hash,grant_id,access_token_id,client_id,resource,scope,all_hosts,manage_hosts,host_ids_json,expires_at,created_at,used_at,revoked_at FROM oauth_refresh_tokens WHERE token_hash=?`, in.TokenHash).Scan(&token.TokenHash, &token.GrantID, &token.AccessTokenID, &token.ClientID, &token.Resource, &token.Scope, &allHosts, &manageHosts, &rawHostIDs, &token.ExpiresAt, &token.CreatedAt, &token.UsedAt, &token.RevokedAt)
+	var rawHostIDs, disabledJSON string
+	err = tx.QueryRowContext(ctx, `SELECT token_hash,grant_id,access_token_id,client_id,resource,scope,all_hosts,manage_hosts,host_ids_json,disabled_tools_json,expires_at,created_at,used_at,revoked_at FROM oauth_refresh_tokens WHERE token_hash=?`, in.TokenHash).Scan(&token.TokenHash, &token.GrantID, &token.AccessTokenID, &token.ClientID, &token.Resource, &token.Scope, &allHosts, &manageHosts, &rawHostIDs, &disabledJSON, &token.ExpiresAt, &token.CreatedAt, &token.UsedAt, &token.RevokedAt)
 	if err != nil {
 		return OAuthRefreshToken{}, err
 	}
 	token.AllHosts = allHosts != 0
 	token.ManageHosts = manageHosts != 0
 	if err = json.Unmarshal([]byte(rawHostIDs), &token.HostIDs); err != nil {
+		return OAuthRefreshToken{}, err
+	}
+	token.DisabledTools, err = decodeDisabledTools(disabledJSON)
+	if err != nil {
 		return OAuthRefreshToken{}, err
 	}
 	if token.ClientID != in.ClientID || token.Resource != in.Resource || token.ExpiresAt <= in.Now || token.RevokedAt.Valid {
@@ -275,15 +292,16 @@ func (s *Store) RotateOAuthRefreshToken(ctx context.Context, in OAuthRefreshToke
 		return OAuthRefreshToken{}, ErrOAuthRefreshReuse
 	}
 	accessToken, err := createTokenTx(ctx, tx, TokenCreate{
-		Name:        in.AccessTokenName,
-		Hash:        in.AccessTokenHash,
-		AllHosts:    token.AllHosts,
-		ManageHosts: token.ManageHosts,
-		HostIDs:     token.HostIDs,
-		Source:      "oauth",
-		ExpiresAt:   in.AccessExpiresAt,
-		Resource:    token.Resource,
-		ClientID:    token.ClientID,
+		Name:          in.AccessTokenName,
+		Hash:          in.AccessTokenHash,
+		AllHosts:      token.AllHosts,
+		ManageHosts:   token.ManageHosts,
+		DisabledTools: token.DisabledTools,
+		HostIDs:       token.HostIDs,
+		Source:        "oauth",
+		ExpiresAt:     in.AccessExpiresAt,
+		Resource:      token.Resource,
+		ClientID:      token.ClientID,
 	}, in.Now)
 	if err != nil {
 		return OAuthRefreshToken{}, err
@@ -297,6 +315,7 @@ func (s *Store) RotateOAuthRefreshToken(ctx context.Context, in OAuthRefreshToke
 		Scope:         token.Scope,
 		AllHosts:      token.AllHosts,
 		ManageHosts:   token.ManageHosts,
+		DisabledTools: token.DisabledTools,
 		HostIDs:       token.HostIDs,
 		ExpiresAt:     in.RefreshExpiresAt,
 		CreatedAt:     in.Now,
@@ -317,7 +336,11 @@ func insertOAuthRefreshTokenTx(ctx context.Context, tx *sql.Tx, token OAuthRefre
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(token_hash,grant_id,access_token_id,client_id,resource,scope,all_hosts,manage_hosts,host_ids_json,expires_at,created_at,used_at,revoked_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, token.TokenHash, token.GrantID, token.AccessTokenID, token.ClientID, token.Resource, token.Scope, boolInt(token.AllHosts), boolInt(token.ManageHosts), string(rawHostIDs), token.ExpiresAt, token.CreatedAt, nullInt(token.UsedAt), nullInt(token.RevokedAt))
+	disabledJSON, _, err := encodeDisabledTools(token.DisabledTools)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(token_hash,grant_id,access_token_id,client_id,resource,scope,all_hosts,manage_hosts,host_ids_json,disabled_tools_json,expires_at,created_at,used_at,revoked_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, token.TokenHash, token.GrantID, token.AccessTokenID, token.ClientID, token.Resource, token.Scope, boolInt(token.AllHosts), boolInt(token.ManageHosts), string(rawHostIDs), disabledJSON, token.ExpiresAt, token.CreatedAt, nullInt(token.UsedAt), nullInt(token.RevokedAt))
 	return err
 }
 

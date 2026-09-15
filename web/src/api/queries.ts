@@ -22,12 +22,14 @@ import type {
   SSHKey,
   Token,
   TokenPayload,
+  ToolGroup,
 } from './types'
 
 export const queryKeys = {
   hosts: ['hosts'] as const,
   keys: ['keys'] as const,
   tokens: ['tokens'] as const,
+  toolGroups: ['tool-groups'] as const,
   jobs: ['jobs'] as const,
   jobLogs: (id: string) => ['jobs', id, 'logs'] as const,
   audit: (filter: AuditFilter) => ['audit', filter] as const,
@@ -274,6 +276,16 @@ export const useDeleteKeys = () =>
 
 export const useCreateToken = () =>
   useInvalidatingMutation<TokenPayload, Token>((v) => post<Token>('/tokens', v), queryKeys.tokens)
+
+export const useUpdateToken = () =>
+  useInvalidatingMutation<{ id: number; payload: TokenPayload }, Token>(
+    ({ id, payload }) => put<Token>(`/tokens/${id}`, payload),
+    queryKeys.tokens,
+    '令牌已更新',
+  )
+
+export const useToolGroups = () =>
+  useQuery({ queryKey: queryKeys.toolGroups, queryFn: () => api<ToolGroup[]>('/tool-groups'), staleTime: Infinity })
 
 export const useDeleteToken = () =>
   useInvalidatingMutation<number, void>((id) => del(`/tokens/${id}`), queryKeys.tokens, '令牌已删除')

@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -28,6 +30,7 @@ import (
 	"onessh/internal/monitor"
 	"onessh/internal/sshpool"
 	"onessh/internal/store"
+	"onessh/internal/toolgroups"
 )
 
 type API struct {
@@ -59,7 +62,9 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("DELETE /keys/{id}", a.key)
 	mux.HandleFunc("GET /tokens", a.tokens)
 	mux.HandleFunc("POST /tokens", a.tokens)
+	mux.HandleFunc("PUT /tokens/{id}", a.token)
 	mux.HandleFunc("DELETE /tokens/{id}", a.token)
+	mux.HandleFunc("GET /tool-groups", a.toolGroups)
 	mux.HandleFunc("GET /jobs", a.jobsList)
 	mux.HandleFunc("POST /jobs/{id}/kill", a.jobKill)
 	mux.HandleFunc("GET /jobs/{id}/logs", a.jobLogs)
@@ -269,15 +274,38 @@ func (a *API) key(w http.ResponseWriter, r *http.Request) {
 }
 
 type tokenInput struct {
-	Name        string  `json:"name"`
-	AllHosts    bool    `json:"all_hosts"`
-	ManageHosts bool    `json:"manage_hosts"`
-	HostIDs     []int64 `json:"host_ids"`
+	Name          string   `json:"name"`
+	AllHosts      bool     `json:"all_hosts"`
+	ManageHosts   bool     `json:"manage_hosts"`
+	HostIDs       []int64  `json:"host_ids"`
+	DisabledTools []string `json:"disabled_tools"`
 }
 type tokenView struct {
 	store.Token
 	HostIDs    []int64 `json:"host_ids,omitempty"`
 	PlainToken string  `json:"token,omitempty"`
+}
+
+func (a *API) toolGroups(w http.ResponseWriter, r *http.Request) {
+	groups := make([]map[string]any, 0, len(toolgroups.All))
+	for _, def := range toolgroups.All {
+		groups = append(groups, map[string]any{
+			"name":  string(def.Group),
+			"tools": def.Tools,
+		})
+	}
+	jsonOut(w, 200, groups)
+}
+
+func normalizeTokenDisabledTools(names []string) ([]string, error) {
+	normalized, err := toolgroups.NormalizeList(names)
+	if err != nil {
+		return nil, err
+	}
+	if normalized == nil {
+		normalized = []string{}
+	}
+	return normalized, nil
 }
 
 func (a *API) tokens(w http.ResponseWriter, r *http.Request) {
@@ -300,13 +328,21 @@ func (a *API) tokens(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, err)
 		return
 	}
+	disabled, err := normalizeTokenDisabledTools(in.DisabledTools)
+	if err != nil {
+		apiError(w, 400, err)
+		return
+	}
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		apiError(w, 500, err)
 		return
 	}
 	plain := "osh_" + base64.RawURLEncoding.EncodeToString(raw)
-	t, err := a.Store.CreateToken(r.Context(), store.TokenCreate{Name: in.Name, Hash: store.TokenHash(plain), AllHosts: in.AllHosts, ManageHosts: in.ManageHosts, HostIDs: in.HostIDs})
+	t, err := a.Store.CreateToken(r.Context(), store.TokenCreate{
+		Name: in.Name, Hash: store.TokenHash(plain), AllHosts: in.AllHosts, ManageHosts: in.ManageHosts,
+		DisabledTools: disabled, HostIDs: in.HostIDs,
+	})
 	if err != nil {
 		apiError(w, 409, err)
 		return
@@ -319,11 +355,51 @@ func (a *API) token(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, err)
 		return
 	}
-	if err = a.Store.DeleteToken(r.Context(), id); err != nil {
-		apiError(w, 500, err)
-		return
+	switch r.Method {
+	case http.MethodPut:
+		var in tokenInput
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			apiError(w, 400, err)
+			return
+		}
+		disabled, err := normalizeTokenDisabledTools(in.DisabledTools)
+		if err != nil {
+			apiError(w, 400, err)
+			return
+		}
+		hostIDs := in.HostIDs
+		if in.AllHosts {
+			hostIDs = nil
+		} else {
+			hostIDs, err = a.Store.ValidateHostIDs(r.Context(), hostIDs)
+			if err != nil {
+				apiError(w, 400, err)
+				return
+			}
+		}
+		t, err := a.Store.UpdateToken(r.Context(), id, store.TokenUpdate{
+			Name: in.Name, AllHosts: in.AllHosts, ManageHosts: in.ManageHosts,
+			HostIDs: hostIDs, DisabledTools: disabled,
+		})
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				apiError(w, 404, err)
+				return
+			}
+			apiError(w, 409, err)
+			return
+		}
+		ids, _ := a.Store.TokenHostIDs(r.Context(), t.ID)
+		jsonOut(w, 200, tokenView{Token: t, HostIDs: ids})
+	case http.MethodDelete:
+		if err = a.Store.DeleteToken(r.Context(), id); err != nil {
+			apiError(w, 500, err)
+			return
+		}
+		w.WriteHeader(204)
+	default:
+		apiError(w, 405, fmt.Errorf("method not allowed"))
 	}
-	w.WriteHeader(204)
 }
 func (a *API) jobsList(w http.ResponseWriter, r *http.Request) {
 	var hostID *int64
