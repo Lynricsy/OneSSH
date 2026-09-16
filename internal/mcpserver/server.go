@@ -26,17 +26,18 @@ import (
 )
 
 type Server struct {
-	MCP         *mcp.Server
-	Store       *store.Store
-	Pool        *sshpool.Pool
-	Events      *events.Bus
-	HostManager *hostmanager.Manager
-	Exec        *execx.Runner
-	Files       *files.Manager
-	Jobs        *jobs.Manager
-	Monitor     *monitor.Manager
-	Memory      *memoryx.Engine
-	apps        *appCatalog
+	MCP           *mcp.Server
+	Store         *store.Store
+	Pool          *sshpool.Pool
+	Events        *events.Bus
+	HostManager   *hostmanager.Manager
+	Exec          *execx.Runner
+	Files         *files.Manager
+	Jobs          *jobs.Manager
+	Monitor       *monitor.Manager
+	Memory        *memoryx.Engine
+	apps          *appCatalog
+	disabledTools toolgroups.Disabled
 }
 
 // Options 收拢 New 的可调参数：按组关闭工具属于实例级配置，再往位置参数上堆会让调用点
@@ -55,7 +56,7 @@ type Options struct {
 }
 
 func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanager.Manager, memory *memoryx.Engine, opts Options) *Server {
-	s := &Server{Store: st, Pool: pool, Events: bus, HostManager: hosts, Memory: memory, Exec: execx.New(opts.DataDir)}
+	s := &Server{Store: st, Pool: pool, Events: bus, HostManager: hosts, Memory: memory, Exec: execx.New(opts.DataDir), disabledTools: opts.DisabledTools}
 	if err := st.RecoverInterruptedCommandRuns(context.Background(), time.Now().UnixMilli()); err != nil {
 		log.Printf("恢复中断的命令执行记录失败: %v", err)
 	}
@@ -99,6 +100,7 @@ func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanage
 		s.registerFanout()
 	}
 	s.apps.registerResources(s.MCP)
+	s.installTokenDenylist()
 	if names := opts.DisabledTools.Names(); len(names) > 0 {
 		log.Printf("已禁用 MCP 工具组: %s", strings.Join(names, ","))
 	}

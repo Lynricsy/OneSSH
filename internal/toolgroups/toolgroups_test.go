@@ -40,3 +40,39 @@ func TestParseEmptySpecDisablesNothing(t *testing.T) {
 		}
 	}
 }
+
+func TestParseListAndUnion(t *testing.T) {
+	disabled, err := ParseList([]string{" Memory ", "files", ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !disabled[Memory] || !disabled[Files] {
+		t.Fatalf("ParseList = %#v", disabled)
+	}
+	if _, err := ParseList([]string{"nope"}); err == nil {
+		t.Fatal("未知分组应报错")
+	}
+	merged := Union(Disabled{Exec: true}, disabled)
+	if !merged[Exec] || !merged[Memory] || !merged[Files] {
+		t.Fatalf("Union = %#v", merged)
+	}
+	names, err := NormalizeList([]string{"files", "memory", "files"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(names, ",") != "files,memory" {
+		t.Fatalf("NormalizeList = %v", names)
+	}
+}
+
+func TestAllDisabled(t *testing.T) {
+	disabled := AllDisabled()
+	if len(disabled) != len(All) {
+		t.Fatalf("AllDisabled size = %d, want %d", len(disabled), len(All))
+	}
+	for _, def := range All {
+		if disabled.Enabled(def.Group) {
+			t.Fatalf("分组 %s 未被禁用", def.Group)
+		}
+	}
+}

@@ -322,7 +322,7 @@ func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 12 {
+	if versions != 13 {
 		t.Fatalf("二次迁移版本数 = %d", versions)
 	}
 }
@@ -351,7 +351,7 @@ func TestOpenRecordsPreexistingManageHostsColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 12 {
+	if versions != 13 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 }
@@ -397,7 +397,7 @@ func TestOpenRecordsPreexistingAuditTokenNameColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 12 {
+	if versions != 13 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 }
@@ -426,7 +426,7 @@ func TestOpenRecordsPreexistingJobLogBytesColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 12 {
+	if versions != 13 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 }
@@ -480,7 +480,7 @@ func TestOpenAddsMissingCommandRunOutputCleanedColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 12 {
+	if versions != 13 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 	var cleanedColumns int
@@ -517,7 +517,7 @@ func TestOpenRecordsPreexistingAuditCommandRunIDsColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 12 {
+	if versions != 13 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 	audit, err := st.ListAudit(context.Background(), nil, nil, nil, nil, 0, 10)

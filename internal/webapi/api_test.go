@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -249,5 +250,139 @@ func TestCommandRunListDetailAndOutput(t *testing.T) {
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/command-runs/"+id+"/output?stream=combined", nil))
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("非法输出流状态码 = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestTokensRejectUnknownDisabledToolGroups(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	box, err := cryptox.New(bytes.Repeat([]byte{8}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := sshpool.New(st, box)
+	defer pool.Close()
+	hosts := hostmanager.New(st, box, pool)
+	api := NewAPI(st, box, pool, hosts, nil, nil, nil, nil, memoryx.New(st, memoryx.EmbeddingConfig{}), nil).Handler()
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		api.ServeHTTP(w, r)
+		return w
+	}
+
+	created := call(http.MethodPost, "/tokens", `{"name":"bad","all_hosts":true,"disabled_tools":["not-a-group"]}`)
+	if created.Code != http.StatusBadRequest {
+		t.Fatalf("POST /tokens 未知分组应 400，实际 %d %s", created.Code, created.Body.String())
+	}
+
+	ok := call(http.MethodPost, "/tokens", `{"name":"ok","all_hosts":true,"disabled_tools":["memory"]}`)
+	if ok.Code != http.StatusCreated {
+		t.Fatalf("POST /tokens 合法分组应 201，实际 %d %s", ok.Code, ok.Body.String())
+	}
+	var tokenOut map[string]any
+	if err := json.Unmarshal(ok.Body.Bytes(), &tokenOut); err != nil {
+		t.Fatal(err)
+	}
+	id := int64(tokenOut["id"].(float64))
+
+	updated := call(http.MethodPut, "/tokens/"+strconv.FormatInt(id, 10), `{"name":"ok","all_hosts":true,"disabled_tools":["still-bad"]}`)
+	if updated.Code != http.StatusBadRequest {
+		t.Fatalf("PUT /tokens 未知分组应 400，实际 %d %s", updated.Code, updated.Body.String())
+	}
+}
+
+func TestUpdateTokenRoundTripDisabledToolsAndHostIDs(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	box, err := cryptox.New(bytes.Repeat([]byte{8}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := sshpool.New(st, box)
+	defer pool.Close()
+	hosts := hostmanager.New(st, box, pool)
+	api := NewAPI(st, box, pool, hosts, nil, nil, nil, nil, memoryx.New(st, memoryx.EmbeddingConfig{}), nil).Handler()
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		api.ServeHTTP(w, r)
+		return w
+	}
+
+	host := call(http.MethodPost, "/hosts", `{"name":"edge","addr":"127.0.0.1","port":22,"username":"runner","auth_type":"password","password":"secret"}`)
+	if host.Code != http.StatusCreated {
+		t.Fatalf("创建主机 %d %s", host.Code, host.Body.String())
+	}
+	var hostOut map[string]any
+	if err := json.Unmarshal(host.Body.Bytes(), &hostOut); err != nil {
+		t.Fatal(err)
+	}
+	hostID := int64(hostOut["id"].(float64))
+
+	created := call(http.MethodPost, "/tokens", `{"name":"agent","all_hosts":true,"disabled_tools":["exec"]}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("创建令牌 %d %s", created.Code, created.Body.String())
+	}
+	var createdOut map[string]any
+	if err := json.Unmarshal(created.Body.Bytes(), &createdOut); err != nil {
+		t.Fatal(err)
+	}
+	id := int64(createdOut["id"].(float64))
+
+	body := `{"name":"agent-edited","all_hosts":false,"manage_hosts":true,"host_ids":[` + strconv.FormatInt(hostID, 10) + `],"disabled_tools":["memory","files"]}`
+	updated := call(http.MethodPut, "/tokens/"+strconv.FormatInt(id, 10), body)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("PUT /tokens/{id} 应 200，实际 %d %s", updated.Code, updated.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(updated.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["name"] != "agent-edited" || out["all_hosts"] != false || out["manage_hosts"] != true {
+		t.Fatalf("PUT 响应字段异常: %s", updated.Body.String())
+	}
+	disabled, ok := out["disabled_tools"].([]any)
+	if !ok || len(disabled) != 2 || disabled[0] != "files" || disabled[1] != "memory" {
+		t.Fatalf("PUT 响应 disabled_tools = %#v", out["disabled_tools"])
+	}
+	hostIDs, ok := out["host_ids"].([]any)
+	if !ok || len(hostIDs) != 1 || int64(hostIDs[0].(float64)) != hostID {
+		t.Fatalf("PUT 响应 host_ids = %#v", out["host_ids"])
+	}
+
+	listed := call(http.MethodGet, "/tokens", "")
+	if listed.Code != http.StatusOK {
+		t.Fatalf("GET /tokens %d %s", listed.Code, listed.Body.String())
+	}
+	var tokens []map[string]any
+	if err := json.Unmarshal(listed.Body.Bytes(), &tokens); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, token := range tokens {
+		if int64(token["id"].(float64)) != id {
+			continue
+		}
+		found = true
+		gotDisabled, _ := token["disabled_tools"].([]any)
+		gotHosts, _ := token["host_ids"].([]any)
+		if len(gotDisabled) != 2 || gotDisabled[0] != "files" || gotDisabled[1] != "memory" {
+			t.Fatalf("列表 disabled_tools = %#v", token["disabled_tools"])
+		}
+		if len(gotHosts) != 1 || int64(gotHosts[0].(float64)) != hostID {
+			t.Fatalf("列表 host_ids = %#v", token["host_ids"])
+		}
+	}
+	if !found {
+		t.Fatal("更新后的令牌未出现在列表中")
 	}
 }

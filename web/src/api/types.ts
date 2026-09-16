@@ -29,6 +29,8 @@ export type Token = {
   name: string
   all_hosts: boolean
   manage_hosts: boolean
+  /** MCP 工具组 denylist，取值与 toolgroups.All / ONESSH_DISABLED_TOOLS 相同 */
+  disabled_tools: string[]
   host_ids?: number[]
   created_at: number
   /** 仅创建响应携带的一次性明文 */
@@ -184,6 +186,12 @@ export type TokenPayload = {
   all_hosts: boolean
   manage_hosts: boolean
   host_ids?: number[]
+  disabled_tools?: string[]
+}
+
+export type ToolGroup = {
+  name: string
+  tools: string[]
 }
 
 /** OAuth 授权页上下文：GET /oauth/authorization?<浏览器入口的原始查询串> */
@@ -193,6 +201,7 @@ export type OAuthAuthorizationInfo = {
   redirect_uri: string
   requested_scopes: string[]
   hosts: Host[]
+  tool_groups: ToolGroup[]
 }
 
 /** 授权决定：POST /oauth/authorization，query 必须是未经改写的原始查询串 */
@@ -202,6 +211,7 @@ export type OAuthDecisionPayload = {
   all_hosts: boolean
   manage_hosts: boolean
   host_ids?: number[]
+  disabled_tools?: string[]
 }
 
 /** 无论批准还是拒绝，后端都给出下一跳；拒绝时带 error=access_denied */

@@ -73,7 +73,7 @@ func TestOAuthAuthorizationCodeFlowPreservesPermissionsAndAudience(t *testing.T)
 		t.Fatalf("授权信息状态码 %d: %s", infoResponse.Code, infoResponse.Body.String())
 	}
 
-	decisionBody := `{"query":` + quoted("?"+params.Encode()) + `,"decision":"approve","all_hosts":false,"manage_hosts":true,"host_ids":[` + fmtInt(host.ID) + `]}`
+	decisionBody := `{"query":` + quoted("?"+params.Encode()) + `,"decision":"approve","all_hosts":false,"manage_hosts":true,"host_ids":[` + fmtInt(host.ID) + `],"disabled_tools":["memory"]}`
 	decisionRequest := httptest.NewRequest(http.MethodPost, "/api/v1/oauth/authorization", strings.NewReader(decisionBody))
 	decisionResponse := httptest.NewRecorder()
 	server.AuthorizationDecision(decisionResponse, decisionRequest)
@@ -128,6 +128,9 @@ func TestOAuthAuthorizationCodeFlowPreservesPermissionsAndAudience(t *testing.T)
 	if stored.Source != "oauth" || !stored.ManageHosts || stored.AllHosts || len(hosts) != 1 || hosts[0].Name != "build" {
 		t.Fatalf("OAuth 权限未保留: token=%#v hosts=%#v", stored, hosts)
 	}
+	if len(stored.DisabledTools) != 1 || stored.DisabledTools[0] != "memory" {
+		t.Fatalf("OAuth 签发后 disabled_tools 未保留: %#v", stored.DisabledTools)
+	}
 	if _, _, err = st.FindTokenForResource(ctx, store.TokenHash(tokenBody.AccessToken), "http://localhost:8866/other"); err == nil {
 		t.Fatal("OAuth 令牌被错误资源接受")
 	}
@@ -154,6 +157,13 @@ func TestOAuthAuthorizationCodeFlowPreservesPermissionsAndAudience(t *testing.T)
 	}
 	if refreshed.AccessToken == "" || refreshed.RefreshToken == "" || refreshed.RefreshToken == tokenBody.RefreshToken {
 		t.Fatalf("刷新令牌未轮换: %#v", refreshed)
+	}
+	refreshedStored, _, err := st.FindTokenForResource(ctx, store.TokenHash(refreshed.AccessToken), "http://localhost:8866/mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refreshedStored.DisabledTools) != 1 || refreshedStored.DisabledTools[0] != "memory" {
+		t.Fatalf("OAuth 刷新后 disabled_tools 未保留: %#v", refreshedStored.DisabledTools)
 	}
 	replayRequest := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(refreshForm.Encode()))
 	replayRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -537,6 +547,50 @@ func TestOAuthMetadataAdvertisesMCPDiscovery(t *testing.T) {
 	server.ProtectedResourceMetadata(resourceResponse, httptest.NewRequest(http.MethodGet, "/.well-known/oauth-protected-resource/mcp", nil))
 	if !strings.Contains(resourceResponse.Body.String(), `"resource":"http://localhost:8866/mcp"`) || !strings.Contains(resourceResponse.Body.String(), `"authorization_servers":["http://localhost:8866"]`) {
 		t.Fatalf("资源元数据不完整: %s", resourceResponse.Body.String())
+	}
+}
+
+func TestOAuthAuthorizationDecisionRejectsUnknownDisabledTools(t *testing.T) {
+	server, st := newTestServer(t)
+	ctx := context.Background()
+	host, err := st.CreateHost(ctx, store.Host{Name: "build", Addr: "127.0.0.1", Port: 22, Username: "runner", AuthType: "password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	registration := `{"client_name":"Claude Code","redirect_uris":["http://127.0.0.1:39123/callback"],"token_endpoint_auth_method":"none","grant_types":["authorization_code"],"response_types":["code"]}`
+	registerRequest := httptest.NewRequest(http.MethodPost, "/oauth/register", strings.NewReader(registration))
+	registerResponse := httptest.NewRecorder()
+	server.RegisterClient(registerResponse, registerRequest)
+	if registerResponse.Code != http.StatusCreated {
+		t.Fatalf("注册状态码 %d: %s", registerResponse.Code, registerResponse.Body.String())
+	}
+	var registered struct {
+		ClientID string `json:"client_id"`
+	}
+	if err = json.NewDecoder(registerResponse.Body).Decode(&registered); err != nil {
+		t.Fatal(err)
+	}
+
+	verifier := strings.Repeat("v", 64)
+	challengeHash := sha256.Sum256([]byte(verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(challengeHash[:])
+	params := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {registered.ClientID},
+		"redirect_uri":          {"http://127.0.0.1:39123/callback"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+		"resource":              {"http://localhost:8866/mcp"},
+		"scope":                 {"mcp"},
+		"state":                 {"state-deny"},
+	}
+	decisionBody := `{"query":` + quoted("?"+params.Encode()) + `,"decision":"approve","all_hosts":false,"manage_hosts":true,"host_ids":[` + fmtInt(host.ID) + `],"disabled_tools":["not-a-group"]}`
+	decisionRequest := httptest.NewRequest(http.MethodPost, "/api/v1/oauth/authorization", strings.NewReader(decisionBody))
+	decisionResponse := httptest.NewRecorder()
+	server.AuthorizationDecision(decisionResponse, decisionRequest)
+	if decisionResponse.Code != http.StatusBadRequest {
+		t.Fatalf("未知工具组应 400，实际 %d: %s", decisionResponse.Code, decisionResponse.Body.String())
 	}
 }
 

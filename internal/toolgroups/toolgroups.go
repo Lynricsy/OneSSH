@@ -1,13 +1,15 @@
 // Package toolgroups 定义 MCP 工具的分组。
 //
-// 分组是 ONESSH_DISABLED_TOOLS 的唯一取值来源，也是 mcpserver 决定「注册哪些工具」和
-// 「服务器提示词里能提到哪些工具」的依据。之所以按组而不是按单个工具名开关：模型在调用前
-// 只能读到 instructions 与 tools/list，两者必须一致；按组裁剪才能让提示词里的整段说明
-// 跟着工具一起消失，而不是留下半句指向不存在的工具。
+// 分组是 ONESSH_DISABLED_TOOLS 与令牌级 denylist 的唯一取值来源，也是 mcpserver 决定
+// 「注册哪些工具」和「服务器提示词里能提到哪些工具」的依据。之所以按组而不是按单个工具名
+// 开关：模型在调用前只能读到 instructions 与 tools/list，两者必须一致；按组裁剪才能让
+// 提示词里的整段说明跟着工具一起消失，而不是留下半句指向不存在的工具。
 package toolgroups
 
 import (
 	"fmt"
+	"iter"
+	"slices"
 	"strings"
 )
 
@@ -83,22 +85,7 @@ func (d Disabled) HidesTool(name string) bool {
 // Parse 解析逗号分隔的分组名。未知分组直接报错而不是静默忽略：拼错一个名字就意味着
 // 运维以为已经关闭的工具仍然暴露在 tools/list 里。
 func Parse(spec string) (Disabled, error) {
-	var disabled Disabled
-	for _, field := range strings.Split(spec, ",") {
-		name := strings.ToLower(strings.TrimSpace(field))
-		if name == "" {
-			continue
-		}
-		group, ok := lookup(name)
-		if !ok {
-			return nil, fmt.Errorf("未知工具组 %q；可选值：%s", name, strings.Join(names(), "、"))
-		}
-		if disabled == nil {
-			disabled = Disabled{}
-		}
-		disabled[group] = true
-	}
-	return disabled, nil
+	return parseGroups(strings.SplitSeq(spec, ","))
 }
 
 func lookup(name string) (Group, bool) {
@@ -116,4 +103,68 @@ func names() []string {
 		all = append(all, string(def.Group))
 	}
 	return all
+}
+
+// ParseList 解析分组名列表（令牌 / OAuth 同意页传入的 JSON 数组）。规则与 Parse 相同：
+// 未知分组名直接报错，避免静默忽略后以为已经关掉的工具仍暴露给该令牌。
+func ParseList(groupNames []string) (Disabled, error) {
+	return parseGroups(slices.Values(groupNames))
+}
+
+func parseGroups(groupNames iter.Seq[string]) (Disabled, error) {
+	var disabled Disabled
+	for field := range groupNames {
+		name := strings.ToLower(strings.TrimSpace(field))
+		if name == "" {
+			continue
+		}
+		group, ok := lookup(name)
+		if !ok {
+			return nil, fmt.Errorf("未知工具组 %q；可选值：%s", name, strings.Join(names(), "、"))
+		}
+		if disabled == nil {
+			disabled = Disabled{}
+		}
+		disabled[group] = true
+	}
+	return disabled, nil
+}
+
+// NormalizeList 校验分组名并把结果按 All 顺序去重，写入数据库时保持稳定序列化。
+func NormalizeList(groupNames []string) ([]string, error) {
+	disabled, err := ParseList(groupNames)
+	if err != nil {
+		return nil, err
+	}
+	return disabled.Names(), nil
+}
+
+// Union 合并多份禁用集合；实例级与令牌级 denylist 取并集，令牌无法重新打开进程已关闭的组。
+func Union(parts ...Disabled) Disabled {
+	var out Disabled
+	for _, part := range parts {
+		for group, on := range part {
+			if !on {
+				continue
+			}
+			if out == nil {
+				out = Disabled{}
+			}
+			out[group] = true
+		}
+	}
+	return out
+}
+
+// GroupNames 返回 All 中的全部分组名，供管理 API / 授权页展示可选值。
+func GroupNames() []string { return names() }
+
+// AllDisabled 返回禁用全部分组的集合。令牌 denylist 解析失败时用它做 fail-closed 回退，
+// 避免静默忽略后放开本应关闭的工具。
+func AllDisabled() Disabled {
+	out := make(Disabled, len(All))
+	for _, def := range All {
+		out[def.Group] = true
+	}
+	return out
 }
