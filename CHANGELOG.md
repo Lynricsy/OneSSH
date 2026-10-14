@@ -2,6 +2,22 @@
 
 本文件记录 OneSSH 的重要变更，格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.1.19] - 2026-10-14
+
+### 新增
+
+- 正式发布的镜像同时推送到 Docker Hub（`lynricsy/onessh`）与 GHCR，两边标签相同、摘要一致，并各自附带构建 provenance。
+
+### 安全
+
+- 升级 `golang.org/x/crypto` 至 v0.56.0，修复 SSH 通道死锁导致的拒绝服务问题（GO-2026-6354、GO-2026-6355）。
+- 升级 `golang.org/x/image` 至 v0.45.0，修复 WebP（VP8L）解码时的过量内存分配（GO-2026-6222），影响 `image_view`。
+- 前端构建依赖 `source-map-js` 升级，修复 GHSA-68fv-2mgg-jv7q。
+
+### 优化
+
+- `host_status` 实时采样不再完整解析一遍随即丢弃的首轮输出，只提取计算 CPU 差值所需的计数。
+
 ## [0.1.18] - 2026-09-17
 
 ### 新增
@@ -36,6 +52,7 @@
   - 新增 `ONESSH_MCP_APPS` 开关（默认 `on`），`off` 时不发布任何卡片资源与 `_meta`。
   - 新增预览画廊 `internal/mcpserver/apps/preview/`，用静态服务器即可离线验收全部卡片。
   - 新增卡片运行时一致性测试并接入 CI：在 Node 里执行 `runtime.js`，覆盖 `ui/*` 协议报文、只读回调白名单与 32 张卡片对真实样例的渲染。
+
 ## [0.1.14] - 2026-08-27
 
 ### 修复
