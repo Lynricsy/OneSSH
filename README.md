@@ -391,23 +391,31 @@ ONESSH_URL=http://localhost:8866/mcp \
 - **frontend** — 锁定依赖安装、TypeScript 检查、生产构建
 - **e2e** — Docker Compose 四主机端到端（覆盖原生、临时 helper 与 noexec 纯 SFTP 回退）
 
-只有 `v*` 标签的 push 会进入正式发布链路，普通分支 push 只运行检查，不写入 GHCR。发布先独立构建并校验八个平台压缩包与 `checksums.txt`，随后把完整资产上传到隐藏的 GitHub Draft Release；草稿准备成功后才发布 `linux/amd64`、`linux/arm64` 镜像及 provenance，最后再公开对应的 GitHub Release。两个 Windows 压缩包由对应架构的 Windows runner 原生构建，其余六个平台压缩包由 Linux runner 交叉构建。跨 GHCR 与 GitHub Release 无法原子提交：若镜像发布失败，只留下可重试的隐藏草稿；若最后公开 Release 失败，镜像已经可见，但完整草稿资产仍在，重跑工作流即可完成公开。工作流使用仓库自带的 `GITHUB_TOKEN`，不需要额外配置 PAT。默认的 `docker-compose.yml` 使用 `latest` 标签；更新部署时先拉取新镜像再重建容器：
+只有 `v*` 标签的 push 会进入正式发布链路，普通分支 push 只运行检查，不写入任何镜像仓库。发布先独立构建并校验八个平台压缩包与 `checksums.txt`，随后把完整资产上传到隐藏的 GitHub Draft Release；草稿准备成功后，一次构建同时把 `linux/amd64`、`linux/arm64` 镜像及 provenance 推送到 GHCR 与 Docker Hub（两边摘要一致），最后再公开对应的 GitHub Release。两个 Windows 压缩包由对应架构的 Windows runner 原生构建，其余六个平台压缩包由 Linux runner 交叉构建。跨镜像仓库与 GitHub Release 无法原子提交：若镜像发布失败，只留下可重试的隐藏草稿；若最后公开 Release 失败，镜像已经可见，但完整草稿资产仍在，重跑工作流即可完成公开。默认的 `docker-compose.yml` 使用 `latest` 标签；更新部署时先拉取新镜像再重建容器：
 
 ```sh
 docker compose pull
 docker compose up -d
 ```
 
-也可以直接拉取镜像：
+也可以直接拉取镜像，GHCR 与 Docker Hub 任选其一：
 
 ```sh
 docker pull ghcr.io/lynricsy/onessh:latest
+docker pull <DOCKERHUB_USERNAME>/onessh:latest
 ```
 
-每次正式发布会同时更新 Git 标签、`sha-<commit>` 和 `latest` 三类镜像标签；分支名不再作为镜像标签发布。
+每次正式发布会在两个仓库同时更新 Git 标签、`sha-<commit>` 和 `latest` 三类镜像标签；分支名不再作为镜像标签发布。
+
+**发布凭据**：GHCR 使用仓库自带的 `GITHUB_TOKEN`；Docker Hub 需要在 GitHub 仓库 *Settings → Secrets and variables → Actions* 中配置：
+
+- 变量 `DOCKERHUB_USERNAME` — Docker Hub 用户名，镜像发布为 `<用户名小写>/onessh`
+- Secret `DOCKERHUB_TOKEN` — Docker Hub 个人访问令牌，权限至少为 *Read & Write*
+
+缺少任一项时镜像发布步骤会直接失败，并保留可重试的草稿 Release。
 
 > [!NOTE]
-> GHCR 首次发布的包默认私有。需要匿名拉取的话，要在 GitHub Packages 设置里显式改为公开。
+> GHCR 首次发布的包默认私有。需要匿名拉取的话，要在 GitHub Packages 设置里显式改为公开。Docker Hub 仓库在首次推送时自动创建，可见性取决于账号的默认仓库设置。
 
 ## 数据与安全
 
