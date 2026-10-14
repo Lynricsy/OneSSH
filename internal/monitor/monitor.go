@@ -224,8 +224,6 @@ func (m *Manager) Fresh(ctx context.Context, h store.Host) (Snapshot, error) {
 	if len(parts) != 2 {
 		return Snapshot{}, fmt.Errorf("主机不支持 /proc fresh 采样")
 	}
-	first, _, err := parse(h.ID, parts[0]+"\n__ONESSH_DF__\n", nil)
-	_ = first
 	cpu1 := parseCPU(parts[0])
 	snap, _, err := parse(h.ID, parts[1], &cpu1)
 	if err != nil {
