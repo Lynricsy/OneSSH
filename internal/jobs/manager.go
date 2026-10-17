@@ -49,10 +49,11 @@ type Status struct {
 // 列表刷新的时间预算与主机并发度。失联主机的 TCP 建连、SSH 握手各自最多等 15 秒，
 // 而连接池对同一主机串行拨号：逐个刷新时一台离线主机上的 N 个任务就要等 N×30 秒，
 // WebUI 的首屏请求因此迟迟不返回、停在骨架屏。
-// listRefreshTimeout 是变量只为让测试缩短预算。
-var listRefreshTimeout = 8 * time.Second
-
-const listRefreshHosts = 8
+// 两者是变量只为让测试缩短预算、构造并发槽被占满的场景。
+var (
+	listRefreshTimeout = 8 * time.Second
+	refreshHosts       = 8
+)
 
 // hostRefresh 是一台主机的 worker 交回的结果，statuses 与 idx 一一对应。
 type hostRefresh struct {
@@ -237,7 +238,7 @@ func (m *Manager) RefreshAll(ctx context.Context, list []store.Job) []Status {
 	ctx, cancel := context.WithTimeout(ctx, listRefreshTimeout)
 	defer cancel()
 	results := make(chan hostRefresh, len(byHost))
-	sem := make(chan struct{}, listRefreshHosts)
+	sem := make(chan struct{}, refreshHosts)
 	pending := make(map[int64]chan struct{}, len(byHost))
 	for hostID, idx := range byHost {
 		if m.hostStuck(hostID) {
@@ -254,7 +255,14 @@ func (m *Manager) RefreshAll(ctx context.Context, list []store.Job) []Status {
 		pending[hostID] = done
 		go func() {
 			defer close(done)
-			results <- hostRefresh{hostID: hostID, idx: idx, statuses: m.refreshHost(ctx, sem, hostID, jobs)}
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				// 没轮到就到了截止：RefreshAll 已按预填的超时快照返回
+				return
+			}
+			results <- hostRefresh{hostID: hostID, idx: idx, statuses: m.refreshHost(ctx, hostID, jobs)}
 		}()
 	}
 	for len(pending) > 0 {
@@ -289,9 +297,9 @@ func (m *Manager) hostStuck(hostID int64) bool {
 	}
 }
 
-// refreshHost 刷新同一台主机上的运行中任务，只取一次连接。它可能在 RefreshAll 返回后
-// 才结束，因此只读写自己的参数，不碰调用方的结果切片。
-func (m *Manager) refreshHost(ctx context.Context, sem chan struct{}, hostID int64, jobs []store.Job) []Status {
+// refreshHost 刷新同一台主机上的运行中任务，只取一次连接。它可能在调用方返回后
+// 才结束，因此只读写自己的参数，不碰调用方的结果切片；并发槽由调用方负责。
+func (m *Manager) refreshHost(ctx context.Context, hostID int64, jobs []store.Job) []Status {
 	out := make([]Status, len(jobs))
 	fail := func(k int, err error) {
 		// 超出预算时底层错误五花八门（i/o timeout、operation was canceled、context deadline exceeded）
@@ -300,15 +308,6 @@ func (m *Manager) refreshHost(ctx context.Context, sem chan struct{}, hostID int
 			reason = timeoutReason()
 		}
 		out[k] = staleStatus(jobs[k], reason)
-	}
-	select {
-	case sem <- struct{}{}:
-		defer func() { <-sem }()
-	case <-ctx.Done():
-		for k := range jobs {
-			fail(k, ctx.Err())
-		}
-		return out
 	}
 	var client *ssh.Client
 	h, err := m.Store.GetHost(ctx, hostID)

@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"onessh/internal/cryptox"
 	"onessh/internal/store"
 )
 
@@ -225,5 +227,78 @@ func TestMaintainKeepsReachableRunningJob(t *testing.T) {
 	}
 	if checked < before {
 		t.Fatalf("刷新成功后确认时间未推进: %d < %d", checked, before)
+	}
+}
+
+// addHost 在 m 的库里再建一台密码主机；密钥与 newRefreshManager 相同，连接池能解开密码。
+func addHost(t *testing.T, m *Manager, name string, port int) store.Host {
+	t.Helper()
+	box, err := cryptox.New(bytes.Repeat([]byte{3}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := box.Seal([]byte("pass"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := m.Store.CreateHost(context.Background(), store.Host{Name: name, Addr: "127.0.0.1", Port: port, Username: "test", AuthType: "password", PasswordEnc: enc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+// 慢主机占满并发槽时，排队的健康主机也必须轮到探测：网关停机超过 7 天恢复后，
+// 所有确认时间都已过期，若按整批预算截止再全库判失联，没轮到的健康任务会被误杀。
+func TestMaintainProbesHostsQueuedBehindSlowOnes(t *testing.T) {
+	savedHosts, savedBudget := refreshHosts, maintenanceHostBudget
+	refreshHosts, maintenanceHostBudget = 1, 300*time.Millisecond
+	t.Cleanup(func() { refreshHosts, maintenanceHostBudget = savedHosts, savedBudget })
+	useRefreshBudget(t)
+
+	home := t.TempDir()
+	healthyPort, stopHealthy := serveExecSSH(t, home)
+	m, _, healthy := newRefreshManager(t, healthyPort)
+	t.Cleanup(stopHealthy)
+	ctx := context.Background()
+	j, err := m.Start(ctx, healthy, 0, "sleep 30", "~", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		target := int(j.PID.Int64)
+		if j.UsedSetsid {
+			target = -target
+		}
+		_ = syscall.Kill(target, syscall.SIGKILL)
+	})
+
+	now := time.Now()
+	tenDaysAgo := now.Add(-10 * 24 * time.Hour).Unix()
+	slowIDs := []string{"slow-0", "slow-1", "slow-2"}
+	for i, id := range slowIDs {
+		port, _, stop := serveSilent(t)
+		h := addHost(t, m, id, port)
+		t.Cleanup(func() { stop(); waitWorkerExit(t, m, h.ID) })
+		seedJob(t, m.Store, store.Job{ID: id, HostID: h.ID, Command: "sleep", Cwd: "~", Status: "running", StartedAt: tenDaysAgo - int64(i)}, tenDaysAgo, 0)
+	}
+	if _, err = m.Store.DB.Exec(`UPDATE jobs SET last_checked_at=? WHERE id=?`, tenDaysAgo, j.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := m.Maintain(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := jobStatus(t, m.Store, j.ID); got != "running" {
+		t.Fatalf("排在慢主机后面的健康任务状态 = %s，期望 running（report=%+v）", got, report)
+	}
+	for _, id := range slowIDs {
+		if got := jobStatus(t, m.Store, id); got != "lost" {
+			t.Errorf("探测超时的任务 %s 状态 = %s，期望 lost", id, got)
+		}
+	}
+	if report.Expired != len(slowIDs) {
+		t.Fatalf("维护统计 = %+v", report)
 	}
 }

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -113,12 +114,22 @@ func (s *Store) RecordJobCheck(ctx context.Context, id string, bytes, checkedAt 
 	return err
 }
 
-// ExpireUncheckedJobs 把最后一次确认早于 cutoff 的运行中任务标为 lost，返回被标记的任务。
-// 单条 UPDATE 完成筛选与改写：与之并发的成功确认要么先落库从而不被选中，要么晚到但已改不回 running。
-func (s *Store) ExpireUncheckedJobs(ctx context.Context, cutoff, now int64) ([]Job, error) {
+// ExpireUncheckedJobs 把 ids 中最后一次确认早于 cutoff 的运行中任务标为 lost，返回被标记的任务。
+// ids 只应包含本轮确实探测失败的任务；单条 UPDATE 完成筛选与改写，
+// 与之并发的成功确认要么先落库从而不被选中，要么晚到但已改不回 running。
+func (s *Store) ExpireUncheckedJobs(ctx context.Context, ids []string, cutoff, now int64) ([]Job, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	args := make([]any, 0, len(ids)+2)
+	args = append(args, now, cutoff)
+	for _, id := range ids {
+		args = append(args, id)
+	}
 	rows, err := s.DB.QueryContext(ctx, `UPDATE jobs SET status='lost',finished_at=?
 		WHERE status='running' AND COALESCE(last_checked_at,started_at)<?
-		RETURNING `+jobColumns, now, cutoff)
+		AND id IN (?`+strings.Repeat(",?", len(ids)-1)+`)
+		RETURNING `+jobColumns, args...)
 	if err != nil {
 		return nil, err
 	}
