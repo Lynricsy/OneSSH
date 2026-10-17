@@ -172,5 +172,14 @@ func ownedJob(ctx context.Context, st *store.Store, id string) (store.Job, error
 	if !store.JobOwnedBy(j, p.Token.ID) {
 		return j, fmt.Errorf("job not authorized: %s", id)
 	}
-	return j, nil
+	// 任务按 job_id 操作，同样要求令牌此刻仍能访问所在主机：主机归档或被移出授权后不能再经任务触达
+	for _, h := range p.Hosts {
+		if h.ID == j.HostID {
+			return j, nil
+		}
+	}
+	if h, hostErr := st.GetHost(ctx, j.HostID); hostErr == nil && h.ArchivedAt.Valid {
+		return j, fmt.Errorf("job host archived: %s（主机已归档，需管理员在控制台取消归档）", h.Name)
+	}
+	return j, fmt.Errorf("job host not authorized: %s", id)
 }

@@ -46,7 +46,11 @@ export function AppShell() {
       </a>
       <Sidebar collapsed={collapsed} onToggle={toggle} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar hostCount={hosts.data?.length ?? 0} onOpenNav={() => setNavOpen(true)} />
+        {/* 顶栏只计在役主机：归档主机已退出监控与 Agent 访问，不算「管理中」 */}
+        <Topbar
+          hostCount={hosts.data?.filter((host) => !host.archived).length ?? 0}
+          onOpenNav={() => setNavOpen(true)}
+        />
         <main
           id="main"
           className={isTerminal ? 'flex-1' : 'mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 md:px-8'}

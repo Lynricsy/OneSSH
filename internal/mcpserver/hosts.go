@@ -58,6 +58,8 @@ type ManagedHostItem struct {
 	Tags           []string `json:"tags"`
 	CreatedAt      int64    `json:"created_at"`
 	Online         bool     `json:"online"`
+	// Archived 为 true 时主机对所有令牌不可见，只能由管理员在控制台取消归档。
+	Archived bool `json:"archived"`
 }
 
 type ManagedHostsOutput struct {
@@ -74,7 +76,7 @@ func (s *Server) registerHosts() {
 	register[Empty, ManagedHostsOutput](s, &mcp.Tool{
 		Name:        "hosts_manage_list",
 		Title:       "列出全部主机配置",
-		Description: "列出网关内全部 SSH 主机的完整配置：端口、认证方式、密钥 ID、已固定的 TOFU 指纹、监控开关与连接状态。用于主机运维，不代表当前令牌有执行权限；执行类工具的可用主机以 hosts_list 为准。需要 manage_hosts 权限。",
+		Description: "列出网关内全部 SSH 主机的完整配置：端口、认证方式、密钥 ID、已固定的 TOFU 指纹、监控开关、归档状态与连接状态。用于主机运维，不代表当前令牌有执行权限；执行类工具的可用主机以 hosts_list 为准（已归档主机不会出现在其中）。需要 manage_hosts 权限。",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(false)},
 	}, s.hostsManageList)
 	register[hostmanager.Input, ManagedHostItem](s, &mcp.Tool{
@@ -231,7 +233,7 @@ func (s *Server) managedHostItem(ctx context.Context, host store.Host) ManagedHo
 	item := ManagedHostItem{
 		ID: view.ID, Name: view.Name, Addr: view.Addr, Port: view.Port, Username: view.Username,
 		AuthType: view.AuthType, KeyID: view.KeyID, HostKeyFP: view.HostKeyFP,
-		MonitorEnabled: view.MonitorEnabled, Tags: view.Tags, CreatedAt: view.CreatedAt, Online: s.Pool.IsOnline(host.Name),
+		MonitorEnabled: view.MonitorEnabled, Tags: view.Tags, CreatedAt: view.CreatedAt, Online: s.Pool.IsOnline(host.Name), Archived: view.Archived,
 	}
 	if host.JumpHostID.Valid {
 		if jump, err := s.Store.GetHost(ctx, host.JumpHostID.Int64); err == nil {

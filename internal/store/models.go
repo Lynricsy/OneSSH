@@ -24,6 +24,8 @@ type Host struct {
 	MonitorEnabled bool           `json:"monitor_enabled"`
 	Tags           []string       `json:"tags"`
 	CreatedAt      int64          `json:"created_at"`
+	// ArchivedAt 非空表示已归档：保留配置与历史，但不监控、不对 MCP 令牌可见。
+	ArchivedAt sql.NullInt64 `json:"-"`
 }
 
 type HostView struct {
@@ -39,6 +41,8 @@ type HostView struct {
 	MonitorEnabled bool     `json:"monitor_enabled"`
 	Tags           []string `json:"tags"`
 	CreatedAt      int64    `json:"created_at"`
+	Archived       bool     `json:"archived"`
+	ArchivedAt     *int64   `json:"archived_at"`
 }
 
 func (h Host) View() HostView {
@@ -57,6 +61,11 @@ func (h Host) View() HostView {
 	if h.HostKeyFP.Valid {
 		x := h.HostKeyFP.String
 		v.HostKeyFP = &x
+	}
+	if h.ArchivedAt.Valid {
+		x := h.ArchivedAt.Int64
+		v.Archived = true
+		v.ArchivedAt = &x
 	}
 	return v
 }

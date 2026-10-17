@@ -70,8 +70,11 @@ func (s *Store) ListJobs(ctx context.Context, tokenID *int64, hostID *int64) ([]
 	return scanJobs(rows)
 }
 
-func (s *Store) ListRunningJobs(ctx context.Context) ([]Job, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+jobColumns+` FROM jobs WHERE status='running' ORDER BY started_at DESC`)
+// ListRunningJobsOnActiveHosts 列出未归档主机上的运行中任务。归档主机不再登录确认，
+// 其任务既不刷新也不应因此被判失联，取消归档后照常恢复跟踪。
+func (s *Store) ListRunningJobsOnActiveHosts(ctx context.Context) ([]Job, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+jobColumns+` FROM jobs WHERE status='running'
+		AND host_id IN (SELECT id FROM hosts WHERE archived_at IS NULL) ORDER BY started_at DESC`)
 	if err != nil {
 		return nil, err
 	}

@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -197,19 +198,31 @@ owned() {
 }
 alive() { kill -0 "$target" 2>/dev/null; }`
 }
+
+// ErrHostArchived 表示任务所在主机已归档：状态刷新不再登录它，任务保持上一次快照。
+var ErrHostArchived = errors.New("主机已归档，不再刷新任务状态")
+
 func (m *Manager) Refresh(ctx context.Context, j store.Job) (Status, error) {
 	if j.Status != "running" {
 		return m.snapshot(j), nil
 	}
-	h, err := m.Store.GetHost(ctx, j.HostID)
-	if err != nil {
-		return Status{}, err
-	}
-	client, err := m.Pool.Get(ctx, h.Name)
+	client, err := m.activeHostClient(ctx, j.HostID)
 	if err != nil {
 		return Status{}, err
 	}
 	return m.probe(ctx, client, j)
+}
+
+// activeHostClient 取得未归档主机的连接；归档主机返回 ErrHostArchived，不建立连接。
+func (m *Manager) activeHostClient(ctx context.Context, hostID int64) (*ssh.Client, error) {
+	h, err := m.Store.GetHost(ctx, hostID)
+	if err != nil {
+		return nil, err
+	}
+	if h.ArchivedAt.Valid {
+		return nil, ErrHostArchived
+	}
+	return m.Pool.Get(ctx, h.Name)
 }
 
 // RefreshAll 刷新一批任务，结果与 list 一一对应、顺序不变。运行中的任务按主机分组，
@@ -309,11 +322,7 @@ func (m *Manager) refreshHost(ctx context.Context, hostID int64, jobs []store.Jo
 		}
 		out[k] = staleStatus(jobs[k], reason)
 	}
-	var client *ssh.Client
-	h, err := m.Store.GetHost(ctx, hostID)
-	if err == nil {
-		client, err = m.Pool.Get(ctx, h.Name)
-	}
+	client, err := m.activeHostClient(ctx, hostID)
 	for k, j := range jobs {
 		if err != nil {
 			fail(k, err)

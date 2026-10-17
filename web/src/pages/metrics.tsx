@@ -139,12 +139,15 @@ function ChartSkeleton({ height }: { height: number }) {
 }
 
 export function MetricsPage() {
-  const [host, setHost] = useState<number>()
+  const [picked, setPicked] = useState<number>()
   const hosts = useHosts()
+  // 归档主机不再采样，不作为可选目标；已选主机被归档后自动退回未选择
+  const activeHosts = (hosts.data ?? []).filter((item) => !item.archived)
+  const selected = activeHosts.find((item) => item.id === picked)
+  const host = selected?.id
   const metrics = useMetrics(host, 24)
   const navigate = useNavigate()
 
-  const selected = hosts.data?.find((item) => item.id === host)
   const diskMount = metrics.data?.[0]?.disks[0]?.mount
 
   const chart = useMemo(
@@ -170,8 +173,8 @@ export function MetricsPage() {
           <Select
             className="w-52"
             value={host}
-            onChange={setHost}
-            options={(hosts.data ?? []).map((h) => ({ value: h.id, label: h.name }))}
+            onChange={setPicked}
+            options={activeHosts.map((h) => ({ value: h.id, label: h.name }))}
             placeholder="选择主机"
           />
         }

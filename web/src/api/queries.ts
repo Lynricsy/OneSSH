@@ -259,6 +259,20 @@ export const useResetFingerprint = () =>
     '指纹已重置',
   )
 
+export const useArchiveHost = () =>
+  useInvalidatingMutation<number, Host>(
+    (id) => post<Host>(`/hosts/${id}/archive`, {}),
+    queryKeys.hosts,
+    '主机已归档',
+  )
+
+export const useUnarchiveHost = () =>
+  useInvalidatingMutation<number, Host>(
+    (id) => post<Host>(`/hosts/${id}/unarchive`, {}),
+    queryKeys.hosts,
+    '主机已取消归档',
+  )
+
 /** 测试连接不改数据，失败提示由 toast.promise 承担，故不走统一 onError */
 export const useTestHost = () =>
   useMutation({ mutationFn: (id: number) => post<{ output?: string }>(`/hosts/${id}/test`, {}) })

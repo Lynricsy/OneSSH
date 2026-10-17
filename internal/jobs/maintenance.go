@@ -69,7 +69,7 @@ func (m *Manager) StopMaintenance() {
 func (m *Manager) Maintain(ctx context.Context, now time.Time) (MaintenanceReport, error) {
 	var report MaintenanceReport
 	var errs error
-	running, err := m.Store.ListRunningJobs(ctx)
+	running, err := m.Store.ListRunningJobsOnActiveHosts(ctx)
 	if err != nil {
 		errs = errors.Join(errs, err)
 	} else if failed := m.probeRunning(ctx, running); len(failed) > 0 && ctx.Err() == nil {

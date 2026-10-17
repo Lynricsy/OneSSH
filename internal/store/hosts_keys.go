@@ -12,7 +12,11 @@ import (
 var (
 	ErrHostHasRunningJobs = errors.New("主机存在运行中的后台任务")
 	ErrHostIsJumpHost     = errors.New("主机被其他主机用作跳板")
+	ErrJumpHostArchived   = errors.New("跳板主机已归档，请先取消归档跳板主机")
 )
+
+// hostColumns 是 scanHost 期望的列顺序，所有读取主机的查询共用。
+const hostColumns = `id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,jump_host_id,monitor_enabled,created_at,tags,archived_at`
 
 func (s *Store) CreateKey(ctx context.Context, name string, enc []byte, public string) (Key, error) {
 	now := time.Now().Unix()
@@ -60,7 +64,7 @@ func scanHost(row interface{ Scan(...any) error }) (Host, error) {
 	var h Host
 	var enabled int
 	var tagsRaw sql.NullString
-	err := row.Scan(&h.ID, &h.Name, &h.Addr, &h.Port, &h.Username, &h.AuthType, &h.KeyID, &h.PasswordEnc, &h.HostKeyFP, &h.JumpHostID, &enabled, &h.CreatedAt, &tagsRaw)
+	err := row.Scan(&h.ID, &h.Name, &h.Addr, &h.Port, &h.Username, &h.AuthType, &h.KeyID, &h.PasswordEnc, &h.HostKeyFP, &h.JumpHostID, &enabled, &h.CreatedAt, &tagsRaw, &h.ArchivedAt)
 	h.MonitorEnabled = enabled != 0
 	h.Tags = parseHostTags(tagsRaw)
 	return h, err
@@ -132,7 +136,7 @@ func (s *Store) DeleteHost(ctx context.Context, id int64) error {
 	return tx.Commit()
 }
 func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,jump_host_id,monitor_enabled,created_at,tags FROM hosts ORDER BY name`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+hostColumns+` FROM hosts ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -148,10 +152,10 @@ func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 	return out, rows.Err()
 }
 func (s *Store) GetHostByName(ctx context.Context, name string) (Host, error) {
-	return scanHost(s.DB.QueryRowContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,jump_host_id,monitor_enabled,created_at,tags FROM hosts WHERE name=?`, name))
+	return scanHost(s.DB.QueryRowContext(ctx, `SELECT `+hostColumns+` FROM hosts WHERE name=?`, name))
 }
 func (s *Store) GetHost(ctx context.Context, id int64) (Host, error) {
-	return scanHost(s.DB.QueryRowContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,jump_host_id,monitor_enabled,created_at,tags FROM hosts WHERE id=?`, id))
+	return scanHost(s.DB.QueryRowContext(ctx, `SELECT `+hostColumns+` FROM hosts WHERE id=?`, id))
 }
 func (s *Store) JumpDependentNames(ctx context.Context, id int64) ([]string, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT name FROM hosts WHERE jump_host_id=? ORDER BY name`, id)
@@ -177,8 +181,72 @@ func (s *Store) UpdateHostFingerprint(ctx context.Context, id int64, fp *string)
 	_, err := s.DB.ExecContext(ctx, `UPDATE hosts SET hostkey_fp=? WHERE id=?`, v, id)
 	return err
 }
+
+// ArchiveHost 归档主机，重复归档保留最初的归档时刻。仍被未归档主机用作跳板时拒绝：
+// 归档意味着停用，而依赖它的活跃主机每次连接都要经过它。
+func (s *Store) ArchiveHost(ctx context.Context, id, at int64) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var dependents int
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM hosts WHERE jump_host_id=? AND archived_at IS NULL`, id).Scan(&dependents); err != nil {
+		return err
+	}
+	if dependents != 0 {
+		return ErrHostIsJumpHost
+	}
+	if err = execOne(ctx, tx, `UPDATE hosts SET archived_at=COALESCE(archived_at,?) WHERE id=?`, at, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// UnarchiveHost 取消归档。跳板主机仍处于归档状态时拒绝，与 ArchiveHost 的约束对称。
+// 归档期间不探测任务，确认时间早已过期；取消归档时为运行中任务重新起算失联宽限期，
+// 否则主机恰好离线时下一轮维护就会把它们直接判为失联。
+func (s *Store) UnarchiveHost(ctx context.Context, id, now int64) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var jumpArchived int
+	err = tx.QueryRowContext(ctx, `SELECT count(*) FROM hosts h JOIN hosts j ON j.id=h.jump_host_id WHERE h.id=? AND j.archived_at IS NOT NULL`, id).Scan(&jumpArchived)
+	if err != nil {
+		return err
+	}
+	if jumpArchived != 0 {
+		return ErrJumpHostArchived
+	}
+	if err = execOne(ctx, tx, `UPDATE hosts SET archived_at=NULL WHERE id=?`, id); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE jobs SET last_checked_at=? WHERE host_id=? AND status='running'`, now, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// execOne 执行恰好影响一行的写入，没有命中时返回 sql.ErrNoRows。
+func execOne(ctx context.Context, tx *sql.Tx, query string, args ...any) error {
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
 func (s *Store) MonitoredHosts(ctx context.Context) ([]Host, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,addr,port,username,auth_type,key_id,password_enc,hostkey_fp,jump_host_id,monitor_enabled,created_at,tags FROM hosts WHERE monitor_enabled=1 ORDER BY name`)
+	// 归档主机即使开着监控开关也不再轮询
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+hostColumns+` FROM hosts WHERE monitor_enabled=1 AND archived_at IS NULL ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}

@@ -120,7 +120,9 @@ function HostPulseCard({ host }: { host: Host }) {
 
 export function DashboardPage() {
   const navigate = useNavigate()
-  const { data: hosts = [], isLoading } = useHosts()
+  const { data: allHosts = [], isLoading } = useHosts()
+  // 概览只看在役主机：归档主机不再采样，计入覆盖率只会把数字拉低
+  const hosts = allHosts.filter((host) => !host.archived)
   const metricQueries = useQueries({
     queries: hosts.map((host) => ({
       queryKey: queryKeys.metrics(host.id, 1),
@@ -174,16 +176,29 @@ export function DashboardPage() {
             </motion.div>
           ) : (
             <Card>
-              <EmptyState
-                icon={<HardDrives size={22} />}
-                title="还没有 SSH 主机"
-                description="添加第一台主机后，这里会显示实时资源脉搏。"
-                action={
-                  <Button variant="primary" onClick={() => navigate('/hosts')}>
-                    添加第一台主机
-                  </Button>
-                }
-              />
+              {allHosts.length ? (
+                <EmptyState
+                  icon={<HardDrives size={22} />}
+                  title="主机均已归档"
+                  description="归档主机不再采样，取消归档后会重新出现在这里。"
+                  action={
+                    <Button variant="primary" onClick={() => navigate('/hosts')}>
+                      管理主机
+                    </Button>
+                  }
+                />
+              ) : (
+                <EmptyState
+                  icon={<HardDrives size={22} />}
+                  title="还没有 SSH 主机"
+                  description="添加第一台主机后，这里会显示实时资源脉搏。"
+                  action={
+                    <Button variant="primary" onClick={() => navigate('/hosts')}>
+                      添加第一台主机
+                    </Button>
+                  }
+                />
+              )}
             </Card>
           )}
         </>

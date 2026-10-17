@@ -116,11 +116,15 @@ func (s *Store) findToken(ctx context.Context, hash, resource string, requireRes
 		return t, nil, err
 	}
 	_, _ = s.DB.ExecContext(ctx, `UPDATE tokens SET last_used_at=? WHERE id=?`, time.Now().Unix(), t.ID)
-	hostQuery := `SELECT h.id,h.name,h.addr,h.port,h.username,h.auth_type,h.key_id,h.password_enc,h.hostkey_fp,h.jump_host_id,h.monitor_enabled,h.created_at,h.tags FROM hosts h`
+	// 归档主机对所有令牌都不可见：在这里过滤即覆盖 hosts_list 与全部按主机鉴权的 MCP 工具。
+	// 列名均未与 token_hosts 冲突，JOIN 时无需加表前缀。
+	hostQuery := `SELECT ` + hostColumns + ` FROM hosts h`
 	hostArgs := []any{}
 	if !t.AllHosts {
-		hostQuery += ` JOIN token_hosts th ON th.host_id=h.id WHERE th.token_id=?`
+		hostQuery += ` JOIN token_hosts th ON th.host_id=h.id WHERE th.token_id=? AND h.archived_at IS NULL`
 		hostArgs = append(hostArgs, t.ID)
+	} else {
+		hostQuery += ` WHERE h.archived_at IS NULL`
 	}
 	hostQuery += ` ORDER BY h.name`
 	rows, err := s.DB.QueryContext(ctx, hostQuery, hostArgs...)

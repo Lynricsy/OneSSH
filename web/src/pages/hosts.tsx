@@ -3,6 +3,7 @@ import { Controller, useForm } from 'react-hook-form'
 import { useEffect, useId, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
+  useArchiveHost,
   useDeleteHost,
   useDeleteHosts,
   useHosts,
@@ -10,6 +11,7 @@ import {
   useResetFingerprint,
   useSaveHost,
   useTestHost,
+  useUnarchiveHost,
 } from '@/api/queries'
 import type { Host, HostPayload } from '@/api/types'
 import { HostConnection } from '@/components/host-connection'
@@ -40,7 +42,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/cn'
 
-type ConfirmState = { kind: 'reset' | 'delete'; host: Host } | { kind: 'batch-delete' } | null
+type ConfirmState =
+  | { kind: 'reset' | 'delete' | 'archive'; host: Host }
+  | { kind: 'batch-delete' }
+  | null
 
 const emptyForm: HostPayload = {
   name: '',
@@ -111,12 +116,33 @@ const FingerprintCell = ({ host }: { host: Host }) =>
     </span>
   )
 
-/** 监控开关是状态而非属性，与指纹共用「圆点 + 文字」这一套状态语汇 */
+/**
+ * 监控开关是状态而非属性，与指纹共用「圆点 + 文字」这一套状态语汇。
+ * 归档主机的开关配置仍保留，但轮询已停，统一压成灰点，不让「启用」暗示仍在采集。
+ */
 const MonitorCell = ({ host }: { host: Host }) => (
-  <span className="inline-flex items-center gap-2 text-[12px] text-muted">
-    <Dot className={host.monitor_enabled ? 'bg-accent' : 'bg-border-strong'} />
-    {host.monitor_enabled ? '启用' : '关闭'}
+  <span
+    className={cn(
+      'inline-flex items-center gap-2 text-[12px]',
+      host.archived ? 'text-faint' : 'text-muted',
+    )}
+    title={host.archived && host.monitor_enabled ? '归档期间不采集，取消归档后恢复' : undefined}
+  >
+    <Dot className={host.monitor_enabled && !host.archived ? 'bg-accent' : 'bg-border-strong'} />
+    {!host.monitor_enabled ? '关闭' : host.archived ? '已暂停' : '启用'}
   </span>
+)
+
+/** 主机名 + 归档标记：桌面表格与移动卡片共用，徽章固定宽度、不随长名被截断 */
+const HostName = ({ host }: { host: Host }) => (
+  <div className="flex min-w-0 items-center gap-2">
+    <span
+      className={cn('truncate leading-5 font-medium', host.archived ? 'text-muted' : 'text-text')}
+    >
+      {host.name}
+    </span>
+    {host.archived && <Badge className="shrink-0">已归档</Badge>}
+  </div>
 )
 
 /** 标签是分组属性而非状态：平铺徽章、允许换行，没有标签时用破折号留白 */
@@ -147,6 +173,8 @@ export function HostsPage() {
   const deleteHost = useDeleteHost()
   const deleteHosts = useDeleteHosts()
   const resetFingerprint = useResetFingerprint()
+  const archiveHost = useArchiveHost()
+  const unarchiveHost = useUnarchiveHost()
   const testHost = useTestHost()
   const {
     register,
@@ -163,9 +191,12 @@ export function HostsPage() {
   const [filterTags, setFilterTags] = useState<string[]>([])
   const [filterAuth, setFilterAuth] = useState<'all' | 'password' | 'key'>('all')
   const [filterMonitor, setFilterMonitor] = useState<'all' | 'on' | 'off'>('all')
+  // 归档主机默认隐藏：它们已退出日常运维，混在列表里只会稀释注意力
+  const [filterArchived, setFilterArchived] = useState<'active' | 'archived' | 'all'>('active')
   const tagFilterId = useId()
   const authFilterId = useId()
   const monitorFilterId = useId()
+  const archivedFilterId = useId()
 
   /** 全部主机已有标签的去重集合，同时喂给过滤条与表单的可选项 */
   const allTags = useMemo(
@@ -185,9 +216,11 @@ export function HostsPage() {
       if (filterTags.length > 0 && !host.tags.some((tag) => filterTags.includes(tag))) return false
       if (filterAuth !== 'all' && host.auth_type !== filterAuth) return false
       if (filterMonitor !== 'all' && host.monitor_enabled !== (filterMonitor === 'on')) return false
+      if (filterArchived !== 'all' && host.archived !== (filterArchived === 'archived'))
+        return false
       return true
     })
-  }, [hosts.data, query, filterTags, filterAuth, filterMonitor])
+  }, [hosts.data, query, filterTags, filterAuth, filterMonitor, filterArchived])
 
   /**
    * 过滤条把主机移出视野后，它就不该继续留在选中态里：批量删除只作用于当前看得见的选择，
@@ -263,6 +296,14 @@ export function HostsPage() {
         <DropdownMenuItem onSelect={() => setConfirm({ kind: 'reset', host })}>
           重置指纹
         </DropdownMenuItem>
+        {host.archived ? (
+          // 取消归档只是恢复原状，不需要二次确认
+          <DropdownMenuItem onSelect={() => unarchiveHost.mutate(host.id)}>取消归档</DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem onSelect={() => setConfirm({ kind: 'archive', host })}>
+            归档
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem danger onSelect={() => setConfirm({ kind: 'delete', host })}>
           删除
         </DropdownMenuItem>
@@ -278,7 +319,7 @@ export function HostsPage() {
       className: 'min-w-[220px]',
       render: (host) => (
         <div className="min-w-0">
-          <div className="truncate leading-5 font-medium">{host.name}</div>
+          <HostName host={host} />
           <HostConnection host={host} />
         </div>
       ),
@@ -351,7 +392,7 @@ export function HostsPage() {
     <EmptyState
       icon={<MagnifyingGlass size={22} />}
       title="没有匹配过滤条件的主机"
-      description="换个关键词，或放宽标签、认证与监控筛选。"
+      description="换个关键词，或放宽标签、认证、监控与归档筛选。"
       action={
         <Button
           variant="outline"
@@ -360,6 +401,7 @@ export function HostsPage() {
             setFilterTags([])
             setFilterAuth('all')
             setFilterMonitor('all')
+            setFilterArchived('all')
           }}
         >
           清除筛选
@@ -434,6 +476,20 @@ export function HostsPage() {
             { value: 'off', label: '关闭' },
           ]}
         />
+        <label htmlFor={archivedFilterId} className="sr-only">
+          按归档状态筛选
+        </label>
+        <Select
+          id={archivedFilterId}
+          className="w-full sm:w-36"
+          value={filterArchived}
+          onChange={setFilterArchived}
+          options={[
+            { value: 'active', label: '未归档' },
+            { value: 'archived', label: '已归档' },
+            { value: 'all', label: '全部主机' },
+          ]}
+        />
       </Card>
 
       <Card className="hidden md:block">
@@ -478,7 +534,7 @@ export function HostsPage() {
                     aria-label={`选择主机 ${host.name}`}
                   />
                   <div className="min-w-0 pt-0.5">
-                    <div className="truncate leading-5 font-medium text-text">{host.name}</div>
+                    <HostName host={host} />
                     <HostConnection host={host} />
                   </div>
                 </div>
@@ -678,7 +734,8 @@ export function HostsPage() {
                     options={[
                       { value: 0, label: '直连（不使用跳板）' },
                       ...(hosts.data ?? [])
-                        .filter((item) => item.name !== editing?.name)
+                        // 后端拒绝让未归档主机经由已归档跳板连接；仅保留当前已选中的值以便原样回显
+                        .filter((item) => item.name !== editing?.name && (!item.archived || item.name === field.value))
                         .map((item) => ({ value: item.id, label: item.name })),
                     ]}
                   />
@@ -766,25 +823,33 @@ export function HostsPage() {
         title={
           confirm?.kind === 'reset'
             ? '重置主机指纹？'
-            : confirm?.kind === 'batch-delete'
-              ? `批量删除 ${selected.size} 台主机？`
-              : '删除主机？'
+            : confirm?.kind === 'archive'
+              ? '归档主机？'
+              : confirm?.kind === 'batch-delete'
+                ? `批量删除 ${selected.size} 台主机？`
+                : '删除主机？'
         }
         description={
           confirm?.kind === 'reset'
             ? `${confirm.host.name} 下次连接将重新执行 TOFU 首次信任。`
-            : confirm?.kind === 'batch-delete'
-              ? '所选主机及其令牌授权会一并失效，此操作不可撤销。'
-              : `${confirm?.host.name ?? ''} 及其令牌授权会一并失效，此操作不可撤销。`
+            : confirm?.kind === 'archive'
+              ? `${confirm.host.name} 归档后保留配置、凭据、令牌授权与历史记录，但停止监控、断开连接，Agent 将无法再看到或操作这台主机；随时可取消归档恢复。`
+              : confirm?.kind === 'batch-delete'
+                ? '所选主机及其令牌授权会一并失效，此操作不可撤销。'
+                : `${confirm?.host.name ?? ''} 及其令牌授权会一并失效，此操作不可撤销。`
         }
-        confirmText={confirm?.kind === 'reset' ? '重置' : '删除'}
-        danger={confirm?.kind !== 'reset'}
+        confirmText={
+          confirm?.kind === 'reset' ? '重置' : confirm?.kind === 'archive' ? '归档' : '删除'
+        }
+        danger={confirm?.kind === 'delete' || confirm?.kind === 'batch-delete'}
         onConfirm={async () => {
           if (!confirm) return
           if (confirm.kind === 'reset') return resetFingerprint.mutateAsync(confirm.host.id)
-          if (confirm.kind === 'delete') {
-            await deleteHost.mutateAsync(confirm.host.id)
-            // 删成功才摘掉选中项：失败时保留，批量条上还能看到它并重试
+          if (confirm.kind === 'delete' || confirm.kind === 'archive') {
+            const mutation = confirm.kind === 'delete' ? deleteHost : archiveHost
+            await mutation.mutateAsync(confirm.host.id)
+            // 成功才摘掉选中项：失败时保留，批量条上还能看到它并重试；
+            // 归档后主机已退出日常操作，也不该继续挂在批量选择里
             setSelected((prev) => {
               if (!prev.has(confirm.host.id)) return prev
               const next = new Set(prev)

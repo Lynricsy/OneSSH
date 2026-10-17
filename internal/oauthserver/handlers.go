@@ -154,6 +154,10 @@ func (s *Server) AuthorizationInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	hostViews := make([]store.HostView, 0, len(hosts))
 	for _, host := range hosts {
+		// 归档主机对令牌不可见，授权时也不提供勾选
+		if host.ArchivedAt.Valid {
+			continue
+		}
 		hostViews = append(hostViews, host.View())
 	}
 	toolGroups := make([]map[string]any, 0, len(toolgroups.All))

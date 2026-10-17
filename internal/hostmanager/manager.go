@@ -170,6 +170,46 @@ func (m *Manager) ResetFingerprint(ctx context.Context, id int64) error {
 	return nil
 }
 
+// Archive 归档主机并断开连接池里的连接；返回归档后的主机。
+func (m *Manager) Archive(ctx context.Context, id int64) (store.Host, error) {
+	host, err := m.store.GetHost(ctx, id)
+	if err != nil {
+		return store.Host{}, classifyLookup(err)
+	}
+	if err = m.store.ArchiveHost(ctx, id, time.Now().Unix()); err != nil {
+		return store.Host{}, classifyArchive(err)
+	}
+	m.pool.Invalidate(host.Name)
+	return m.reload(ctx, id)
+}
+
+// Unarchive 取消归档；连接在下次使用时按需重建。
+func (m *Manager) Unarchive(ctx context.Context, id int64) (store.Host, error) {
+	if err := m.store.UnarchiveHost(ctx, id, time.Now().Unix()); err != nil {
+		return store.Host{}, classifyArchive(err)
+	}
+	return m.reload(ctx, id)
+}
+
+func (m *Manager) reload(ctx context.Context, id int64) (store.Host, error) {
+	host, err := m.store.GetHost(ctx, id)
+	if err != nil {
+		return store.Host{}, classifyLookup(err)
+	}
+	return host, nil
+}
+
+func classifyArchive(err error) error {
+	switch {
+	case errors.Is(err, store.ErrHostIsJumpHost), errors.Is(err, store.ErrJumpHostArchived):
+		return &Error{Kind: ErrorConflict, Err: err}
+	case errors.Is(err, sql.ErrNoRows):
+		return classifyLookup(err)
+	default:
+		return &Error{Kind: ErrorInternal, Err: err}
+	}
+}
+
 func (m *Manager) hostFromInput(ctx context.Context, old store.Host, in Input, updating bool) (store.Host, error) {
 	host := old
 	host.Name = strings.TrimSpace(in.Name)
@@ -231,6 +271,10 @@ func (m *Manager) hostFromInput(ctx context.Context, old store.Host, in Input, u
 		}
 		if err != nil {
 			return store.Host{}, &Error{Kind: ErrorInternal, Err: err}
+		}
+		// 与 ArchiveHost/UnarchiveHost 保持同一不变量：未归档主机不能经由已归档的跳板连接
+		if jump.ArchivedAt.Valid && !host.ArchivedAt.Valid {
+			return store.Host{}, invalid("jump_host 已归档: " + name)
 		}
 		seen := make(map[int64]bool)
 		cur := jump

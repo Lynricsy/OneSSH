@@ -104,7 +104,7 @@ export function MemoriesPage() {
       { value: GLOBAL_BANK, label: withCount('全局', 0) },
       ...(hosts.data ?? []).map((host) => ({
         value: String(host.id),
-        label: withCount(host.name, host.id),
+        label: withCount(host.archived ? `${host.name}（已归档）` : host.name, host.id),
       })),
     ]
   }, [hosts.data, statByBank])

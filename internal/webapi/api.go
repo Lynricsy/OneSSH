@@ -57,6 +57,8 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("DELETE /hosts/{id}", a.host)
 	mux.HandleFunc("POST /hosts/{id}/test", a.hostTest)
 	mux.HandleFunc("POST /hosts/{id}/reset-fingerprint", a.resetFingerprint)
+	mux.HandleFunc("POST /hosts/{id}/archive", a.hostArchive)
+	mux.HandleFunc("POST /hosts/{id}/unarchive", a.hostArchive)
 	mux.HandleFunc("GET /keys", a.keys)
 	mux.HandleFunc("POST /keys", a.keys)
 	mux.HandleFunc("DELETE /keys/{id}", a.key)
@@ -189,6 +191,25 @@ func (a *API) resetFingerprint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOut(w, 200, map[string]bool{"ok": true})
+}
+
+// hostArchive 处理归档与取消归档，按路由末段区分，返回更新后的主机。
+func (a *API) hostArchive(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r, "id")
+	if err != nil {
+		apiError(w, 400, err)
+		return
+	}
+	archive := a.Hosts.Archive
+	if strings.HasSuffix(r.URL.Path, "/unarchive") {
+		archive = a.Hosts.Unarchive
+	}
+	h, err := archive(r.Context(), id)
+	if err != nil {
+		apiError(w, hostErrorStatus(err), err)
+		return
+	}
+	jsonOut(w, 200, h.View())
 }
 
 type keyInput struct {

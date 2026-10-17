@@ -39,7 +39,7 @@ function startDownload(hostId: number, path: string, name: string) {
 }
 
 export function FilesPage() {
-  const [host, setHost] = useState<number>()
+  const [picked, setPicked] = useState<number>()
   const [path, setPath] = useState('~')
   // draft 非空即为路径编辑态：用一个状态代替「editing 布尔 + 直接改 path」，
   // 后者每敲一个字符就会发一次 SFTP 请求（并弹一条错误 toast）
@@ -53,6 +53,9 @@ export function FilesPage() {
   const selectionScope = useRef(0)
 
   const hosts = useHosts()
+  // 归档主机不可作为 SFTP 目标；已选主机被归档后自动退回未选择
+  const activeHosts = (hosts.data ?? []).filter((item) => !item.archived)
+  const host = activeHosts.some((item) => item.id === picked) ? picked : undefined
   const query = useSftpList(host, path)
   const upload = useUpload(host, path)
   const errorMessage = query.error instanceof Error ? query.error.message : undefined
@@ -141,11 +144,11 @@ export function FilesPage() {
             className="w-full sm:w-52"
             value={host}
             onChange={(nextHost) => {
-              setHost(nextHost)
+              setPicked(nextHost)
               setPath('~')
               setDraft(undefined)
             }}
-            options={(hosts.data ?? []).map((item) => ({ value: item.id, label: item.name }))}
+            options={activeHosts.map((item) => ({ value: item.id, label: item.name }))}
             placeholder="选择主机"
           />
 

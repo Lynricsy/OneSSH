@@ -187,9 +187,10 @@ function TokenFormFields({ form, idPrefix, hosts, toolGroups }: TokenFormFieldsP
                       value={field.value}
                       onChange={field.onChange}
                       invalid={Boolean(errors.host_ids)}
+                      // 归档主机必须留在候选里：PUT 整体替换授权列表，藏起来会静默丢掉已有授权
                       options={(hosts ?? []).map((host) => ({
                         value: host.id,
-                        label: host.name,
+                        label: host.archived ? `${host.name}（已归档）` : host.name,
                       }))}
                     />
                   )}

@@ -12,6 +12,8 @@ export type Host = {
   /** 跳板主机 id；缺省表示直连 */
   jump_host_id?: number
   monitor_enabled: boolean
+  /** 已归档：保留配置与历史，但退出监控与 MCP 访问；列表接口照常返回 */
+  archived: boolean
   /** 分组标签，后端保证非 null */
   tags: string[]
   created_at: number

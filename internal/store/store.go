@@ -55,6 +55,9 @@ var migration0013 string
 //go:embed migrations/0014_job_last_checked.sql
 var migration0014 string
 
+//go:embed migrations/0015_host_archive.sql
+var migration0015 string
+
 type Store struct {
 	DB      *sql.DB
 	writeMu sync.Mutex
@@ -141,6 +144,7 @@ func migrate(db *sql.DB) error {
 		{version: 12, sql: migration0012},
 		{version: 13, sql: migration0013},
 		{version: 14, sql: migration0014},
+		{version: 15, sql: migration0015},
 	} {
 		if err := applyMigration(db, m); err != nil {
 			return fmt.Errorf("版本 %d: %w", m.version, err)

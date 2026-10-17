@@ -64,8 +64,12 @@ func AuthorizedHost(ctx context.Context, name string) (store.Host, error) {
 		return h, nil
 	}
 	if p.Store != nil {
-		if _, err := p.Store.GetHostByName(ctx, name); errors.Is(err, sql.ErrNoRows) {
+		h, err := p.Store.GetHostByName(ctx, name)
+		if errors.Is(err, sql.ErrNoRows) {
 			return store.Host{}, toolError("unknown host: " + name)
+		}
+		if err == nil && h.ArchivedAt.Valid {
+			return store.Host{}, toolError("host archived: " + name + "（主机已归档，需管理员在控制台取消归档）")
 		}
 	}
 	return store.Host{}, toolError("host not authorized: " + name)
