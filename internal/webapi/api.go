@@ -416,14 +416,7 @@ func (a *API) jobsList(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 500, err)
 		return
 	}
-	out := make([]jobs.Status, 0, len(list))
-	for _, j := range list {
-		st, e := a.Jobs.Refresh(r.Context(), j)
-		if e == nil {
-			out = append(out, st)
-		}
-	}
-	jsonOut(w, 200, out)
+	jsonOut(w, 200, a.Jobs.RefreshAll(r.Context(), list))
 }
 func (a *API) jobKill(w http.ResponseWriter, r *http.Request) {
 	j, err := a.Store.GetJob(r.Context(), r.PathValue("id"))

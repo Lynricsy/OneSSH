@@ -90,9 +90,10 @@ func (s *Server) registerJobs(m *jobs.Manager) {
 		return nil, JobStartOutput{JobID: j.ID, RunID: run.ID, PID: j.PID.Int64}, nil
 	})
 	register[JobListInput, JobListOutput](s, &mcp.Tool{
-		Name:        "job_list",
-		Title:       "列出后台任务",
-		Description: "列出当前令牌启动过的后台任务并逐个刷新状态，可用 host 过滤。看不到其他令牌的任务；刷新需要登录主机，任务多时会稍慢。",
+		Name:  "job_list",
+		Title: "列出后台任务",
+		Description: "列出当前令牌启动过的后台任务，按主机并发登录刷新运行中任务的状态，可用 host 过滤。看不到其他令牌的任务。" +
+			"刷新整体最多等 8 秒：连不上或超时的任务返回数据库里的上次状态并带 refresh_error，这时 status 只是旧快照，需要确认时稍后再查或用 job_status。",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(true)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in JobListInput) (*mcp.CallToolResult, JobListOutput, error) {
 		p, _ := FromContext(ctx)
@@ -108,14 +109,7 @@ func (s *Server) registerJobs(m *jobs.Manager) {
 		if err != nil {
 			return nil, JobListOutput{}, err
 		}
-		out := JobListOutput{Jobs: make([]jobs.Status, 0, len(list))}
-		for _, j := range list {
-			st, e := m.Refresh(ctx, j)
-			if e == nil {
-				out.Jobs = append(out.Jobs, st)
-			}
-		}
-		return nil, out, nil
+		return nil, JobListOutput{Jobs: m.RefreshAll(ctx, list)}, nil
 	})
 	register[JobIDInput, jobs.Status](s, &mcp.Tool{
 		Name:  "job_status",

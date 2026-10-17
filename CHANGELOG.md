@@ -8,6 +8,9 @@
 
 - 新增 `ONESSH_MASTER_KEY_FILE`：从文件读取主密钥，便于配合 Docker secrets、systemd credential，避免主密钥明文出现在环境变量；与 `ONESSH_MASTER_KEY` 互斥，同时设置时启动报错。`docker-compose.yml` 允许把 `ONESSH_MASTER_KEY` 置空以改用文件，变量未定义时仍在 Compose 阶段直接报错；README 补充 Docker secrets 叠加示例（[#27](https://github.com/Lynricsy/OneSSH/pull/27)）。
 
+### 修复
+
+- WebUI「后台任务」页在存在离线主机上的运行中任务时一直停在骨架屏：任务列表（`GET /api/v1/jobs` 与 MCP `job_list`）原先逐个登录主机刷新，连接池对同一主机串行拨号，每个失联任务都要等满建连与握手超时。现在按主机分组、每台只连一次、主机间并发，整批最多等 8 秒；未能确认的任务保留在列表中并带 `refresh_error`，界面显示为「状态未知」，不再静默消失。
 ## [0.1.19] - 2026-10-14
 
 ### 新增

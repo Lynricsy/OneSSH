@@ -25,7 +25,14 @@ import { formatBytes, formatTime } from '@/lib/format'
  * 只有「正在跑」和「进程失联」值得上状态色：exited 拿不到 exit code，涂绿等于替它宣布成功。
  * title 保留原始英文，排障时不必翻代码。
  */
-function JobBadge({ status }: { status: string }) {
+function JobBadge({ status, refreshError }: { status: string; refreshError?: string }) {
+  // 主机没连上时 status 只是上次快照，照旧显示「运行中」会把猜测说成事实
+  if (refreshError)
+    return (
+      <Badge variant="warning" title={`${status} · ${refreshError}`}>
+        状态未知
+      </Badge>
+    )
   if (status === 'running')
     return (
       <Badge variant="accent" title={status}>
@@ -159,7 +166,7 @@ export function JobsPage() {
       key: 'status',
       title: '状态',
       className: 'w-[1%] whitespace-nowrap',
-      render: (item) => <JobBadge status={item.job.status} />,
+      render: (item) => <JobBadge status={item.job.status} refreshError={item.refresh_error} />,
     },
     {
       key: 'log_bytes',
@@ -281,7 +288,7 @@ export function JobsPage() {
                         />
                         <Code>{item.job.id.slice(0, 8)}</Code>
                       </div>
-                      <JobBadge status={item.job.status} />
+                      <JobBadge status={item.job.status} refreshError={item.refresh_error} />
                     </div>
                     <p className="mt-2 line-clamp-2 font-mono text-[12px] break-all text-muted">
                       {item.job.command}

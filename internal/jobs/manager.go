@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,7 +38,17 @@ type JobView struct {
 type Status struct {
 	Job      JobView `json:"job"`
 	LogBytes int64   `json:"log_bytes"`
+	// RefreshError 非空表示本次没能登录主机确认状态，Job 是数据库里的上一次快照。
+	RefreshError string `json:"refresh_error,omitempty"`
 }
+
+// 列表刷新的时间预算与主机并发度。失联主机的 TCP 建连、SSH 握手各自最多等 15 秒，
+// 而连接池对同一主机串行拨号：逐个刷新时一台离线主机上的 N 个任务就要等 N×30 秒，
+// WebUI 的首屏请求因此迟迟不返回、停在骨架屏。
+// listRefreshTimeout 是变量只为让测试缩短预算。
+var listRefreshTimeout = 8 * time.Second
+
+const listRefreshHosts = 8
 
 type LogChunk struct {
 	Content    string `json:"content"`
@@ -172,8 +183,7 @@ alive() { kill -0 "$target" 2>/dev/null; }`
 }
 func (m *Manager) Refresh(ctx context.Context, j store.Job) (Status, error) {
 	if j.Status != "running" {
-		m.syncCommandRun(j, nil)
-		return Status{Job: view(j), LogBytes: j.LogBytes}, nil
+		return m.snapshot(j), nil
 	}
 	h, err := m.Store.GetHost(ctx, j.HostID)
 	if err != nil {
@@ -183,6 +193,81 @@ func (m *Manager) Refresh(ctx context.Context, j store.Job) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
+	return m.probe(ctx, client, j)
+}
+
+// RefreshAll 刷新一批任务，结果与 list 一一对应、顺序不变。运行中的任务按主机分组，
+// 每台主机只取一次连接，主机之间并发，整批受 listRefreshTimeout 约束；
+// 没能确认的任务退回数据库快照并带上 RefreshError，而不是从列表里消失。
+func (m *Manager) RefreshAll(ctx context.Context, list []store.Job) []Status {
+	out := make([]Status, len(list))
+	byHost := make(map[int64][]int)
+	for i, j := range list {
+		if j.Status != "running" {
+			out[i] = m.snapshot(j)
+			continue
+		}
+		byHost[j.HostID] = append(byHost[j.HostID], i)
+	}
+	if len(byHost) == 0 {
+		return out
+	}
+	ctx, cancel := context.WithTimeout(ctx, listRefreshTimeout)
+	defer cancel()
+	sem := make(chan struct{}, listRefreshHosts)
+	var wg sync.WaitGroup
+	for hostID, idx := range byHost {
+		// 每个 goroutine 只写自己那台主机的下标，out 无需加锁
+		wg.Go(func() {
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				for _, i := range idx {
+					out[i] = staleStatus(ctx, list[i], ctx.Err())
+				}
+				return
+			}
+			var client *ssh.Client
+			h, err := m.Store.GetHost(ctx, hostID)
+			if err == nil {
+				client, err = m.Pool.Get(ctx, h.Name)
+			}
+			for _, i := range idx {
+				failure := err
+				if failure == nil {
+					st, probeErr := m.probe(ctx, client, list[i])
+					if probeErr == nil {
+						out[i] = st
+						continue
+					}
+					failure = probeErr
+				}
+				out[i] = staleStatus(ctx, list[i], failure)
+			}
+		})
+	}
+	wg.Wait()
+	return out
+}
+
+func (m *Manager) snapshot(j store.Job) Status {
+	m.syncCommandRun(j, nil)
+	return Status{Job: view(j), LogBytes: j.LogBytes}
+}
+
+// staleStatus 把刷新失败的任务退回数据库快照。超出时间预算时底层错误五花八门
+// （i/o timeout、operation was canceled、context deadline exceeded），统一成一句可读的原因。
+func staleStatus(ctx context.Context, j store.Job, err error) Status {
+	msg := err.Error()
+	if ctx.Err() != nil {
+		msg = fmt.Sprintf("%s 内未能连上主机确认状态", listRefreshTimeout)
+	}
+	return Status{Job: view(j), LogBytes: j.LogBytes, RefreshError: msg}
+}
+
+// probe 登录主机读取一个运行中任务的真实状态，并把变化写回数据库。
+func (m *Manager) probe(ctx context.Context, client *ssh.Client, j store.Job) (Status, error) {
 	script := `d="$HOME/.onessh/jobs/` + j.ID + `"; ` + jobProcessIdentityScript(j) + `
 if [ -f "$d/exit" ]; then printf 'exited:'; tr -d '\n' < "$d/exit"; printf ':'; wc -c < "$d/out.log";
 elif alive && owned; then printf 'running::'; wc -c < "$d/out.log";

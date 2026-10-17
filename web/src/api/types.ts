@@ -49,6 +49,8 @@ export type JobStatus = {
     finished_at: number | null
   }
   log_bytes: number
+  /** 本次没能登录主机确认状态时出现，此时 job.status 只是数据库里的上次快照 */
+  refresh_error?: string
 }
 
 export type Metric = {

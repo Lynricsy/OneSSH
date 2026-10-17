@@ -38,7 +38,7 @@
   // 但网关若哪天把 job 本体平铺过来，这里也不该整卡片崩掉——认 id 字段即可判别。
   function shellOf(item) {
     if (!item || typeof item !== "object") return { job: {}, log_bytes: null };
-    if (item.job && typeof item.job === "object") return { job: item.job, log_bytes: item.log_bytes };
+    if (item.job && typeof item.job === "object") return { job: item.job, log_bytes: item.log_bytes, refresh_error: textOf(item.refresh_error) };
     if (typeof item.id === "string") return { job: item, log_bytes: item.log_bytes };
     return { job: {}, log_bytes: item.log_bytes };
   }
@@ -207,9 +207,11 @@
     }
 
     // killed 必须自成一项：漏掉它，分项之和就对不上总数，被终止的任务会凭空消失。
-    var running = 0, exited = 0, lost = 0, killed = 0, failed = 0;
+    // 未能确认的任务仍按快照归类（快照里只会是 running），另记 unconfirmed 供提示，分项之和不变。
+    var running = 0, exited = 0, lost = 0, killed = 0, failed = 0, unconfirmed = 0;
     entries.forEach(function (entry) {
       var status = textOf(entry.job.status);
+      if (entry.refresh_error) unconfirmed++;
       if (status === "running") running++;
       else if (status === "exited") exited++;
       else if (status === "killed") killed++;
@@ -228,12 +230,16 @@
     if (running > 0) detail.push(fmt.num(running) + t(" 运行中", " running"));
     if (killed > 0) detail.push(fmt.num(killed) + t(" 已终止", " killed"));
     if (lost > 0) detail.push(fmt.num(lost) + t(" 失联", " lost"));
+    if (unconfirmed > 0) detail.push(fmt.num(unconfirmed) + t(" 状态未知", " unconfirmed"));
     if (failed > 0) detail.push(fmt.num(failed) + t(" 失败", " failed"));
     if (detail.length) status.push(ui.pill("muted", detail.join(" · ")));
 
     var summary = ui.metrics([
       { label: t("任务总数", "Jobs"), value: fmt.num(entries.length) },
-      { label: t("运行中", "Running"), value: fmt.num(running), kind: running > 0 ? "info" : "muted" },
+      {
+        label: t("运行中", "Running"), value: fmt.num(running), kind: running > 0 ? "info" : "muted",
+        hint: unconfirmed > 0 ? fmt.num(unconfirmed) + t(" 个本次连不上主机，只是上次快照", " could not be reached; last known state") : null
+      },
       {
         // 这一格数的是「已经有结局的任务」，退出码 0 的成功收尾也在里面，
         // 所以整格不能因为其中有失败就涂成 warn：那会让一次正常结束看起来也在报警。
@@ -269,7 +275,16 @@
     // 行可点击只在能真正跳转时才挂：否则鼠标变成手型却什么都不发生，比不可点更糟。
     var clickable = ctx.can("job_status") && entries.some(function (entry) { return textOf(entry.job.id); });
     var columns = [
-      { label: t("状态", "State"), render: function (entry) { return jobStatusPill(entry.job); } },
+      {
+        label: t("状态", "State"),
+        render: function (entry) {
+          // job_list 连不上主机时 job.status 只是上次快照，不能照旧说「运行中」
+          if (!entry.refresh_error) return jobStatusPill(entry.job);
+          var pill = ui.pill("warn", t("状态未知", "Unconfirmed"));
+          pill.title = entry.refresh_error;
+          return pill;
+        }
+      },
       { label: t("命令", "Command"), mono: true, render: function (entry) { return commandCell(entry.job.command); } }
     ];
     if (sharedHost === null) {
