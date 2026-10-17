@@ -22,6 +22,8 @@ type Manager struct {
 	Pool   *sshpool.Pool
 	Exec   *execx.Runner
 	Events *events.Bus
+	// stuck 记录超过截止仍未结束的列表刷新 worker：key 为 host ID，value 是它结束时关闭的通道。
+	stuck sync.Map
 }
 type JobView struct {
 	ID         string `json:"id"`
@@ -49,6 +51,17 @@ type Status struct {
 var listRefreshTimeout = 8 * time.Second
 
 const listRefreshHosts = 8
+
+// hostRefresh 是一台主机的 worker 交回的结果，statuses 与 idx 一一对应。
+type hostRefresh struct {
+	hostID   int64
+	idx      []int
+	statuses []Status
+}
+
+func timeoutReason() string {
+	return fmt.Sprintf("%s 内未能从主机确认状态", listRefreshTimeout)
+}
 
 type LogChunk struct {
 	Content    string `json:"content"`
@@ -197,8 +210,13 @@ func (m *Manager) Refresh(ctx context.Context, j store.Job) (Status, error) {
 }
 
 // RefreshAll 刷新一批任务，结果与 list 一一对应、顺序不变。运行中的任务按主机分组，
-// 每台主机只取一次连接，主机之间并发，整批受 listRefreshTimeout 约束；
+// 每台主机一个 worker、只取一次连接，主机之间并发，整批受 listRefreshTimeout 硬性约束；
 // 没能确认的任务退回数据库快照并带上 RefreshError，而不是从列表里消失。
+//
+// 截止是硬的：连接池的主机锁、NewSession、session.Start 都不响应 context，
+// 半死的连接能把 worker 永久挂住，所以到点直接返回快照，不等 worker 收尾。
+// worker 只通过带缓冲的通道交付结果，返回后迟到的结果被丢弃；
+// 仍挂着 worker 的主机在下一次刷新时直接给快照，挂住的 goroutine 每台主机至多一个。
 func (m *Manager) RefreshAll(ctx context.Context, list []store.Job) []Status {
 	out := make([]Status, len(list))
 	byHost := make(map[int64][]int)
@@ -207,6 +225,8 @@ func (m *Manager) RefreshAll(ctx context.Context, list []store.Job) []Status {
 			out[i] = m.snapshot(j)
 			continue
 		}
+		// 先按超时填好快照，worker 按时交付的结果再覆盖
+		out[i] = staleStatus(j, timeoutReason())
 		byHost[j.HostID] = append(byHost[j.HostID], i)
 	}
 	if len(byHost) == 0 {
@@ -214,40 +234,97 @@ func (m *Manager) RefreshAll(ctx context.Context, list []store.Job) []Status {
 	}
 	ctx, cancel := context.WithTimeout(ctx, listRefreshTimeout)
 	defer cancel()
+	results := make(chan hostRefresh, len(byHost))
 	sem := make(chan struct{}, listRefreshHosts)
-	var wg sync.WaitGroup
+	pending := make(map[int64]chan struct{}, len(byHost))
 	for hostID, idx := range byHost {
-		// 每个 goroutine 只写自己那台主机的下标，out 无需加锁
-		wg.Go(func() {
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-ctx.Done():
-				for _, i := range idx {
-					out[i] = staleStatus(ctx, list[i], ctx.Err())
-				}
-				return
-			}
-			var client *ssh.Client
-			h, err := m.Store.GetHost(ctx, hostID)
-			if err == nil {
-				client, err = m.Pool.Get(ctx, h.Name)
-			}
+		if m.hostStuck(hostID) {
 			for _, i := range idx {
-				failure := err
-				if failure == nil {
-					st, probeErr := m.probe(ctx, client, list[i])
-					if probeErr == nil {
-						out[i] = st
-						continue
-					}
-					failure = probeErr
-				}
-				out[i] = staleStatus(ctx, list[i], failure)
+				out[i] = staleStatus(list[i], "上一次刷新这台主机的请求仍未返回")
 			}
-		})
+			continue
+		}
+		jobs := make([]store.Job, len(idx))
+		for k, i := range idx {
+			jobs[k] = list[i]
+		}
+		done := make(chan struct{})
+		pending[hostID] = done
+		go func() {
+			defer close(done)
+			results <- hostRefresh{hostID: hostID, idx: idx, statuses: m.refreshHost(ctx, sem, hostID, jobs)}
+		}()
 	}
-	wg.Wait()
+	for len(pending) > 0 {
+		select {
+		case r := <-results:
+			delete(pending, r.hostID)
+			for k, i := range r.idx {
+				out[i] = r.statuses[k]
+			}
+		case <-ctx.Done():
+			for hostID, done := range pending {
+				m.stuck.Store(hostID, done)
+			}
+			return out
+		}
+	}
+	return out
+}
+
+// hostStuck 判断这台主机是否还挂着之前被放弃的 worker；已结束的记录顺手清掉。
+func (m *Manager) hostStuck(hostID int64) bool {
+	v, ok := m.stuck.Load(hostID)
+	if !ok {
+		return false
+	}
+	select {
+	case <-v.(chan struct{}):
+		m.stuck.CompareAndDelete(hostID, v)
+		return false
+	default:
+		return true
+	}
+}
+
+// refreshHost 刷新同一台主机上的运行中任务，只取一次连接。它可能在 RefreshAll 返回后
+// 才结束，因此只读写自己的参数，不碰调用方的结果切片。
+func (m *Manager) refreshHost(ctx context.Context, sem chan struct{}, hostID int64, jobs []store.Job) []Status {
+	out := make([]Status, len(jobs))
+	fail := func(k int, err error) {
+		// 超出预算时底层错误五花八门（i/o timeout、operation was canceled、context deadline exceeded）
+		reason := err.Error()
+		if ctx.Err() != nil {
+			reason = timeoutReason()
+		}
+		out[k] = staleStatus(jobs[k], reason)
+	}
+	select {
+	case sem <- struct{}{}:
+		defer func() { <-sem }()
+	case <-ctx.Done():
+		for k := range jobs {
+			fail(k, ctx.Err())
+		}
+		return out
+	}
+	var client *ssh.Client
+	h, err := m.Store.GetHost(ctx, hostID)
+	if err == nil {
+		client, err = m.Pool.Get(ctx, h.Name)
+	}
+	for k, j := range jobs {
+		if err != nil {
+			fail(k, err)
+			continue
+		}
+		st, probeErr := m.probe(ctx, client, j)
+		if probeErr != nil {
+			fail(k, probeErr)
+			continue
+		}
+		out[k] = st
+	}
 	return out
 }
 
@@ -256,14 +333,8 @@ func (m *Manager) snapshot(j store.Job) Status {
 	return Status{Job: view(j), LogBytes: j.LogBytes}
 }
 
-// staleStatus 把刷新失败的任务退回数据库快照。超出时间预算时底层错误五花八门
-// （i/o timeout、operation was canceled、context deadline exceeded），统一成一句可读的原因。
-func staleStatus(ctx context.Context, j store.Job, err error) Status {
-	msg := err.Error()
-	if ctx.Err() != nil {
-		msg = fmt.Sprintf("%s 内未能连上主机确认状态", listRefreshTimeout)
-	}
-	return Status{Job: view(j), LogBytes: j.LogBytes, RefreshError: msg}
+func staleStatus(j store.Job, reason string) Status {
+	return Status{Job: view(j), LogBytes: j.LogBytes, RefreshError: reason}
 }
 
 // probe 登录主机读取一个运行中任务的真实状态，并把变化写回数据库。
