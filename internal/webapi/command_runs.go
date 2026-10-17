@@ -166,8 +166,13 @@ func (a *API) commandRunOutput(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		job, getErr := a.Store.GetJob(r.Context(), run.JobID.String)
+		if errors.Is(getErr, sql.ErrNoRows) {
+			// 命令记录里写过 job_id，任务行却没了：只可能是过了保留期被清理，或所在主机已删除
+			apiError(w, http.StatusGone, errors.New("后台任务记录已清理（结束超过 30 天或主机已删除），日志不再可读"))
+			return
+		}
 		if getErr != nil {
-			apiError(w, http.StatusNotFound, errors.New("后台任务不存在"))
+			apiError(w, http.StatusInternalServerError, getErr)
 			return
 		}
 		if job.Status == "running" {

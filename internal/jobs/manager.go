@@ -24,6 +24,8 @@ type Manager struct {
 	Events *events.Bus
 	// stuck 记录超过截止仍未结束的列表刷新 worker：key 为 host ID，value 是它结束时关闭的通道。
 	stuck sync.Map
+	// cancel 停止 Start 启动的后台维护循环。
+	cancel context.CancelFunc
 }
 type JobView struct {
 	ID         string `json:"id"`
@@ -361,7 +363,7 @@ else printf 'lost::'; wc -c 2>/dev/null < "$d/out.log" || echo 0; fi`
 	}
 	size, _ := strconv.ParseInt(strings.TrimSpace(parts[2]), 10, 64)
 	j.LogBytes = size
-	_ = m.Store.UpdateJobLogBytes(context.Background(), j.ID, size)
+	_ = m.Store.RecordJobCheck(context.Background(), j.ID, size, time.Now().Unix())
 	_ = m.Store.UpdateCommandRunJobBytes(context.Background(), j.ID, size)
 	if status != j.Status {
 		_ = m.Store.UpdateJobState(context.Background(), j.ID, status, code)

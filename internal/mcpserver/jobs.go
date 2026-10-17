@@ -114,7 +114,7 @@ func (s *Server) registerJobs(m *jobs.Manager) {
 	register[JobIDInput, jobs.Status](s, &mcp.Tool{
 		Name:  "job_status",
 		Title: "查询后台任务状态",
-		Description: "登录主机刷新并返回单个后台任务的状态：running 表示仍在运行，exited 带 exit_code，lost 表示进程已不在且没留下退出码（多为主机重启或被外部杀掉）。" +
+		Description: "登录主机刷新并返回单个后台任务的状态：running 表示仍在运行，exited 带 exit_code，lost 表示网关已无法确认进程（多为主机重启或进程被外部杀掉，也包括连续 7 天无法登录主机确认），之后不再跟踪。" +
 			"log_bytes 是当前日志字节数，可作为 job_logs 的 offset_bytes 基准做增量读取。轮询长任务时优先查状态，不要反复拉全量日志。",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(true)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in JobIDInput) (*mcp.CallToolResult, jobs.Status, error) {

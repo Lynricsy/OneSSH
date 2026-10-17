@@ -322,7 +322,7 @@ func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 13 {
+	if versions != 14 {
 		t.Fatalf("二次迁移版本数 = %d", versions)
 	}
 }
@@ -351,7 +351,7 @@ func TestOpenRecordsPreexistingManageHostsColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 13 {
+	if versions != 14 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 }
@@ -397,7 +397,7 @@ func TestOpenRecordsPreexistingAuditTokenNameColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 13 {
+	if versions != 14 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 }
@@ -426,8 +426,50 @@ func TestOpenRecordsPreexistingJobLogBytesColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 13 {
+	if versions != 14 {
 		t.Fatalf("迁移登记数 = %d", versions)
+	}
+}
+
+// 升级时存量运行中任务没有确认记录：必须从迁移时刻起算宽限期，
+// 否则启动早于 7 天、主机只是刚离线的任务会在首轮维护里被直接判成失联。
+func TestOpenBackfillsRunningJobCheckTime(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "onessh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(migration0001); err != nil {
+		t.Fatal(err)
+	}
+	// 必须有对应主机：迁移 0003 会删掉引用不存在主机的任务
+	if _, err = db.Exec(`INSERT INTO hosts(id,name,addr,username,auth_type,created_at) VALUES(1,'web','127.0.0.1','root','password',1);
+		INSERT INTO jobs(id,host_id,command,cwd,status,started_at) VALUES
+		('old-running',1,'sleep','~','running',1000),
+		('old-exited',1,'true','~','exited',1000)`); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before := time.Now().Unix()
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	var running, exited sql.NullInt64
+	if err = st.DB.QueryRow(`SELECT last_checked_at FROM jobs WHERE id='old-running'`).Scan(&running); err != nil {
+		t.Fatal(err)
+	}
+	if err = st.DB.QueryRow(`SELECT last_checked_at FROM jobs WHERE id='old-exited'`).Scan(&exited); err != nil {
+		t.Fatal(err)
+	}
+	if !running.Valid || running.Int64 < before {
+		t.Fatalf("存量运行中任务的确认时间 = %#v，应为迁移时刻", running)
+	}
+	if exited.Valid {
+		t.Fatalf("已结束任务不需要确认时间，实际 %d", exited.Int64)
 	}
 }
 
@@ -480,7 +522,7 @@ func TestOpenAddsMissingCommandRunOutputCleanedColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 13 {
+	if versions != 14 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 	var cleanedColumns int
@@ -517,7 +559,7 @@ func TestOpenRecordsPreexistingAuditCommandRunIDsColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 13 {
+	if versions != 14 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 	audit, err := st.ListAudit(context.Background(), nil, nil, nil, nil, 0, 10)

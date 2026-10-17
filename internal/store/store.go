@@ -52,6 +52,9 @@ var migration0012 string
 //go:embed migrations/0013_token_disabled_tools.sql
 var migration0013 string
 
+//go:embed migrations/0014_job_last_checked.sql
+var migration0014 string
+
 type Store struct {
 	DB      *sql.DB
 	writeMu sync.Mutex
@@ -137,6 +140,7 @@ func migrate(db *sql.DB) error {
 		{version: 11, sql: migration0011},
 		{version: 12, sql: migration0012},
 		{version: 13, sql: migration0013},
+		{version: 14, sql: migration0014},
 	} {
 		if err := applyMigration(db, m); err != nil {
 			return fmt.Errorf("版本 %d: %w", m.version, err)

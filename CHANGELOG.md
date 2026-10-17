@@ -6,6 +6,7 @@
 
 ### 新增
 
+- 后台任务自动清理：启动约 1 分钟后及此后每小时刷新全部运行中任务，连续 7 天无法登录主机确认的任务标为 `lost` 并同步命令记录为失联；结束超过 30 天的任务记录自动删除，读取其日志时返回 410 并说明原因。升级时存量运行中任务从迁移时刻起算 7 天宽限期。
 - 新增 `ONESSH_MASTER_KEY_FILE`：从文件读取主密钥，便于配合 Docker secrets、systemd credential，避免主密钥明文出现在环境变量；与 `ONESSH_MASTER_KEY` 互斥，同时设置时启动报错。`docker-compose.yml` 允许把 `ONESSH_MASTER_KEY` 置空以改用文件，变量未定义时仍在 Compose 阶段直接报错；README 补充 Docker secrets 叠加示例（[#27](https://github.com/Lynricsy/OneSSH/pull/27)）。
 
 ### 修复

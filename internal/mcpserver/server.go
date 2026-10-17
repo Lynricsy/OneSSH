@@ -105,6 +105,7 @@ func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanage
 		log.Printf("已禁用 MCP 工具组: %s", strings.Join(names, ","))
 	}
 	s.Monitor.Start(context.Background())
+	s.Jobs.StartMaintenance(context.Background())
 	return s
 }
 
@@ -135,6 +136,7 @@ func newProtocolServer(publicURL, instructions string) *mcp.Server {
 
 func (s *Server) Close() {
 	s.Monitor.Stop()
+	s.Jobs.StopMaintenance()
 	s.Files.Clients.Close()
 }
 
