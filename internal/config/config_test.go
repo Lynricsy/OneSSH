@@ -1,11 +1,52 @@
 package config
 
 import (
+	"encoding/hex"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"onessh/internal/toolgroups"
 )
+
+func TestLoadMasterKeyFromFile(t *testing.T) {
+	key := strings.Repeat("cd", 32)
+	path := filepath.Join(t.TempDir(), "master.key")
+	if err := os.WriteFile(path, []byte(key+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ONESSH_MASTER_KEY", "invalid")
+	t.Setenv("ONESSH_MASTER_KEY_FILE", path)
+	t.Setenv("ONESSH_ADMIN_PASSWORD", "pw")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hex.EncodeToString(cfg.MasterKey); got != key {
+		t.Fatalf("主密钥 = %s，期望 %s", got, key)
+	}
+}
+
+func TestLoadMasterKeyFileMissing(t *testing.T) {
+	t.Setenv("ONESSH_MASTER_KEY_FILE", filepath.Join(t.TempDir(), "missing.key"))
+	t.Setenv("ONESSH_ADMIN_PASSWORD", "pw")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "读取 ONESSH_MASTER_KEY_FILE") {
+		t.Fatalf("缺少文件时应报错，实际 err = %v", err)
+	}
+}
+
+func TestLoadMasterKeyFileInvalidContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "master.key")
+	if err := os.WriteFile(path, []byte("not-a-hex-key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ONESSH_MASTER_KEY_FILE", path)
+	t.Setenv("ONESSH_ADMIN_PASSWORD", "pw")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "必须是 64 位十六进制字符串") {
+		t.Fatalf("文件内容非法时应报错，实际 err = %v", err)
+	}
+}
 
 func TestLoadReadsOptionalEmbeddingConfig(t *testing.T) {
 	t.Setenv("ONESSH_MASTER_KEY", strings.Repeat("01", 32))
