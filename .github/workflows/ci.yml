@@ -57,6 +57,9 @@ jobs:
           CGO_ENABLED: "0"
         run: go test -count=1 ./...
 
+      - name: Scan known vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
       - name: Build CGO-free binary
         env:
           CGO_ENABLED: "0"
@@ -223,6 +226,9 @@ jobs:
 
       - name: Type-check and build
         run: npm run build
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
 
       # 卡片运行时是纯浏览器代码，Go 测试够不到它自己跑起来之后的行为。
       # 这份一致性测试在 Node 里把 runtime.js 真的执行一遍，覆盖 ui/* 协议报文、
