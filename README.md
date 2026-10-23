@@ -315,7 +315,7 @@ openssl rand -hex 32
 需要 Go 1.26+ 与 Node.js 22+。项目以 CGO-free 方式构建；官方发布覆盖 Linux、macOS、Windows、FreeBSD 的 amd64 与 arm64，容器镜像覆盖 `linux/amd64` 与 `linux/arm64`。
 
 ```sh
-cd web && npm install && npm run build && cd ..
+cd web && npm ci && npm run build && cd ..
 CGO_ENABLED=0 go build -o onessh ./cmd/onessh
 ```
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
 
 type target struct {
@@ -57,6 +58,9 @@ func compress(source, destination string) error {
 		output.Close()
 		return err
 	}
+	// gzip.Writer 在 ModTime 为零时会写入当前时间，导致每次构建产物不同，
+	// 破坏可复现构建。这里固定为 epoch，使嵌入二进制的资产字节级可复现。
+	writer.Header.ModTime = time.Unix(0, 0)
 	_, copyErr := io.Copy(writer, input)
 	closeWriterErr := writer.Close()
 	closeOutputErr := output.Close()
