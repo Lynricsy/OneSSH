@@ -17,6 +17,7 @@
 ### 安全
 
 - 构建工具链 Go 升级至 1.26.10（`go.mod`，CI 与发布构建据此安装），修复 govulncheck 报告的 16 个静态可达标准库告警，涉及 `net/http`（HTTP/1 与 HTTP/2 服务端/客户端、Range 头解析）、`net/textproto`/`mime/multipart`、`crypto/tls`、`crypto/x509`、`net/url`、`encoding/asn1`（GO-2026-6809、6617、6613、6612、6611、6610、6609、6608、6607、6605、6603、6218、6090、6089、5972、5026）。
+- 前端构建依赖 `vite` 升级至 6.4.5，修复开发服务器相关的 GHSA-587h-7wmj-h5pm、GHSA-698v-4r3x-3vcv、GHSA-r825-w8mm-5pxw、GHSA-rq7h-c2jc-7f22、GHSA-9jrq-w75r-8gcw；只影响 `npm run dev`，不影响嵌入发布产物的静态资源。
 
 ## [0.1.19] - 2026-10-14
 
