@@ -80,8 +80,12 @@ secrets:
 ```
 
 ```sh
-export ONESSH_MASTER_KEY=   # 置空：与文件互斥；compose 仍要求该变量已定义，down 等命令也一样
-(umask 077; openssl rand -hex 32 > master.key)
+# 已有部署：把当前主密钥原样写入文件，切勿重新生成，否则已加密凭据无法解密
+(set -C; umask 077; printf '%s\n' "$ONESSH_MASTER_KEY" > master.key)
+# 全新部署则改为：(set -C; umask 077; openssl rand -hex 32 > master.key)
+# set -C 拒绝覆盖已存在的 master.key
+
+export ONESSH_MASTER_KEY=   # 写好文件后再置空：与文件互斥；compose 仍要求该变量已定义，down 等命令也一样
 docker compose -f docker-compose.yml -f compose.secrets.yml up -d
 ```
 
