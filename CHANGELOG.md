@@ -6,7 +6,7 @@
 
 ### 新增
 
-- 新增 `ONESSH_MASTER_KEY_FILE`：从文件读取主密钥，便于配合 Docker secrets、systemd credential，避免主密钥明文出现在环境变量；与 `ONESSH_MASTER_KEY` 互斥，同时设置时启动报错。`docker-compose.yml` 不再强制要求 `ONESSH_MASTER_KEY`，README 补充 Docker secrets 叠加示例（[#27](https://github.com/Lynricsy/OneSSH/pull/27)）。
+- 新增 `ONESSH_MASTER_KEY_FILE`：从文件读取主密钥，便于配合 Docker secrets、systemd credential，避免主密钥明文出现在环境变量；与 `ONESSH_MASTER_KEY` 互斥，同时设置时启动报错。`docker-compose.yml` 允许把 `ONESSH_MASTER_KEY` 置空以改用文件，变量未定义时仍在 Compose 阶段直接报错；README 补充 Docker secrets 叠加示例（[#27](https://github.com/Lynricsy/OneSSH/pull/27)）。
 
 ## [0.1.19] - 2026-10-14
 

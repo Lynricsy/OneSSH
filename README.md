@@ -65,7 +65,7 @@ curl --fail http://localhost:8866/healthz
 > [!WARNING]
 > 主密钥丢失后，已加密的 SSH 密钥和密码**无法恢复**。生产环境必须持久化保存主密钥，不要每次启动重新生成。
 
-不想让主密钥出现在环境变量里，可以改用 Docker secrets：把密钥写入 `master.key`，不设置 `ONESSH_MASTER_KEY`，再叠加一个 `compose.secrets.yml`：
+不想让主密钥出现在环境变量里，可以改用 Docker secrets：把密钥写入 `master.key`，把 `ONESSH_MASTER_KEY` 置空，再叠加一个 `compose.secrets.yml`：
 
 ```yaml
 services:
@@ -80,7 +80,7 @@ secrets:
 ```
 
 ```sh
-unset ONESSH_MASTER_KEY   # 与文件互斥；快速开始里导出过的话必须先清掉
+export ONESSH_MASTER_KEY=   # 置空：与文件互斥；compose 仍要求该变量已定义，down 等命令也一样
 (umask 077; openssl rand -hex 32 > master.key)
 docker compose -f docker-compose.yml -f compose.secrets.yml up -d
 ```
@@ -469,7 +469,7 @@ docker pull lynricsy/onessh:latest
 - 首次连接会接受并保存主机指纹；指纹变化即拒绝连接，确认主机确实重装后才能在 WebUI 重置。
 - SSH TCP 建连与协议握手均限制为 15 秒；调用上下文更早取消或到期时立即中断，避免失常目标长期占用连接与监控槽位。
 - 令牌与 OAuth 授权都按最小权限分配主机，不再使用立即删除。
-- 不要把 `ONESSH_MASTER_KEY`、管理员密码、Agent 令牌、OAuth 令牌或导出的数据卷提交到版本控制。
+- 不要把 `ONESSH_MASTER_KEY`、`master.key` 等主密钥文件、管理员密码、Agent 令牌、OAuth 令牌或导出的数据卷提交到版本控制。
 
 ## 友情链接
 
