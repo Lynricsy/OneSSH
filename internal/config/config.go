@@ -30,9 +30,13 @@ type Config struct {
 func Load() (Config, error) {
 	var cfg Config
 	keyHex := os.Getenv("ONESSH_MASTER_KEY")
-	// ONESSH_MASTER_KEY_FILE 优先：允许把主密钥放在只读文件中
-	// （如 systemd credential、KMS 解密产物），避免明文出现在环境变量。
+	// ONESSH_MASTER_KEY_FILE 允许把主密钥放在只读文件中（如 Docker secrets、
+	// systemd credential），避免明文出现在环境变量。两者互斥：同时设置时无法判断
+	// 运维意图，用错主密钥只会在解密凭据时才暴露，因此启动即拒绝。
 	if file := os.Getenv("ONESSH_MASTER_KEY_FILE"); file != "" {
+		if keyHex != "" {
+			return cfg, errors.New("ONESSH_MASTER_KEY 与 ONESSH_MASTER_KEY_FILE 只能设置其一")
+		}
 		b, err := os.ReadFile(file)
 		if err != nil {
 			return cfg, fmt.Errorf("读取 ONESSH_MASTER_KEY_FILE: %w", err)

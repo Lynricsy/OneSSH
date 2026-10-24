@@ -63,7 +63,26 @@ curl --fail http://localhost:8866/healthz
 5. 手工令牌的明文只显示一次，立刻复制进 Agent 的安全配置。
 
 > [!WARNING]
-> 主密钥丢失后，已加密的 SSH 密钥和密码**无法恢复**。生产环境必须持久化保存 `ONESSH_MASTER_KEY`，不要每次启动重新生成。
+> 主密钥丢失后，已加密的 SSH 密钥和密码**无法恢复**。生产环境必须持久化保存主密钥，不要每次启动重新生成。
+
+不想让主密钥出现在环境变量里，可以改用 Docker secrets：把密钥写入 `master.key`，不设置 `ONESSH_MASTER_KEY`，再叠加一个 `compose.secrets.yml`：
+
+```yaml
+services:
+  onessh:
+    environment:
+      ONESSH_MASTER_KEY_FILE: /run/secrets/onessh_master_key
+    secrets:
+      - onessh_master_key
+secrets:
+  onessh_master_key:
+    file: ./master.key
+```
+
+```sh
+(umask 077; openssl rand -hex 32 > master.key)
+docker compose -f docker-compose.yml -f compose.secrets.yml up -d
+```
 
 停服不会删数据；只有确实要清空数据库和密钥时才带 `-v`：
 
@@ -292,7 +311,7 @@ WebUI 的「活动」页会为每次 `exec`、`job_start`，以及 `exec_many` �
 | 变量 | 必填 | 默认值 | 说明 |
 |---|:---:|---|---|
 | `ONESSH_MASTER_KEY` | * | — | 64 位十六进制字符串，即 32 字节主密钥 |
-| `ONESSH_MASTER_KEY_FILE` | * | — | 主密钥文件路径，内容为 64 位十六进制字符串（可含首尾空白），例如 `e3b0c44298fc1c14...9f4c2b0c`（省略中段）；设置后优先于 `ONESSH_MASTER_KEY`，适合配合 systemd credential、KMS 解密产物等只读文件注入，避免明文出现在环境变量 |
+| `ONESSH_MASTER_KEY_FILE` | * | — | 主密钥文件路径，内容同上（允许首尾空白与换行）；适合 Docker secrets、systemd credential 等只读文件注入，避免明文出现在环境变量 |
 | `ONESSH_ADMIN_PASSWORD` | ✅ | — | WebUI 管理员密码 |
 | `ONESSH_LISTEN` | | `:8866` | HTTP 监听地址 |
 | `ONESSH_PUBLIC_URL` | | 按请求推导 | 对外访问来源，如 `https://ssh.example.com`；生产 OAuth 部署应显式设置，同时决定是否发布 MCP 服务器图标 |
@@ -311,7 +330,7 @@ WebUI 的「活动」页会为每次 `exec`、`job_start`，以及 `exec_many` �
 openssl rand -hex 32
 ```
 
-> `ONESSH_MASTER_KEY` 与 `ONESSH_MASTER_KEY_FILE` 至少配置其一；两者都设置时以文件为准。主密钥丢失后已加密凭据无法恢复，生产环境应持久化保存。
+> `ONESSH_MASTER_KEY` 与 `ONESSH_MASTER_KEY_FILE` 必须且只能设置其一，同时设置会在启动时报错。
 
 ## 本地开发
 

@@ -4,7 +4,8 @@ services:
     ports:
       - "8866:8866"
     environment:
-      ONESSH_MASTER_KEY: ${ONESSH_MASTER_KEY:?required}
+      # 也可改用 ONESSH_MASTER_KEY_FILE 从文件读取，两者只能设置其一（见 README）
+      ONESSH_MASTER_KEY: ${ONESSH_MASTER_KEY:-}
       ONESSH_ADMIN_PASSWORD: ${ONESSH_ADMIN_PASSWORD:?required}
       ONESSH_LISTEN: :8866
       ONESSH_DATA_DIR: /data
