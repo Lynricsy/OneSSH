@@ -80,6 +80,7 @@ secrets:
 ```
 
 ```sh
+unset ONESSH_MASTER_KEY   # 与文件互斥；快速开始里导出过的话必须先清掉
 (umask 077; openssl rand -hex 32 > master.key)
 docker compose -f docker-compose.yml -f compose.secrets.yml up -d
 ```
