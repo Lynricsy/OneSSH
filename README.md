@@ -63,7 +63,31 @@ curl --fail http://localhost:8866/healthz
 5. 手工令牌的明文只显示一次，立刻复制进 Agent 的安全配置。
 
 > [!WARNING]
-> 主密钥丢失后，已加密的 SSH 密钥和密码**无法恢复**。生产环境必须持久化保存 `ONESSH_MASTER_KEY`，不要每次启动重新生成。
+> 主密钥丢失后，已加密的 SSH 密钥和密码**无法恢复**。生产环境必须持久化保存主密钥，不要每次启动重新生成。
+
+不想让主密钥出现在环境变量里，可以改用 Docker secrets：把密钥写入 `master.key`，把 `ONESSH_MASTER_KEY` 置空，再叠加一个 `compose.secrets.yml`：
+
+```yaml
+services:
+  onessh:
+    environment:
+      ONESSH_MASTER_KEY_FILE: /run/secrets/onessh_master_key
+    secrets:
+      - onessh_master_key
+secrets:
+  onessh_master_key:
+    file: ./master.key
+```
+
+```sh
+# 已有部署：把当前主密钥原样写入文件，切勿重新生成，否则已加密凭据无法解密。
+# 全新部署把第一行换成：(set -C; umask 077; openssl rand -hex 32 > master.key) &&
+# set -C 拒绝覆盖已存在的 master.key；任一步失败都不会继续。
+# 之后把 ONESSH_MASTER_KEY 置空：与文件互斥，但 compose 仍要求该变量已定义，down 等命令也一样。
+(set -C; umask 077; printf '%s\n' "${ONESSH_MASTER_KEY:?请先导出当前主密钥}" > master.key) &&
+  export ONESSH_MASTER_KEY= &&
+  docker compose -f docker-compose.yml -f compose.secrets.yml up -d
+```
 
 停服不会删数据；只有确实要清空数据库和密钥时才带 `-v`：
 
@@ -291,7 +315,8 @@ WebUI 的「活动」页会为每次 `exec`、`job_start`，以及 `exec_many` �
 
 | 变量 | 必填 | 默认值 | 说明 |
 |---|:---:|---|---|
-| `ONESSH_MASTER_KEY` | ✅ | — | 64 位十六进制字符串，即 32 字节主密钥 |
+| `ONESSH_MASTER_KEY` | * | — | 64 位十六进制字符串，即 32 字节主密钥 |
+| `ONESSH_MASTER_KEY_FILE` | * | — | 主密钥文件路径，内容同上（允许首尾空白与换行）；适合 Docker secrets、systemd credential 等只读文件注入，避免明文出现在环境变量 |
 | `ONESSH_ADMIN_PASSWORD` | ✅ | — | WebUI 管理员密码 |
 | `ONESSH_LISTEN` | | `:8866` | HTTP 监听地址 |
 | `ONESSH_PUBLIC_URL` | | 按请求推导 | 对外访问来源，如 `https://ssh.example.com`；生产 OAuth 部署应显式设置，同时决定是否发布 MCP 服务器图标 |
@@ -309,6 +334,8 @@ WebUI 的「活动」页会为每次 `exec`、`job_start`，以及 `exec_many` �
 ```sh
 openssl rand -hex 32
 ```
+
+> `ONESSH_MASTER_KEY` 与 `ONESSH_MASTER_KEY_FILE` 必须且只能设置其一，同时设置会在启动时报错。
 
 ## 本地开发
 
@@ -446,7 +473,7 @@ docker pull lynricsy/onessh:latest
 - 首次连接会接受并保存主机指纹；指纹变化即拒绝连接，确认主机确实重装后才能在 WebUI 重置。
 - SSH TCP 建连与协议握手均限制为 15 秒；调用上下文更早取消或到期时立即中断，避免失常目标长期占用连接与监控槽位。
 - 令牌与 OAuth 授权都按最小权限分配主机，不再使用立即删除。
-- 不要把 `ONESSH_MASTER_KEY`、管理员密码、Agent 令牌、OAuth 令牌或导出的数据卷提交到版本控制。
+- 不要把 `ONESSH_MASTER_KEY`、`master.key` 等主密钥文件、管理员密码、Agent 令牌、OAuth 令牌或导出的数据卷提交到版本控制。
 
 ## 友情链接
 

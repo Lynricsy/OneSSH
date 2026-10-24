@@ -3,3 +3,4 @@ web/node_modules/
 /onessh
 web/*.tsbuildinfo
 internal/searchx/helper/assets/*.gz
+/master.key

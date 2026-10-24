@@ -2,3 +2,4 @@
 .agent-logs
 web/node_modules
 onessh
+master.key
