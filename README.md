@@ -80,13 +80,13 @@ secrets:
 ```
 
 ```sh
-# 已有部署：把当前主密钥原样写入文件，切勿重新生成，否则已加密凭据无法解密
-(set -C; umask 077; printf '%s\n' "$ONESSH_MASTER_KEY" > master.key)
-# 全新部署则改为：(set -C; umask 077; openssl rand -hex 32 > master.key)
-# set -C 拒绝覆盖已存在的 master.key
-
-export ONESSH_MASTER_KEY=   # 写好文件后再置空：与文件互斥；compose 仍要求该变量已定义，down 等命令也一样
-docker compose -f docker-compose.yml -f compose.secrets.yml up -d
+# 已有部署：把当前主密钥原样写入文件，切勿重新生成，否则已加密凭据无法解密。
+# 全新部署把第一行换成：(set -C; umask 077; openssl rand -hex 32 > master.key) &&
+# set -C 拒绝覆盖已存在的 master.key；任一步失败都不会继续。
+# 之后把 ONESSH_MASTER_KEY 置空：与文件互斥，但 compose 仍要求该变量已定义，down 等命令也一样。
+(set -C; umask 077; printf '%s\n' "${ONESSH_MASTER_KEY:?请先导出当前主密钥}" > master.key) &&
+  export ONESSH_MASTER_KEY= &&
+  docker compose -f docker-compose.yml -f compose.secrets.yml up -d
 ```
 
 停服不会删数据；只有确实要清空数据库和密钥时才带 `-v`：
