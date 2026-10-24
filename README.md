@@ -291,7 +291,8 @@ WebUI 的「活动」页会为每次 `exec`、`job_start`，以及 `exec_many` �
 
 | 变量 | 必填 | 默认值 | 说明 |
 |---|:---:|---|---|
-| `ONESSH_MASTER_KEY` | ✅ | — | 64 位十六进制字符串，即 32 字节主密钥 |
+| `ONESSH_MASTER_KEY` | * | — | 64 位十六进制字符串，即 32 字节主密钥 |
+| `ONESSH_MASTER_KEY_FILE` | * | — | 主密钥文件路径，内容为 64 位十六进制字符串（可含首尾空白），例如 `e3b0c44298fc1c14...9f4c2b0c`（省略中段）；设置后优先于 `ONESSH_MASTER_KEY`，适合配合 systemd credential、KMS 解密产物等只读文件注入，避免明文出现在环境变量 |
 | `ONESSH_ADMIN_PASSWORD` | ✅ | — | WebUI 管理员密码 |
 | `ONESSH_LISTEN` | | `:8866` | HTTP 监听地址 |
 | `ONESSH_PUBLIC_URL` | | 按请求推导 | 对外访问来源，如 `https://ssh.example.com`；生产 OAuth 部署应显式设置，同时决定是否发布 MCP 服务器图标 |
@@ -309,6 +310,8 @@ WebUI 的「活动」页会为每次 `exec`、`job_start`，以及 `exec_many` �
 ```sh
 openssl rand -hex 32
 ```
+
+> `ONESSH_MASTER_KEY` 与 `ONESSH_MASTER_KEY_FILE` 至少配置其一；两者都设置时以文件为准。主密钥丢失后已加密凭据无法恢复，生产环境应持久化保存。
 
 ## 本地开发
 

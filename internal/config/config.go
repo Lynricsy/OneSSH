@@ -30,9 +30,18 @@ type Config struct {
 func Load() (Config, error) {
 	var cfg Config
 	keyHex := os.Getenv("ONESSH_MASTER_KEY")
+	// ONESSH_MASTER_KEY_FILE 优先：允许把主密钥放在只读文件中
+	// （如 systemd credential、KMS 解密产物），避免明文出现在环境变量。
+	if file := os.Getenv("ONESSH_MASTER_KEY_FILE"); file != "" {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			return cfg, fmt.Errorf("读取 ONESSH_MASTER_KEY_FILE: %w", err)
+		}
+		keyHex = strings.TrimSpace(string(b))
+	}
 	key, err := hex.DecodeString(keyHex)
 	if err != nil || len(key) != 32 {
-		return cfg, errors.New("ONESSH_MASTER_KEY 必须是 64 位十六进制字符串；可用 openssl rand -hex 32 生成")
+		return cfg, errors.New("ONESSH_MASTER_KEY 或 ONESSH_MASTER_KEY_FILE 必须是 64 位十六进制字符串；可用 openssl rand -hex 32 生成")
 	}
 	cfg.MasterKey = key
 	cfg.AdminPassword = os.Getenv("ONESSH_ADMIN_PASSWORD")
