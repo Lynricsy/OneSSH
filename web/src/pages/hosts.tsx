@@ -728,7 +728,7 @@ export function HostsPage() {
                     // 载荷仍按名称提交，两侧在这里换算。
                     value={hosts.data?.find((item) => item.name === field.value)?.id ?? 0}
                     onChange={(value) =>
-                      field.onChange(hosts.data?.find((item) => item.id === value)?.name)
+                      field.onChange(hosts.data?.find((item) => item.id === value)?.name ?? '')
                     }
                     placeholder="直连（不使用跳板）"
                     options={[
