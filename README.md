@@ -367,6 +367,15 @@ go test -count=1 ./...
 (cd web && npm run build)
 ```
 
+WebUI 行为回归测试使用 Playwright，在独立浏览器中运行真实前端并模拟 API，无需启动网关或连接真实 SSH 主机：
+
+```sh
+cd web
+npm ci
+npx playwright install --with-deps --only-shell chromium
+npm test
+```
+
 卡片预览画廊（不依赖 Go 与宿主，直接在浏览器里逐张验收 32 张卡片的浅色、深色、错误态与窄屏表现）：
 
 ```sh

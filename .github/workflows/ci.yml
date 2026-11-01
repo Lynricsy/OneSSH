@@ -224,6 +224,12 @@ jobs:
       - name: Type-check and build
         run: npm run build
 
+      - name: Install browser for WebUI tests
+        run: npx playwright install --with-deps --only-shell chromium
+
+      - name: WebUI regression tests
+        run: npm test
+
       # 卡片运行时是纯浏览器代码，Go 测试够不到它自己跑起来之后的行为。
       # 这份一致性测试在 Node 里把 runtime.js 真的执行一遍，覆盖 ui/* 协议报文、
       # 只读回调白名单和 32 张卡片对真实样例的渲染，零依赖，不需要装任何东西。

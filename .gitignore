@@ -2,5 +2,7 @@
 web/node_modules/
 /onessh
 web/*.tsbuildinfo
+web/test-results/
+web/playwright-report/
 internal/searchx/helper/assets/*.gz
 /master.key
