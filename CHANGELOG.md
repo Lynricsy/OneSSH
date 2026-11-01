@@ -2,7 +2,7 @@
 
 本文件记录 OneSSH 的重要变更，格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
-## [Unreleased]
+## [0.1.21] - 2026-11-01
 
 ### 新增
 
@@ -10,7 +10,7 @@
 
 ### 修复
 
-- WebUI 编辑已配置跳板的主机时，选择“直连（不使用跳板）”后不再回弹原跳板；保存时继续省略 `jump_host` 以清除跳板配置。
+- WebUI 编辑已配置跳板的主机时，选择“直连（不使用跳板）”后不再回弹原跳板；保存时继续省略 `jump_host` 以清除跳板配置。新增 Playwright WebUI 回归测试并接入 CI（[#28](https://github.com/Lynricsy/OneSSH/pull/28)）。
 
 ## [0.1.20] - 2026-10-25
 
