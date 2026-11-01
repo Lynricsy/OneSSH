@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -216,6 +217,8 @@ type keyInput struct {
 	Name       string `json:"name"`
 	Mode       string `json:"mode"`
 	PrivateKey string `json:"private_key"`
+	// Passphrase 只在导入受口令保护的私钥时使用，仅存在于本次请求内存，不落库。
+	Passphrase string `json:"passphrase"`
 }
 
 func (a *API) keys(w http.ResponseWriter, r *http.Request) {
@@ -255,13 +258,12 @@ func (a *API) keys(w http.ResponseWriter, r *http.Request) {
 		}
 		public = string(ssh.MarshalAuthorizedKey(sshPub))
 	case "import":
-		private = []byte(in.PrivateKey)
-		signer, err := ssh.ParsePrivateKey(private)
+		var err error
+		private, public, err = importPrivateKey([]byte(in.PrivateKey), []byte(in.Passphrase), in.Name)
 		if err != nil {
-			apiError(w, 400, fmt.Errorf("解析私钥: %w", err))
+			apiError(w, 400, err)
 			return
 		}
-		public = string(ssh.MarshalAuthorizedKey(signer.PublicKey()))
 	default:
 		apiError(w, 400, fmt.Errorf("mode 必须是 generate 或 import"))
 		return
@@ -280,6 +282,43 @@ func (a *API) keys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOut(w, 201, key)
+}
+
+// importPrivateKey 解析导入的私钥，返回待加密入库的私钥与 authorized_keys 格式公钥。
+// 未加密私钥原样保存，此时 passphrase 被忽略；受口令保护的私钥在这里解密并重新编码为
+// 无口令 OpenSSH 格式：静态保护交给 OneSSH 主密钥，连接阶段仍走 ssh.ParsePrivateKey，口令不落库。
+func importPrivateKey(pemBytes, passphrase []byte, comment string) ([]byte, string, error) {
+	defer clear(passphrase)
+	signer, err := ssh.ParsePrivateKey(pemBytes)
+	if err == nil {
+		return pemBytes, string(ssh.MarshalAuthorizedKey(signer.PublicKey())), nil
+	}
+	var missing *ssh.PassphraseMissingError
+	if !errors.As(err, &missing) {
+		return nil, "", fmt.Errorf("解析私钥: %w", err)
+	}
+	if len(passphrase) == 0 {
+		return nil, "", errors.New("该私钥受口令保护，请填写口令")
+	}
+	raw, err := ssh.ParseRawPrivateKeyWithPassphrase(pemBytes, passphrase)
+	if errors.Is(err, x509.IncorrectPasswordError) {
+		return nil, "", errors.New("私钥口令错误")
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("解密私钥: %w", err)
+	}
+	signer, err = ssh.NewSignerFromKey(raw)
+	if err != nil {
+		return nil, "", fmt.Errorf("解析私钥: %w", err)
+	}
+	// DSA 等 OpenSSH 新格式不支持的类型会在这里失败，不能退回保存加密原文，否则连接阶段无法使用。
+	block, err := ssh.MarshalPrivateKey(raw, comment)
+	if err != nil {
+		return nil, "", fmt.Errorf("该私钥类型不支持口令导入: %w", err)
+	}
+	plain := pem.EncodeToMemory(block)
+	clear(block.Bytes)
+	return plain, string(ssh.MarshalAuthorizedKey(signer.PublicKey())), nil
 }
 func (a *API) key(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r, "id")
