@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 支持导入受口令保护的私钥（OpenSSH 新格式与传统 PEM 加密格式）：WebUI 导入表单新增可选的「私钥口令」，`POST /api/v1/keys` 新增只写字段 `passphrase`。网关在导入时解密并重新编码为无口令 OpenSSH 私钥，再由主密钥 AES-256-GCM 加密保存；口令只在本次请求内存中使用，不落库、不进日志。缺少口令或口令错误时分别给出明确提示；OpenSSH 格式无法表示的 DSA 等密钥类型会拒绝导入（[#29](https://github.com/Lynricsy/OneSSH/issues/29)）。
+
 ### 修复
 
 - WebUI 编辑已配置跳板的主机时，选择“直连（不使用跳板）”后不再回弹原跳板；保存时继续省略 `jump_host` 以清除跳板配置。

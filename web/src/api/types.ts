@@ -183,6 +183,8 @@ export type KeyPayload = {
   name: string
   mode: 'generate' | 'import'
   private_key?: string
+  /** 仅导入受口令保护的私钥时提交；服务端解密后丢弃，不落库。 */
+  passphrase?: string
 }
 
 export type TokenPayload = {
