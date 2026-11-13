@@ -71,13 +71,13 @@ func (s *Server) registerHosts() {
 		Name:        "hosts_list",
 		Title:       "列出可用主机",
 		Description: "列出当前令牌可访问的 SSH 主机名、地址、登录用户、标签和实时连接状态。其他工具的 host 参数只接受这里返回的 name，开始任何主机相关任务前先调用一次。可按 tags 区分环境或用途后再选择目标主机。",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(false)},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(false)},
 	}, s.hostsList)
 	register[Empty, ManagedHostsOutput](s, &mcp.Tool{
 		Name:        "hosts_manage_list",
 		Title:       "列出全部主机配置",
 		Description: "列出网关内全部 SSH 主机的完整配置：端口、认证方式、密钥 ID、已固定的 TOFU 指纹、监控开关、归档状态与连接状态。用于主机运维，不代表当前令牌有执行权限；执行类工具的可用主机以 hosts_list 为准（已归档主机不会出现在其中）。需要 manage_hosts 权限。",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(false)},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(false)},
 	}, s.hostsManageList)
 	register[hostmanager.Input, ManagedHostItem](s, &mcp.Tool{
 		Name:        "host_create",
