@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +27,7 @@ func TestToolCatalogGivesAgentsEnoughContext(t *testing.T) {
 	if len(tools.Tools) < 25 {
 		t.Fatalf("工具数量 = %d，疑似注册缺失", len(tools.Tools))
 	}
+	var readOnly []string
 	for _, tool := range tools.Tools {
 		if tool.Title == "" {
 			t.Errorf("%s 缺少 Title", tool.Name)
@@ -37,19 +39,32 @@ func TestToolCatalogGivesAgentsEnoughContext(t *testing.T) {
 			t.Errorf("%s 缺少 ToolAnnotations，客户端无法判断只读还是破坏性", tool.Name)
 			continue
 		}
-		// 客户端靠这两个注解决定「只读工具是否免确认自动放行」。只读必须显式写出
-		// destructiveHint=false：注解缺省时协议按各自默认值补齐，留空会让支持自动
-		// 放行的客户端无从判断，把只读工具也弹出确认框，等于注解形同虚设。
+		// destructiveHint 在 readOnlyHint=true 时按协议没有意义，但支持「只读工具免确认
+		// 自动放行」的客户端仍会读它；缺省值 true 会让这些客户端宁可弹确认框也不放行。
+		// 所以每个工具都显式声明该字段，只读工具显式写 false。
 		if tool.Annotations.DestructiveHint == nil {
-			t.Errorf("%s 未显式声明 destructiveHint，客户端无法据注解放行只读工具", tool.Name)
+			t.Errorf("%s 未显式声明 destructiveHint，支持只读自动放行的客户端无法据以放行", tool.Name)
 		} else if tool.Annotations.ReadOnlyHint && *tool.Annotations.DestructiveHint {
-			t.Errorf("%s 同时标记 readOnlyHint=true 与 destructiveHint=true，注解自相矛盾", tool.Name)
+			t.Errorf("%s 标为只读却声明 destructiveHint=true，两处必须一致", tool.Name)
+		}
+		if tool.Annotations.ReadOnlyHint {
+			readOnly = append(readOnly, tool.Name)
 		}
 		for name, description := range schemaPropertyDescriptions(t, tool.Name, tool.InputSchema) {
 			if strings.TrimSpace(description) == "" {
 				t.Errorf("%s 的参数 %s 缺少说明", tool.Name, name)
 			}
 		}
+	}
+	// 只读集合必须精确可控：多一个会让客户端跳过确认执行有副作用的工具，少一个会让
+	// 纯读工具每次弹确认。新增工具时先把副作用想清楚，再决定是否加入这份名单。
+	wantReadOnly := []string{
+		"file_list", "file_read", "hosts_list", "hosts_manage_list", "image_view",
+		"job_logs", "memory_list", "memory_stats", "output_read",
+	}
+	sort.Strings(readOnly)
+	if strings.Join(readOnly, ",") != strings.Join(wantReadOnly, ",") {
+		t.Errorf("只读工具集合 = %v，期望 %v", readOnly, wantReadOnly)
 	}
 }
 

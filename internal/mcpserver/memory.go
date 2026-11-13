@@ -120,7 +120,7 @@ func (s *Server) registerMemory() {
 		Description: "按当前问题检索持久记忆。开始一台主机上的实质性工作前先召回一次，避免重复踩坑、重复摸索路径。" +
 			"混合打分融合全文检索、重要度、时近度以及可选的语义向量（engine 字段标明实际使用的检索路径）；指定 host 时会同时检索该主机 bank 与全局 bank。" +
 			"记忆可能已经过期，只能作为线索，结论仍须用文件、命令输出或监控数据现场验证；没召回到结果就正常调查，不要当成事实不存在。",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(false)},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: new(false), IdempotentHint: false, OpenWorldHint: new(false)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in MemoryRecallInput) (*mcp.CallToolResult, MemoryRecallOutput, error) {
 		hostID, bank, err := memoryBank(ctx, in.Host)
 		if err != nil {

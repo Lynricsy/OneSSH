@@ -2,6 +2,12 @@
 
 本文件记录 OneSSH 的重要变更，格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [Unreleased]
+
+### 修复
+
+- MCP 工具注解与实际副作用对齐，便于支持「只读工具免确认自动放行」的客户端判断：`job_list`、`job_status` 刷新任务时会写 `last_checked_at`、日志字节数与状态并发布事件，`memory_recall` 会递增 `recall_count`、写 `last_recalled`，`host_status` 的 `fresh=true` 会把现场采样写入指标表，四者因此不再标记为只读与幂等（`readOnlyHint: false`、`idempotentHint: false`）；`grep`、`find` 的降级路径会在远端暂存、chmod 并执行临时 helper，同样不标记为只读。真正只读的 `hosts_list`、`hosts_manage_list`、`file_read`、`file_list`、`job_logs`、`output_read`、`image_view`、`memory_list`、`memory_stats` 显式声明 `destructiveHint: false`，并把只读工具集合固化为测试断言，避免以后新增工具时误标。
+
 ## [0.1.21] - 2026-11-01
 
 ### 新增
