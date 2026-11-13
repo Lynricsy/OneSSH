@@ -94,7 +94,7 @@ func (s *Server) registerJobs(m *jobs.Manager) {
 		Title: "列出后台任务",
 		Description: "列出当前令牌启动过的后台任务，按主机并发登录刷新运行中任务的状态，可用 host 过滤。看不到其他令牌的任务。" +
 			"刷新整体最多等 8 秒：连不上或超时的任务返回数据库里的上次状态并带 refresh_error，这时 status 只是旧快照，需要确认时稍后再查或用 job_status。",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(true)},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(true)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in JobListInput) (*mcp.CallToolResult, JobListOutput, error) {
 		p, _ := FromContext(ctx)
 		var hostID *int64
@@ -116,7 +116,7 @@ func (s *Server) registerJobs(m *jobs.Manager) {
 		Title: "查询后台任务状态",
 		Description: "登录主机刷新并返回单个后台任务的状态：running 表示仍在运行，exited 带 exit_code，lost 表示网关已无法确认进程（多为主机重启或进程被外部杀掉，也包括连续 7 天无法登录主机确认），之后不再跟踪。" +
 			"log_bytes 是当前日志字节数，可作为 job_logs 的 offset_bytes 基准做增量读取。轮询长任务时优先查状态，不要反复拉全量日志。",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(true)},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(true)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in JobIDInput) (*mcp.CallToolResult, jobs.Status, error) {
 		j, err := ownedJob(ctx, s.Store, in.JobID)
 		if err != nil {
@@ -132,7 +132,7 @@ func (s *Server) registerJobs(m *jobs.Manager) {
 		Name:        "job_logs",
 		Title:       "读取任务日志",
 		Description: "读取后台任务的合并输出日志。默认返回末尾 100 行；grep 传扩展正则先过滤再取尾部；offset_bytes 用于从上次读到的位置继续增量读取，适合边跑边看。",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(true)},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(true)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in JobLogsInput) (*mcp.CallToolResult, JobLogsOutput, error) {
 		j, err := ownedJob(ctx, s.Store, in.JobID)
 		if err != nil {

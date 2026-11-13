@@ -35,6 +35,15 @@ func TestToolCatalogGivesAgentsEnoughContext(t *testing.T) {
 		}
 		if tool.Annotations == nil {
 			t.Errorf("%s 缺少 ToolAnnotations，客户端无法判断只读还是破坏性", tool.Name)
+			continue
+		}
+		// 客户端靠这两个注解决定「只读工具是否免确认自动放行」。只读必须显式写出
+		// destructiveHint=false：注解缺省时协议按各自默认值补齐，留空会让支持自动
+		// 放行的客户端无从判断，把只读工具也弹出确认框，等于注解形同虚设。
+		if tool.Annotations.DestructiveHint == nil {
+			t.Errorf("%s 未显式声明 destructiveHint，客户端无法据注解放行只读工具", tool.Name)
+		} else if tool.Annotations.ReadOnlyHint && *tool.Annotations.DestructiveHint {
+			t.Errorf("%s 同时标记 readOnlyHint=true 与 destructiveHint=true，注解自相矛盾", tool.Name)
 		}
 		for name, description := range schemaPropertyDescriptions(t, tool.Name, tool.InputSchema) {
 			if strings.TrimSpace(description) == "" {

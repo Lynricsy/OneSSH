@@ -120,7 +120,7 @@ func (s *Server) registerMemory() {
 		Description: "按当前问题检索持久记忆。开始一台主机上的实质性工作前先召回一次，避免重复踩坑、重复摸索路径。" +
 			"混合打分融合全文检索、重要度、时近度以及可选的语义向量（engine 字段标明实际使用的检索路径）；指定 host 时会同时检索该主机 bank 与全局 bank。" +
 			"记忆可能已经过期，只能作为线索，结论仍须用文件、命令输出或监控数据现场验证；没召回到结果就正常调查，不要当成事实不存在。",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(false)},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(false)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in MemoryRecallInput) (*mcp.CallToolResult, MemoryRecallOutput, error) {
 		hostID, bank, err := memoryBank(ctx, in.Host)
 		if err != nil {
@@ -142,7 +142,7 @@ func (s *Server) registerMemory() {
 		Name:        "memory_list",
 		Title:       "浏览记忆",
 		Description: "按写入时间倒序分页列出某一个 bank 的记忆，用于人工核对与清理，不做相关性排序，也不会把主机 bank 和全局 bank 合并。按问题找内容请用 memory_recall。",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(false)},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(false)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in MemoryListInput) (*mcp.CallToolResult, MemoryListOutput, error) {
 		hostID, bank, err := memoryBank(ctx, in.Host)
 		if err != nil {
@@ -210,7 +210,7 @@ func (s *Server) registerMemory() {
 		Name:        "memory_stats",
 		Title:       "记忆库统计",
 		Description: "统计当前令牌可见的全局 bank 与各主机 bank：记忆条数、已生成向量数、最后写入时间。用于判断某个 bank 是否值得 memory_sleep 整理，或确认记忆是否写进了预期的 bank。",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(false)},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(false)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ Empty) (*mcp.CallToolResult, MemoryStatsOutput, error) {
 		principal, ok := FromContext(ctx)
 		if !ok {
