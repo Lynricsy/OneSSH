@@ -139,7 +139,7 @@ func (s *Server) registerExec(runner *execx.Runner) {
 		Title: "读取截断输出",
 		Description: "读取 exec 因输出过大而落在网关本地的完整输出（artifact）。返回带原始行号的内容和总行数，可用 offset/limit 翻页、用 grep 正则过滤。" +
 			"artifact 保留 7 天，过期后返回错误，此时重新执行命令即可。",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(false)},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(false)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in OutputReadInput) (*mcp.CallToolResult, OutputReadOutput, error) {
 		path, err := runner.ArtifactPath(in.ArtifactID)
 		if err != nil {
