@@ -304,6 +304,23 @@ func TestCommandPolicyInstructionMentionsOnlyExposedTools(t *testing.T) {
 		t.Fatalf("只留 fanout 时提示词越界: %s", instructions)
 	}
 
+	// 只开 hosts：host_test 的 uptime 同样过策略，模型也需要拒绝指引，
+	// 但提示词不能提到 exec/jobs 才有的环境变量入口。
+	server = newTestServer(t, Options{
+		CommandPolicy: instance,
+		DisabledTools: toolgroups.Disabled{
+			toolgroups.Exec: true, toolgroups.Fanout: true, toolgroups.Jobs: true, toolgroups.Files: true,
+			toolgroups.Search: true, toolgroups.Monitor: true, toolgroups.Image: true, toolgroups.Memory: true,
+		},
+	})
+	instructions = serverInstructions(server.disabledTools, true)
+	if !strings.Contains(instructions, "【命令策略】") {
+		t.Fatalf("只开 hosts 时也应出现命令策略段落: %s", instructions)
+	}
+	if strings.Contains(instructions, "session_env") || strings.Contains(instructions, "job_start.env") {
+		t.Fatalf("hosts-only 提示词不应提到环境变量入口: %s", instructions)
+	}
+
 	// 零值策略必须与升级前完全一致：默认配置下不出现命令策略段落。
 	if zero := serverInstructions(nil, cmdpolicy.Policy{}.Active()); strings.Contains(zero, "【命令策略】") {
 		t.Fatalf("默认 off 时不应出现命令策略段落: %s", zero)

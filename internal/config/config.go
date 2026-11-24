@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"onessh/internal/cmdpolicy"
+	"onessh/internal/execx"
 	"onessh/internal/toolgroups"
 )
 
@@ -92,6 +93,13 @@ func Load() (Config, error) {
 	}
 	cfg.CommandPolicy = commandPolicy
 	cfg.CommandEnvKeys = splitKeys(os.Getenv("ONESSH_COMMAND_ENV_KEYS"))
+	// 追加键必须是合法 shell 标识符：运行时的环境键名都按这个规则校验，
+	// 拼错的 `HTTP-PROXY` 永远匹配不到任何键，等于没配却看似生效，启动即报错。
+	for _, key := range cfg.CommandEnvKeys {
+		if !execx.ValidEnvName(key) {
+			return cfg, fmt.Errorf("ONESSH_COMMAND_ENV_KEYS 含非法环境变量名 %q：必须是 [A-Za-z_][A-Za-z0-9_]*", key)
+		}
+	}
 	seconds, err := strconv.Atoi(envDefault("ONESSH_POLL_INTERVAL", "60"))
 	if err != nil || seconds < 0 {
 		return cfg, fmt.Errorf("ONESSH_POLL_INTERVAL 必须是非负整数")

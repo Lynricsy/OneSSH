@@ -341,7 +341,8 @@ type tokenInput struct {
 	ManageHosts   bool     `json:"manage_hosts"`
 	HostIDs       []int64  `json:"host_ids"`
 	DisabledTools []string `json:"disabled_tools"`
-	// 省略 command_policy 表示保留原策略；显式 {"mode":"off"} 才清除。
+	// 省略或 null 的 command_policy 表示保留原策略；显式提交一个规范化后为 off 的
+	// 策略才清除——包括 {"mode":"off"}、空对象 {} 或仅含空白规则的列表。
 	CommandPolicy *cmdpolicy.TokenPolicy `json:"command_policy"`
 }
 type tokenView struct {

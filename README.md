@@ -296,7 +296,7 @@ WebUI 的「活动」页会为每次 `exec`、`job_start`，以及 `exec_many` �
 
 ### 命令策略（护栏，不是沙箱）
 
-`exec`、`exec_many`、`job_start` 的命令原文会在创建执行记录、取 SSH 连接之前先过一层策略；`host_test` 固定执行的 `uptime` 同样受策略约束，没有绕过白名单的执行入口。`session_env.set` 与 `job_start.env` 的变量名也会检查，避免用 `PATH`、`BASH_ENV`、`LD_PRELOAD` 改变下一条命令的解释方式。判定同时使用命令原文、去首尾空白与 NUL 截断前缀及其叠加形式，`^` 锚定的规则不会被前导换行或 NUL 填充绕过；白名单规则自动按整条命令锚定，`^git fetch` 只放行 `git fetch` 本身，不会放行 `git fetch && …`。注意 Go 正则的 `.` 默认不跨行，覆盖 heredoc 这类多行命令需写 `(?s)`。默认关闭，升级后行为不变。
+`exec`、`exec_many`、`job_start` 的命令原文会在创建执行记录、取 SSH 连接之前先过一层策略；`host_test` 固定执行的 `uptime` 同样受策略约束，没有绕过白名单的执行入口。`session_env.set` 与 `job_start.env` 的变量名也会检查，避免用 `PATH`、`BASH_ENV`、`LD_PRELOAD` 改变下一条命令的解释方式。判定同时使用命令原文、去首尾空白与 NUL 截断前缀及其叠加形式，`^` 锚定的规则不会被前导换行或 NUL 填充绕过；白名单规则自动按整条命令锚定，`^git fetch` 只放行 `git fetch` 本身，不会放行 `git fetch && …`。注意 Go 正则的 `.` 默认不跨行，覆盖 heredoc 这类多行命令需写 `(?s)`。默认关闭，命令与敏感键的判定行为不变；环境变量键名始终要求合法 shell 标识符（`[A-Za-z_][A-Za-z0-9_]*`），该校验与档位无关（`session_env` 此前已有，`job_start.env` 为本次新增）。
 
 | 档位 | 行为 |
 |---|---|
@@ -316,7 +316,7 @@ export ONESSH_COMMAND_ALLOW='^uptime$'
 export ONESSH_COMMAND_ENV_KEYS='HTTP_PROXY,HTTPS_PROXY'
 ```
 
-内置敏感键收录所有「让后续进程加载或执行额外代码」的键：`PATH`、`ENV`、`BASH_ENV`、`SHELLOPTS`、`BASHOPTS`、`PROMPT_COMMAND`、`PS4`、`IFS`、`LD_PRELOAD`、`LD_LIBRARY_PATH`、`LD_AUDIT`、`GCONV_PATH`、`PYTHONSTARTUP`、`PYTHONPATH`、`PYTHONHOME`、`PERL5OPT`、`PERL5LIB`、`RUBYOPT`、`NODE_OPTIONS`、`GIT_SSH`、`GIT_SSH_COMMAND`、`GIT_CONFIG_GLOBAL`、`GIT_CONFIG_SYSTEM`、`GIT_CONFIG_COUNT`、`SSH_ASKPASS`、`SUDO_ASKPASS`、`OPENSSL_CONF`、`SSL_CERT_FILE`、`HOSTALIASES`、`BASH_XTRACEFD`。环境变量名必须是合法 shell 标识符（`[A-Za-z_][A-Za-z0-9_]*`）；`job_start.env` 与 `session_env` 都按这个规则拒绝 `PATH; export ...` 之类的键名，避免把变量名拼进远端脚本时注入命令。启用策略后 `exec` 每次执行前还会复查已有会话环境，残留这些键会直接拒绝，先用 `session_env` 的 `unset` 删除即可恢复。
+内置敏感键按「让后续进程加载或执行额外代码」的标准收录了常见的键（名单并不穷尽，`ONESSH_COMMAND_ENV_KEYS` 可追加）：`PATH`、`ENV`、`BASH_ENV`、`SHELLOPTS`、`BASHOPTS`、`PROMPT_COMMAND`、`PS4`、`IFS`、`LD_PRELOAD`、`LD_LIBRARY_PATH`、`LD_AUDIT`、`GCONV_PATH`、`PYTHONSTARTUP`、`PYTHONPATH`、`PYTHONHOME`、`PERL5OPT`、`PERL5LIB`、`RUBYOPT`、`RUBYLIB`、`NODE_OPTIONS`、`GIT_SSH`、`GIT_SSH_COMMAND`、`GIT_EXEC_PATH`、`GIT_CONFIG_GLOBAL`、`GIT_CONFIG_SYSTEM`、`GIT_CONFIG_COUNT`、`JAVA_TOOL_OPTIONS`、`_JAVA_OPTIONS`、`JDK_JAVA_OPTIONS`、`SSH_ASKPASS`、`SUDO_ASKPASS`、`OPENSSL_CONF`、`SSL_CERT_FILE`、`HOSTALIASES`、`BASH_XTRACEFD`。环境变量名必须是合法 shell 标识符（`[A-Za-z_][A-Za-z0-9_]*`）；`job_start.env` 与 `session_env` 都按这个规则拒绝 `PATH; export ...` 之类的键名，避免把变量名拼进远端脚本时注入命令。启用策略后 `exec` 每次执行前还会复查已有会话环境，残留这些键会直接拒绝，先用 `session_env` 的 `unset` 删除即可恢复（拒绝文案按实际存储的键名指认）。
 
 令牌级策略只能收紧实例级策略，二者按逻辑 AND 组合：任何一层的拒绝规则命中都会拒绝；处在 `allow` 档的每一层都必须放行。实例级的拒绝规则不会被令牌的 `off`/`deny` 放宽，令牌的 `allow` 也只是在实例白名单之上继续收窄。WebUI 的令牌创建/编辑与 OAuth 同意页都可以配置，REST 形状为：
 
@@ -324,9 +324,9 @@ export ONESSH_COMMAND_ENV_KEYS='HTTP_PROXY,HTTPS_PROXY'
 {"command_policy": {"mode": "deny", "deny": ["rm\\s+-rf"], "allow": []}}
 ```
 
-`PUT /api/v1/tokens/{id}` 对名称/主机/工具组仍是全量替换；`command_policy` 省略时保留原策略（避免旧客户端静默清空），显式提交 `{"mode":"off"}` 才清除。OAuth 刷新令牌会继承签发时的策略以及之后的管理面更新。
+`PUT /api/v1/tokens/{id}` 对名称/主机/工具组仍是全量替换；`command_policy` 省略或为 `null` 时保留原策略（避免旧客户端静默清空），显式提交一个规范化后为 `off` 的策略才清除——包括 `{"mode":"off"}`、空对象 `{}` 或仅含空白规则的列表。OAuth 刷新令牌会继承签发时的策略以及之后的管理面更新。
 
-被策略拒绝的调用不会创建命令执行记录或后台任务，审计中标为 `outcome=denied` 并记录 `deny_reason`（命中的实例/令牌规则）。`GET /api/v1/audit?outcome=denied` 可筛选；WebUI「活动与审计」页把「策略拒绝」与执行失败分开显示，实时事件的 `tool_call` 载荷带 `denied=true`。服务器 `instructions` 也会说明「被拒绝不是连接失败，原样重试不会成功」，避免模型把策略拦截当成主机故障反复重连。
+被策略拒绝的调用不会创建命令执行记录或后台任务，审计中标为 `outcome=denied` 并记录 `deny_reason`（策略层级与拒绝原因：命中的规则，或白名单为空/未命中）。`GET /api/v1/audit?outcome=denied` 可筛选；WebUI「活动与审计」页把「策略拒绝」与执行失败分开显示，实时事件的 `tool_call` 载荷带 `denied=true`。服务器 `instructions` 也会说明「被拒绝不是连接失败，原样重试不会成功」，避免模型把策略拦截当成主机故障反复重连。
 
 **它不是安全边界。** 规则只匹配网关收到的原始命令/环境变量名，不做 shell 解析，也不理解引号拼接、变量展开、管道或 `sh -c`：`r""m -rf /`、`echo ... | base64 -d | sh` 等都能绕过。它拦的是手滑和明文 prompt injection 里明着写的危险命令，不防有意构造绕过的攻击者；后者应在目标机使用 `ForceCommand` 或受限账号。策略也不覆盖 `file_write`、`file_edit` 等其他破坏性能力，以及管理员使用的 WebUI 终端。`file_write` 与 `allow` 档组合有一条值得点破的链路：写 `/etc/environment` 或 `~/.pam_environment` 会在每次新 SSH 会话注入 `PATH`，让白名单命令执行攻击者放置的同名程序——需要封死这条链时，把 files 工具组一并禁用。
 

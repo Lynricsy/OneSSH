@@ -251,9 +251,14 @@ var builtinSensitiveEnvKeys = []string{
 	"NODE_OPTIONS",      // --require 可加载任意 JS
 	"GIT_SSH",           // git 走哪个 ssh
 	"GIT_SSH_COMMAND",   //
+	"GIT_EXEC_PATH",     // 换掉 git 子命令的二进制查找路径
 	"GIT_CONFIG_GLOBAL", // git 配置注入：core.pager / diff.external 都能执行命令
 	"GIT_CONFIG_SYSTEM", //
 	"GIT_CONFIG_COUNT",  // GIT_CONFIG_KEY_n/VALUE_n 的开关，单独拦编号键没有意义
+	"RUBYLIB",           // 改 Ruby 库搜索路径
+	"JAVA_TOOL_OPTIONS", // JVM 参数注入，可启用 -javaagent
+	"_JAVA_OPTIONS",     // 同上，老变量
+	"JDK_JAVA_OPTIONS",  // 同上，JDK 9+ 变量
 	"SSH_ASKPASS",       //
 	"SUDO_ASKPASS",      // 配合 sudo -A 执行任意取密程序
 	"OPENSSL_CONF",      // 劫持 openssl 行为
@@ -276,18 +281,21 @@ func SensitiveEnv(extra []string) map[string]struct{} {
 	return out
 }
 
-// EnvDenial 返回第一个敏感键。先排序再判断，保证同样的输入永远得到同样的结论——
+// EnvDenial 返回第一个敏感键，按调用方书写的原样（仅去首尾空白）而非统一大写：
+// 残留会话环境的拒绝文案要能指到实际存储的键名——统一大写成 PATH 会让
+// unset 一个历史遗留的小写 path 键变成无效操作。比较仍不分大小写。
+// 先排序再判断，保证同样的输入永远得到同样的结论——
 // session_env 的入参是 map，遍历顺序随机会让审计里记录的原因每次都不一样。
 func EnvDenial(sensitive map[string]struct{}, names []string) (string, bool) {
 	keys := make([]string, 0, len(names))
 	for _, name := range names {
-		if name = strings.ToUpper(strings.TrimSpace(name)); name != "" {
+		if name = strings.TrimSpace(name); name != "" {
 			keys = append(keys, name)
 		}
 	}
 	sort.Strings(keys)
 	for _, name := range keys {
-		if _, ok := sensitive[name]; ok {
+		if _, ok := sensitive[strings.ToUpper(name)]; ok {
 			return name, true
 		}
 	}

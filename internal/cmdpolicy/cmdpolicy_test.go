@@ -345,23 +345,33 @@ func TestDecodeTokenPolicyDefaultsAndFailClosed(t *testing.T) {
 
 func TestSensitiveEnvAndEnvDenial(t *testing.T) {
 	sensitive := SensitiveEnv([]string{"http_proxy", " ", "CUSTOM_KEY"})
-	// 名单覆盖所有「让后续进程加载或执行额外代码」的键：动态库、解释器启动、
-	// git/sudo 配置注入各占一族，缺一个就留一条改命令解释方式的旁路。
+	// 名单按「让后续进程加载或执行额外代码」的标准收录常见键：动态库、解释器启动、
+	// git/Java/sudo 配置注入各占一族，缺一个键就留一条改命令解释方式的旁路。
+	// HTTP_PROXY 是文档写明的合法用途，不在内置名单，经 extra 键追加。
 	for _, key := range []string{
-		"PATH", "BASH_ENV", "LD_PRELOAD", "LD_AUDIT", "GCONV_PATH", "HTTP_PROXY",
-		"NODE_OPTIONS", "PYTHONHOME", "PYTHONPATH", "PERL5LIB", "RUBYOPT",
-		"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_COUNT",
+		"PATH", "BASH_ENV", "LD_PRELOAD", "LD_AUDIT", "GCONV_PATH",
+		"NODE_OPTIONS", "PYTHONHOME", "PYTHONPATH", "PERL5LIB", "RUBYOPT", "RUBYLIB",
+		"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_COUNT", "GIT_EXEC_PATH",
+		"JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS",
 		"SUDO_ASKPASS", "OPENSSL_CONF", "SSL_CERT_FILE", "HOSTALIASES", "BASH_XTRACEFD",
 	} {
 		if _, ok := sensitive[key]; !ok {
 			t.Fatalf("%s 不在敏感键集合中", key)
 		}
 	}
+	if _, ok := sensitive["HTTP_PROXY"]; !ok {
+		t.Fatal("ONESSH_COMMAND_ENV_KEYS 追加的 http_proxy 应以大写进入集合")
+	}
 	if _, ok := sensitive["HOME"]; ok {
 		t.Fatal("HOME 不应被内置限制")
 	}
 	if _, denied := EnvDenial(sensitive, []string{"custom_key"}); !denied {
 		t.Fatal("自定义敏感键应大小写无关")
+	}
+	// 回归：拒绝文案按调用方书写的原样键名返回，统一大写会让 unset 一个
+	// 历史遗留的小写 path 键变成无效操作。
+	if key, denied := EnvDenial(sensitive, []string{"path"}); !denied || key != "path" {
+		t.Fatalf("小写残留键应按原样返回: %q, %v", key, denied)
 	}
 
 	// map 遍历顺序随机，EnvDenial 必须排序后返回，保证审计原因稳定。

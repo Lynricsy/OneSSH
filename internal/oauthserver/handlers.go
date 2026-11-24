@@ -180,7 +180,9 @@ func (s *Server) AuthorizationInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) AuthorizationDecision(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	// 命令策略两份规则列表的合法上限就有约 100KB（100 条 × 512 字节 × 2 + JSON 信封），
+	// 64KB 会把合法的大策略挡在 JSON 解析之前，报错文案还指向「不是有效 JSON」。
+	r.Body = http.MaxBytesReader(w, r.Body, 256<<10)
 	var input authorizationDecision
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		oauthAPIError(w, http.StatusBadRequest, "授权请求不是有效 JSON")

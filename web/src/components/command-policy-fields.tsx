@@ -46,7 +46,7 @@ export function CommandPolicyFields({
         <>
           <Field
             label={value.mode === 'allow' ? '拒绝规则（优先于白名单）' : '拒绝规则'}
-            hint="每行一条 Go 正则；命中的命令在送到主机前被拒绝。留空表示不加额外拒绝规则。"
+            hint="每行一条 Go 正则；命中的命令在送到主机前被拒绝。留空表示不加额外拒绝规则。单列表上限 100 条、单条 512 字节，超出保存时会报错。"
           >
             {(id) => (
               <Textarea
@@ -63,7 +63,7 @@ export function CommandPolicyFields({
           {value.mode === 'allow' && (
             <Field
               label="白名单"
-              hint="每行一条 Go 正则；未命中任何一条即拒绝。空白名单等于拒绝全部命令，请至少写一条。"
+              hint="每行一条 Go 正则，按整条命令精确匹配（无需手写 ^…$，`.` 不跨行、多行命令用 `(?s)`）；未命中任何一条即拒绝。空白名单等于拒绝全部命令，请至少写一条。单列表上限 100 条、单条 512 字节。"
             >
               {(id) => (
                 <Textarea

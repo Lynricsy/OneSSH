@@ -101,5 +101,5 @@ func deny(ctx context.Context, reason string) *mcp.CallToolResult {
 		d.reason = reason
 	}
 	return errorResult("网关命令策略拒绝了本次调用：" + reason +
-		"。这是策略拦截，不是主机连不上；原样重试不会成功，需要改命令或由管理员调整策略。")
+		"。这是策略拦截，不是主机连不上；原样重试不会成功，请按上面给出的原因调整调用方式，或由管理员调整策略。")
 }

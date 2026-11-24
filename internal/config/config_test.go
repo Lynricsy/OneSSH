@@ -246,4 +246,13 @@ func TestLoadCommandPolicy(t *testing.T) {
 			t.Fatalf("CommandEnvKeys = %#v", cfg.CommandEnvKeys)
 		}
 	})
+
+	t.Run("非法环境变量键名", func(t *testing.T) {
+		// 拼错的键永远匹配不到运行时的环境变量名，等于没配却看似生效，启动即报错。
+		t.Setenv("ONESSH_COMMAND_ENV_KEYS", "HTTP_PROXY,HTTP-PROXY")
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "非法环境变量名") {
+			t.Fatalf("非法键名应报错: %v", err)
+		}
+	})
 }

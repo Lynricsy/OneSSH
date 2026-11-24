@@ -41,7 +41,9 @@ func (s *Server) installTokenDenylist() {
 			case "tools/call":
 				name := callToolName(req)
 				// 解析不出工具名时 fail-closed：有 denylist 生效就不能放行空名绕过。
-				if name == "" {
+				// 只开命令策略（没有禁用任何工具组）时不走这个分支：畸形请求照旧落回
+				// SDK 分发报 tool not found，不混进「策略拒绝」的审计口径。
+				if len(disabled) > 0 && name == "" {
 					s.auditDeniedTool(ctx, "(unparseable)", "工具名无法解析")
 					return errorResult("tool not authorized"), nil
 				}

@@ -417,7 +417,7 @@ export function ActivityPage() {
               </span>
             )}
           </CardHeader>
-          {/* 工具/令牌/主机支持多选 + 搜索；结果仅两个值，保留单选下拉；改动即查，不设「查询」按钮 */}
+          {/* 工具/令牌/主机支持多选 + 搜索；结果为成功/失败/策略拒绝三个值，单选下拉；改动即查，不设「查询」按钮 */}
           <div className="grid grid-cols-2 gap-2 border-b border-border p-3 lg:grid-cols-4">
             <div className="col-span-2 lg:col-span-4">
               <label htmlFor="audit-filter-query" className="sr-only">
