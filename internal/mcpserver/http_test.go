@@ -37,7 +37,7 @@ func TestAuditCapturesAuthenticatedTokenIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	server := &Server{MCP: newProtocolServer("", serverInstructions(nil)), Store: st, Events: events.New()}
+	server := &Server{MCP: newProtocolServer("", serverInstructions(nil, false)), Store: st, Events: events.New()}
 	register(server, &mcp.Tool{Name: "audit_test"}, func(context.Context, *mcp.CallToolRequest, Empty) (*mcp.CallToolResult, Empty, error) {
 		return nil, Empty{}, nil
 	})
@@ -60,7 +60,7 @@ func TestAuditCapturesAuthenticatedTokenIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	audit, err := st.ListAudit(ctx, nil, nil, nil, nil, 0, 10)
+	audit, err := st.ListAudit(ctx, nil, nil, nil, nil, "", 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestToolCallEventIncludesCommandSummary(t *testing.T) {
 	bus := events.New()
 	ch, unsub := bus.Subscribe()
 	defer unsub()
-	server := &Server{MCP: newProtocolServer("", serverInstructions(nil)), Store: st, Events: bus}
+	server := &Server{MCP: newProtocolServer("", serverInstructions(nil, false)), Store: st, Events: bus}
 	type cmdIn struct {
 		Host    string `json:"host"`
 		Command string `json:"command"`
@@ -136,7 +136,7 @@ func TestToolCallEventIncludesCommandSummary(t *testing.T) {
 		t.Fatal("没有收到 tool_call 事件")
 	}
 
-	audit, err := st.ListAudit(ctx, nil, nil, nil, nil, 0, 10)
+	audit, err := st.ListAudit(ctx, nil, nil, nil, nil, "", 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestHandlerUsesModernStatelessTransport(t *testing.T) {
 
 	started := make(chan struct{})
 	cancelled := make(chan struct{}, 1)
-	server := &Server{MCP: newProtocolServer("", serverInstructions(nil))}
+	server := &Server{MCP: newProtocolServer("", serverInstructions(nil, false))}
 	mcp.AddTool(server.MCP, &mcp.Tool{Name: "wait"}, func(ctx context.Context, _ *mcp.CallToolRequest, _ Empty) (*mcp.CallToolResult, Empty, error) {
 		close(started)
 		<-ctx.Done()

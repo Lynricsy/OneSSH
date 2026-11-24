@@ -267,7 +267,7 @@ OneSSH 为**全部 32 个工具**各提供一张 [MCP Apps](https://modelcontext
 
 Agent 自带记忆系统时，用 `ONESSH_DISABLED_TOOLS=memory` 让网关只做 SSH 运维；关闭仅影响 MCP 暴露面，WebUI 的记忆页与 `/api/v1/memories` 仍可查看与清理既有记忆。多 Agent 共用同一实例时，可在令牌创建/更新或 OAuth 同意页按相同工具组再收紧：对该 Bearer 隐藏 `tools/list`、拒绝 `tools/call` 并记审计，无需重启进程；有效禁用为进程级与令牌级的并集。
 
-`GET /api/v1/tool-groups` 返回可选工具组。`PUT /api/v1/tokens/{id}` **全量替换**令牌的名称与权限，不是部分更新：请求应提交 `name`、`all_hosts`、`manage_hosts`、`host_ids` 和 `disabled_tools`；未提供的布尔字段按 `false`、列表按空列表处理。`all_hosts=true` 时忽略 `host_ids`。编辑当前 OAuth 访问令牌也会同步其尚未使用、未撤销的刷新令牌，使后续刷新继承更新后的权限。
+`GET /api/v1/tool-groups` 返回可选工具组。`PUT /api/v1/tokens/{id}` **全量替换**令牌的名称、主机范围与工具组，不是部分更新：请求应提交 `name`、`all_hosts`、`manage_hosts`、`host_ids` 和 `disabled_tools`；未提供的布尔字段按 `false`、列表按空列表处理。`all_hosts=true` 时忽略 `host_ids`。命令策略是例外：省略 `command_policy` 时保留原策略，显式提交 `{"mode":"off"}` 才清除，这样旧客户端不会静默关掉安全收紧。编辑当前 OAuth 访问令牌也会同步其尚未使用、未撤销的刷新令牌，使后续刷新继承更新后的权限。
 
 工具组限制不是主机操作沙箱：保留 `exec` 仍可通过命令读写文件，`fanout` 和 `jobs` 也有独立的命令执行入口。不要仅靠禁用 `files` 或 `exec` 一组来实现主机只读权限；远程账号本身仍应遵循最小权限原则。
 
@@ -294,11 +294,47 @@ WebUI 的「活动」页会为每次 `exec`、`job_start`，以及 `exec_many` �
 
 </details>
 
+### 命令策略（护栏，不是沙箱）
+
+`exec`、`exec_many`、`job_start` 的命令原文会在创建执行记录、取 SSH 连接之前先过一层策略；`host_test` 固定执行的 `uptime` 同样受策略约束，没有绕过白名单的执行入口。`session_env.set` 与 `job_start.env` 的变量名也会检查，避免用 `PATH`、`BASH_ENV`、`LD_PRELOAD` 改变下一条命令的解释方式。判定同时使用命令原文、去首尾空白与 NUL 截断前缀及其叠加形式，`^` 锚定的规则不会被前导换行或 NUL 填充绕过；白名单规则自动按整条命令锚定，`^git fetch` 只放行 `git fetch` 本身，不会放行 `git fetch && …`。注意 Go 正则的 `.` 默认不跨行，覆盖 heredoc 这类多行命令需写 `(?s)`。默认关闭，升级后行为不变。
+
+| 档位 | 行为 |
+|---|---|
+| `off`（默认） | 完全不检查，规则即使存在也不生效 |
+| `deny` | 只拒绝命中 `ONESSH_COMMAND_DENY` 的命令；拒绝规则为空时等同于 `off` |
+| `allow` | 白名单：必须命中 `ONESSH_COMMAND_ALLOW` 才放行；空白名单等于拒绝全部命令 |
+
+```sh
+# 一行一条 Go 正则，空行与 # 开头的行忽略；非法正则在启动时直接报错，不会静默跳过
+export ONESSH_COMMAND_POLICY=deny
+export ONESSH_COMMAND_DENY='rm\s+-rf\s+/(?:\s|$)'
+export ONESSH_COMMAND_DENY="$ONESSH_COMMAND_DENY
+docker\s+system\s+prune"
+# 只对 allow 档有意义；allow 档下拒绝规则仍优先
+export ONESSH_COMMAND_ALLOW='^uptime$'
+# 在内置敏感键之外追加（逗号分隔，大小写不敏感）
+export ONESSH_COMMAND_ENV_KEYS='HTTP_PROXY,HTTPS_PROXY'
+```
+
+内置敏感键收录所有「让后续进程加载或执行额外代码」的键：`PATH`、`ENV`、`BASH_ENV`、`SHELLOPTS`、`BASHOPTS`、`PROMPT_COMMAND`、`PS4`、`IFS`、`LD_PRELOAD`、`LD_LIBRARY_PATH`、`LD_AUDIT`、`GCONV_PATH`、`PYTHONSTARTUP`、`PYTHONPATH`、`PYTHONHOME`、`PERL5OPT`、`PERL5LIB`、`RUBYOPT`、`NODE_OPTIONS`、`GIT_SSH`、`GIT_SSH_COMMAND`、`GIT_CONFIG_GLOBAL`、`GIT_CONFIG_SYSTEM`、`GIT_CONFIG_COUNT`、`SSH_ASKPASS`、`SUDO_ASKPASS`、`OPENSSL_CONF`、`SSL_CERT_FILE`、`HOSTALIASES`、`BASH_XTRACEFD`。环境变量名必须是合法 shell 标识符（`[A-Za-z_][A-Za-z0-9_]*`）；`job_start.env` 与 `session_env` 都按这个规则拒绝 `PATH; export ...` 之类的键名，避免把变量名拼进远端脚本时注入命令。启用策略后 `exec` 每次执行前还会复查已有会话环境，残留这些键会直接拒绝，先用 `session_env` 的 `unset` 删除即可恢复。
+
+令牌级策略只能收紧实例级策略，二者按逻辑 AND 组合：任何一层的拒绝规则命中都会拒绝；处在 `allow` 档的每一层都必须放行。实例级的拒绝规则不会被令牌的 `off`/`deny` 放宽，令牌的 `allow` 也只是在实例白名单之上继续收窄。WebUI 的令牌创建/编辑与 OAuth 同意页都可以配置，REST 形状为：
+
+```json
+{"command_policy": {"mode": "deny", "deny": ["rm\\s+-rf"], "allow": []}}
+```
+
+`PUT /api/v1/tokens/{id}` 对名称/主机/工具组仍是全量替换；`command_policy` 省略时保留原策略（避免旧客户端静默清空），显式提交 `{"mode":"off"}` 才清除。OAuth 刷新令牌会继承签发时的策略以及之后的管理面更新。
+
+被策略拒绝的调用不会创建命令执行记录或后台任务，审计中标为 `outcome=denied` 并记录 `deny_reason`（命中的实例/令牌规则）。`GET /api/v1/audit?outcome=denied` 可筛选；WebUI「活动与审计」页把「策略拒绝」与执行失败分开显示，实时事件的 `tool_call` 载荷带 `denied=true`。服务器 `instructions` 也会说明「被拒绝不是连接失败，原样重试不会成功」，避免模型把策略拦截当成主机故障反复重连。
+
+**它不是安全边界。** 规则只匹配网关收到的原始命令/环境变量名，不做 shell 解析，也不理解引号拼接、变量展开、管道或 `sh -c`：`r""m -rf /`、`echo ... | base64 -d | sh` 等都能绕过。它拦的是手滑和明文 prompt injection 里明着写的危险命令，不防有意构造绕过的攻击者；后者应在目标机使用 `ForceCommand` 或受限账号。策略也不覆盖 `file_write`、`file_edit` 等其他破坏性能力，以及管理员使用的 WebUI 终端。`file_write` 与 `allow` 档组合有一条值得点破的链路：写 `/etc/environment` 或 `~/.pam_environment` 会在每次新 SSH 会话注入 `PATH`，让白名单命令执行攻击者放置的同名程序——需要封死这条链时，把 files 工具组一并禁用。
+
 ### 给 Agent 的说明层
 
 工具选得对不对，取决于服务器把话说清楚了没有。OneSSH 在三处提供说明，都会随 `initialize` 和 `tools/list` 一次性交给客户端：
 
-- **服务器 instructions**：网关整体工作协议——`hosts_list` 是所有 `host` 参数的唯一来源、`manage_hosts` 是独立权限、优先用专用工具而不是拿 `exec` 拼命令、长任务走 `job_start`、截断输出走 `output_read`、破坏性操作前先确认现状，以及记忆的读写与安全红线。说明按工具组拼装：`ONESSH_DISABLED_TOOLS` 关掉的组，其段落一并消失，避免提示词指向不存在的工具。
+- **服务器 instructions**：网关整体工作协议——`hosts_list` 是所有 `host` 参数的唯一来源、`manage_hosts` 是独立权限、优先用专用工具而不是拿 `exec` 拼命令、长任务走 `job_start`、截断输出走 `output_read`、破坏性操作前先确认现状，以及记忆的读写与安全红线。启用命令策略时会额外告诉模型「被拒绝不是连接失败、原样重试不会成功」。说明按工具组拼装：`ONESSH_DISABLED_TOOLS` 关掉的组，其段落一并消失，避免提示词指向不存在的工具；命令策略段落提到的环境变量入口也会按当前启用的工具组裁剪。
 - **工具 `description` 与 `title`**：每个工具写清适用场景、与相邻工具的取舍、默认值和硬上限、失败时该怎么办。
 - **参数 `description` 与 `annotations`**：每个入参都有说明，每个工具都标注 `readOnlyHint` / `destructiveHint` / `idempotentHint` / `openWorldHint`，客户端据此决定是否需要用户确认。
 
@@ -326,6 +362,10 @@ WebUI 的「活动」页会为每次 `exec`、`job_start`，以及 `exec_many` �
 | `ONESSH_MCP_APPS` | | `on` | `on` 为全部工具发布 MCP Apps 交互卡片资源与 `_meta.ui`；`off` 完全关闭卡片 |
 | `ONESSH_SEARCH_HELPER` | | `auto` | `auto` 在 Linux amd64/arm64 上启用临时搜索 helper；`off` 强制使用原生工具或纯 SFTP |
 | `ONESSH_DISABLED_TOOLS` | | — | 逗号分隔的工具组名（见工具清单），列出的组不注册为 MCP 工具，服务器 `instructions` 里的对应说明同时移除；未知组名启动即报错 |
+| `ONESSH_COMMAND_POLICY` | | `off` | 命令策略档位：`off` / `deny` / `allow`；未知值启动报错。见「命令策略」 |
+| `ONESSH_COMMAND_DENY` | | — | 换行分隔的 Go 正则，一行一条，空行与 `#` 注释忽略；按子串匹配，判定同时覆盖命令原文、去首尾空白与 NUL 截断前缀。`deny` 档命中即拒绝，`allow` 档下仍优先拒绝。非法正则启动报错。单列表上限 100 条、单条上限 512 字节 |
+| `ONESSH_COMMAND_ALLOW` | | — | 换行分隔的 Go 正则，自动按整条命令锚定（无需手写 `^…$`，写了也不冲突）；`.` 不跨行，多行命令（如 heredoc）用 `(?s)`。`allow` 档必须命中才放行，空白名单拒绝全部命令。`off`/`deny` 档不使用。单列表上限 100 条、单条上限 512 字节 |
+| `ONESSH_COMMAND_ENV_KEYS` | | — | 逗号分隔的额外敏感环境变量名，追加到内置键表；大小写不敏感 |
 | `ONESSH_EMBEDDING_API_URL` | | — | OpenAI 兼容 API 根地址，如 `https://api.example.com/v1`；需同时设置模型才启用 |
 | `ONESSH_EMBEDDING_API_KEY` | | — | embedding 服务 Bearer 密钥；服务不需要鉴权时可留空 |
 | `ONESSH_EMBEDDING_MODEL` | | — | embedding 模型名；换模型后旧向量自然不参与召回 |

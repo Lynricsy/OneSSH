@@ -13,6 +13,18 @@ import (
 // token 条件每项占 3 个变量；三个维度各 100 项时总计不超过 500。
 const MaxAuditFilterValues = 100
 
+// 审计结果分类。空串是迁移前的历史记录：那时只有 ok 位，无法区分拒绝与失败。
+const (
+	AuditOutcomeOK     = "ok"
+	AuditOutcomeFailed = "failed"
+	AuditOutcomeDenied = "denied"
+)
+
+// AuditOutcomes 列出可筛选的结果分类，供管理 API 校验入参。
+func AuditOutcomes() []string {
+	return []string{AuditOutcomeOK, AuditOutcomeFailed, AuditOutcomeDenied}
+}
+
 func (s *Store) AddAudit(ctx context.Context, a Audit) error {
 	var runIDs any
 	if len(a.RunIDs) > 0 {
@@ -24,7 +36,7 @@ func (s *Store) AddAudit(ctx context.Context, a Audit) error {
 	}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO audit(ts,token_id,token_name,tool,host,params_json,command_run_ids_json,ok,exit_code,duration_ms,bytes_out) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, a.Ts, nullInt(a.TokenID), nullString(a.TokenName), a.Tool, nullString(a.Host), a.ParamsJSON, runIDs, boolInt(a.OK), nullInt(a.ExitCode), a.DurationMS, a.BytesOut)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO audit(ts,token_id,token_name,tool,host,params_json,command_run_ids_json,ok,exit_code,duration_ms,bytes_out,outcome,deny_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, a.Ts, nullInt(a.TokenID), nullString(a.TokenName), a.Tool, nullString(a.Host), a.ParamsJSON, runIDs, boolInt(a.OK), nullInt(a.ExitCode), a.DurationMS, a.BytesOut, a.Outcome, nullString(sql.NullString{String: a.DenyReason, Valid: a.DenyReason != ""}))
 	return err
 }
 
@@ -34,7 +46,7 @@ func validateAuditFilterCount(name string, count int) error {
 	}
 	return nil
 }
-func (s *Store) ListAudit(ctx context.Context, tokenIDs []int64, hosts, tools []string, ok *bool, before int64, limit int) ([]Audit, error) {
+func (s *Store) ListAudit(ctx context.Context, tokenIDs []int64, hosts, tools []string, ok *bool, outcome string, before int64, limit int) ([]Audit, error) {
 	if err := validateAuditFilterCount("令牌", len(tokenIDs)); err != nil {
 		return nil, err
 	}
@@ -44,7 +56,7 @@ func (s *Store) ListAudit(ctx context.Context, tokenIDs []int64, hosts, tools []
 	if err := validateAuditFilterCount("工具", len(tools)); err != nil {
 		return nil, err
 	}
-	q := `SELECT id,ts,token_id,token_name,tool,host,params_json,command_run_ids_json,ok,exit_code,duration_ms,bytes_out FROM audit WHERE 1=1`
+	q := `SELECT id,ts,token_id,token_name,tool,host,params_json,command_run_ids_json,ok,exit_code,duration_ms,bytes_out,outcome,deny_reason FROM audit WHERE 1=1`
 	args := []any{}
 	if len(tokenIDs) > 0 {
 		// 迁移前的 ID 可能已被复用；当前令牌存在时，只接受写入时已快照其名称的记录。
@@ -79,6 +91,21 @@ func (s *Store) ListAudit(ctx context.Context, tokenIDs []int64, hosts, tools []
 		q += ` AND ok=?`
 		args = append(args, boolInt(*ok))
 	}
+	// outcome 是对 ok 的细分，同时兼容迁移前的历史记录（outcome 为空串）：
+	// failed 要包含旧的 ok=0 记录但不能混入 denied；denied 只认新写入的分类。
+	switch outcome {
+	case "":
+	case AuditOutcomeOK:
+		q += ` AND ok=1`
+	case AuditOutcomeFailed:
+		q += ` AND ok=0 AND outcome<>?`
+		args = append(args, AuditOutcomeDenied)
+	case AuditOutcomeDenied:
+		q += ` AND outcome=?`
+		args = append(args, AuditOutcomeDenied)
+	default:
+		return nil, fmt.Errorf("未知审计结果分类 %q", outcome)
+	}
 	if before > 0 {
 		q += ` AND id<?`
 		args = append(args, before)
@@ -97,8 +124,8 @@ func (s *Store) ListAudit(ctx context.Context, tokenIDs []int64, hosts, tools []
 	for rows.Next() {
 		var a Audit
 		var ok int
-		var runIDs sql.NullString
-		if err := rows.Scan(&a.ID, &a.Ts, &a.TokenID, &a.TokenName, &a.Tool, &a.Host, &a.ParamsJSON, &runIDs, &ok, &a.ExitCode, &a.DurationMS, &a.BytesOut); err != nil {
+		var runIDs, denyReason sql.NullString
+		if err := rows.Scan(&a.ID, &a.Ts, &a.TokenID, &a.TokenName, &a.Tool, &a.Host, &a.ParamsJSON, &runIDs, &ok, &a.ExitCode, &a.DurationMS, &a.BytesOut, &a.Outcome, &denyReason); err != nil {
 			return nil, err
 		}
 		if runIDs.Valid {
@@ -107,6 +134,7 @@ func (s *Store) ListAudit(ctx context.Context, tokenIDs []int64, hosts, tools []
 			}
 		}
 		a.OK = ok != 0
+		a.DenyReason = denyReason.String
 		out = append(out, a)
 	}
 	return out, rows.Err()

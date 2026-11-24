@@ -58,6 +58,9 @@ var migration0014 string
 //go:embed migrations/0015_host_archive.sql
 var migration0015 string
 
+//go:embed migrations/0016_command_policy.sql
+var migration0016 string
+
 type Store struct {
 	DB      *sql.DB
 	writeMu sync.Mutex
@@ -145,12 +148,23 @@ func migrate(db *sql.DB) error {
 		{version: 13, sql: migration0013},
 		{version: 14, sql: migration0014},
 		{version: 15, sql: migration0015},
+		{version: 16, sql: migration0016},
 	} {
 		if err := applyMigration(db, m); err != nil {
 			return fmt.Errorf("版本 %d: %w", m.version, err)
 		}
 	}
 	return nil
+}
+
+// migration0016Columns 列出 0016 新增的列，供 applyMigration 逐列判存实现幂等。
+// DDL 必须与 0016_command_policy.sql 保持一致，TestMigration0016DDLMatchesIdempotentCase 钉死两者。
+var migration0016Columns = []struct{ table, column, ddl string }{
+	{"audit", "outcome", `ALTER TABLE audit ADD COLUMN outcome TEXT NOT NULL DEFAULT ''`},
+	{"audit", "deny_reason", `ALTER TABLE audit ADD COLUMN deny_reason TEXT`},
+	{"tokens", "command_policy_json", `ALTER TABLE tokens ADD COLUMN command_policy_json TEXT NOT NULL DEFAULT '{}'`},
+	{"oauth_authorization_codes", "command_policy_json", `ALTER TABLE oauth_authorization_codes ADD COLUMN command_policy_json TEXT NOT NULL DEFAULT '{}'`},
+	{"oauth_refresh_tokens", "command_policy_json", `ALTER TABLE oauth_refresh_tokens ADD COLUMN command_policy_json TEXT NOT NULL DEFAULT '{}'`},
 }
 
 func applyMigration(db *sql.DB, m migration) error {
@@ -221,6 +235,21 @@ func applyMigration(db *sql.DB, m migration) error {
 		if !hasColumn {
 			if _, err = tx.Exec(m.sql); err != nil {
 				return err
+			}
+		}
+	case 16:
+		// 命令策略迁移逐列幂等：库可能被手工补过列或跑过中间开发版，
+		// 一把梭执行 0016 的五条 ALTER 会在已有列上以 duplicate column 失败，
+		// 进程起不来且无法自愈。DDL 一致性由 TestMigration0016DDLMatchesIdempotentCase 钉死。
+		for _, c := range migration0016Columns {
+			hasColumn, err := tableHasColumn(tx, c.table, c.column)
+			if err != nil {
+				return err
+			}
+			if !hasColumn {
+				if _, err = tx.Exec(c.ddl); err != nil {
+					return err
+				}
 			}
 		}
 	default:

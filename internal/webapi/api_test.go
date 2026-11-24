@@ -386,3 +386,166 @@ func TestUpdateTokenRoundTripDisabledToolsAndHostIDs(t *testing.T) {
 		t.Fatal("更新后的令牌未出现在列表中")
 	}
 }
+
+func TestTokensCommandPolicyRoundTripAndValidation(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	box, err := cryptox.New(bytes.Repeat([]byte{8}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := sshpool.New(st, box)
+	defer pool.Close()
+	hosts := hostmanager.New(st, box, pool)
+	api := NewAPI(st, box, pool, hosts, nil, nil, nil, nil, memoryx.New(st, memoryx.EmbeddingConfig{}), nil).Handler()
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		api.ServeHTTP(w, r)
+		return w
+	}
+
+	created := call(http.MethodPost, "/tokens", `{"name":"agent","all_hosts":true,"command_policy":{"mode":"deny","deny":["rm\\s+-rf"],"allow":[]}}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("创建令牌 %d %s", created.Code, created.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(created.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	policy, ok := out["command_policy"].(map[string]any)
+	if !ok || policy["mode"] != "deny" {
+		t.Fatalf("创建响应 command_policy = %#v", out["command_policy"])
+	}
+	if deny, ok := policy["deny"].([]any); !ok || len(deny) != 1 || deny[0] != `rm\s+-rf` {
+		t.Fatalf("创建响应 deny 规则 = %#v", policy["deny"])
+	}
+	id := int64(out["id"].(float64))
+
+	updated := call(http.MethodPut, "/tokens/"+strconv.FormatInt(id, 10), `{"name":"agent","all_hosts":true,"command_policy":{"mode":"allow","deny":["shutdown"],"allow":["^uptime$"]}}`)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("更新令牌 %d %s", updated.Code, updated.Body.String())
+	}
+	if err := json.Unmarshal(updated.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	policy, _ = out["command_policy"].(map[string]any)
+	if policy["mode"] != "allow" {
+		t.Fatalf("更新响应 command_policy = %#v", out["command_policy"])
+	}
+
+	badCreate := call(http.MethodPost, "/tokens", `{"name":"bad","all_hosts":true,"command_policy":{"mode":"deny","deny":["("]}}`)
+	if badCreate.Code != http.StatusBadRequest {
+		t.Fatalf("非法正则创建应 400，实际 %d %s", badCreate.Code, badCreate.Body.String())
+	}
+	badMode := call(http.MethodPost, "/tokens", `{"name":"bad2","all_hosts":true,"command_policy":{"mode":"denny"}}`)
+	if badMode.Code != http.StatusBadRequest {
+		t.Fatalf("未知档位创建应 400，实际 %d %s", badMode.Code, badMode.Body.String())
+	}
+	missingMode := call(http.MethodPost, "/tokens", `{"name":"bad3","all_hosts":true,"command_policy":{"deny":["rm"]}}`)
+	if missingMode.Code != http.StatusBadRequest {
+		t.Fatalf("缺少 mode 的规则应 400，实际 %d %s", missingMode.Code, missingMode.Body.String())
+	}
+	badUpdate := call(http.MethodPut, "/tokens/"+strconv.FormatInt(id, 10), `{"name":"agent","all_hosts":true,"command_policy":{"mode":"deny","deny":["("]}}`)
+	if badUpdate.Code != http.StatusBadRequest {
+		t.Fatalf("非法正则更新应 400，实际 %d %s", badUpdate.Code, badUpdate.Body.String())
+	}
+	stored, err := st.GetToken(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.CommandPolicy.Mode != "allow" || len(stored.CommandPolicy.Allow) != 1 {
+		t.Fatalf("失败更新污染了已有策略: %#v", stored.CommandPolicy)
+	}
+
+	listed := call(http.MethodGet, "/tokens", "")
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"mode":"allow"`) {
+		t.Fatalf("列表未返回命令策略 %d %s", listed.Code, listed.Body.String())
+	}
+
+	// 旧客户端/旧前端 PUT 不带 command_policy：保留原策略，不能静默清空。
+	legacy := call(http.MethodPut, "/tokens/"+strconv.FormatInt(id, 10), `{"name":"agent","all_hosts":true}`)
+	if legacy.Code != http.StatusOK {
+		t.Fatalf("旧 payload 更新 %d %s", legacy.Code, legacy.Body.String())
+	}
+	if err := json.Unmarshal(legacy.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	policy, _ = out["command_policy"].(map[string]any)
+	if policy["mode"] != "allow" {
+		t.Fatalf("旧 payload 静默清空了策略: %#v", out["command_policy"])
+	}
+
+	// 显式 off 才清除。
+	explicitOff := call(http.MethodPut, "/tokens/"+strconv.FormatInt(id, 10), `{"name":"agent","all_hosts":true,"command_policy":{"mode":"off"}}`)
+	if explicitOff.Code != http.StatusOK {
+		t.Fatalf("显式 off 更新 %d %s", explicitOff.Code, explicitOff.Body.String())
+	}
+	if err := json.Unmarshal(explicitOff.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	policy, _ = out["command_policy"].(map[string]any)
+	if policy["mode"] != "off" {
+		t.Fatalf("显式 off 未清除策略: %#v", out["command_policy"])
+	}
+	stored, err = st.GetToken(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.CommandPolicy.Mode != "off" {
+		t.Fatalf("显式 off 后库中策略 = %#v", stored.CommandPolicy)
+	}
+}
+
+func TestAuditOutcomeFilter(t *testing.T) {
+	ctx := t.Context()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	for _, row := range []store.Audit{
+		{Ts: 1, Tool: "exec", ParamsJSON: "{}", OK: true, Outcome: store.AuditOutcomeOK},
+		{Ts: 2, Tool: "exec", ParamsJSON: "{}", OK: false, Outcome: store.AuditOutcomeFailed},
+		{Ts: 3, Tool: "exec", ParamsJSON: "{}", OK: false, Outcome: store.AuditOutcomeDenied, DenyReason: "实例拒绝规则命中"},
+		{Ts: 4, Tool: "exec", ParamsJSON: "{}", OK: false}, // 迁移前历史失败
+	} {
+		if err := st.AddAudit(ctx, row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	handler := (&API{Store: st}).Handler()
+	get := func(query string) *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/audit?"+query, nil))
+		return response
+	}
+
+	denied := get("outcome=denied")
+	if denied.Code != http.StatusOK {
+		t.Fatalf("outcome=denied %d %s", denied.Code, denied.Body.String())
+	}
+	var rows []store.Audit
+	if err := json.Unmarshal(denied.Body.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Outcome != store.AuditOutcomeDenied || rows[0].DenyReason == "" {
+		t.Fatalf("denied 结果 = %#v", rows)
+	}
+
+	failed := get("outcome=failed")
+	if err := json.Unmarshal(failed.Body.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("failed 应包含历史失败，实际 %d 条: %#v", len(rows), rows)
+	}
+
+	if bad := get("outcome=bogus"); bad.Code != http.StatusBadRequest {
+		t.Fatalf("未知 outcome 状态码 = %d %s", bad.Code, bad.Body.String())
+	}
+}

@@ -15,7 +15,7 @@ type JobStartInput struct {
 	Host    string            `json:"host" jsonschema:"SSH 主机名，取自 hosts_list"`
 	Command string            `json:"command" jsonschema:"要在后台运行的 shell 命令；stdout 与 stderr 合并写入任务日志，stdin 为 /dev/null"`
 	Cwd     string            `json:"cwd,omitempty" jsonschema:"工作目录，默认 ~；目录不存在任务会以退出码 97 失败"`
-	Env     map[string]string `json:"env,omitempty" jsonschema:"额外导出的环境变量；不会读取 session_env 设置的会话环境"`
+	Env     map[string]string `json:"env,omitempty" jsonschema:"额外导出的环境变量；键名必须是合法 shell 标识符 [A-Za-z_][A-Za-z0-9_]*，不会读取 session_env 设置的会话环境"`
 }
 type JobStartOutput struct {
 	JobID string `json:"job_id"`
@@ -72,6 +72,19 @@ func (s *Server) registerJobs(m *jobs.Manager) {
 		p, _ := FromContext(ctx)
 		if strings.TrimSpace(in.Command) == "" {
 			return errorResult("command 不能为空"), JobStartOutput{}, nil
+		}
+		// env 键名会被拼进远端 export 语句；这里先拒绝非法键名，命令策略与环境变量策略
+		// 只能决定“允不允许”，不能替 shell 语法兜底。
+		if validErr := execx.ValidateEnv(in.Env); validErr != nil {
+			return errorResult(validErr.Error()), JobStartOutput{}, nil
+		}
+		// job_start 与 exec 是同一个执行面：策略必须在建执行记录、取连接与启动任务之前过。
+		if reason, denied := s.commandDenial(ctx, in.Command); denied {
+			return deny(ctx, reason), JobStartOutput{}, nil
+		}
+		// job_start 不读会话环境，但它自己的 env 参数同样能改下一条命令的解释方式。
+		if key, denied := s.envDenial(ctx, envNames(in.Env)); denied {
+			return deny(ctx, fmt.Sprintf("敏感环境变量 %s 不允许通过 job_start.env 传入", key)), JobStartOutput{}, nil
 		}
 		if in.Cwd == "" {
 			in.Cwd = "~"

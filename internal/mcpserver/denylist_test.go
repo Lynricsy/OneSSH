@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"onessh/internal/cmdpolicy"
 	"onessh/internal/store"
 	"onessh/internal/toolgroups"
 )
@@ -80,7 +81,7 @@ func TestTokenDenylistHidesMemoryAndExecFromListAndCall(t *testing.T) {
 		t.Fatalf("拒绝文案 = %q", text)
 	}
 
-	audit, err := st.ListAudit(ctx, nil, nil, nil, nil, 0, 10)
+	audit, err := st.ListAudit(ctx, nil, nil, nil, nil, "", 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +93,9 @@ func TestTokenDenylistHidesMemoryAndExecFromListAndCall(t *testing.T) {
 	}
 	if !audit[0].TokenName.Valid || audit[0].TokenName.String != token.Name {
 		t.Fatalf("审计令牌名 = %#v", audit[0].TokenName)
+	}
+	if audit[0].Outcome != store.AuditOutcomeDenied || audit[0].DenyReason == "" {
+		t.Fatalf("工具组拒绝未标记为 denied: %#v", audit[0])
 	}
 }
 
@@ -304,7 +308,7 @@ func TestTokenDenylistAuditsResourceReadDenial(t *testing.T) {
 		t.Fatalf("受限令牌读取禁用工具卡片应失败: %s", execURI)
 	}
 
-	audit, err := st.ListAudit(ctx, nil, nil, nil, nil, 0, 20)
+	audit, err := st.ListAudit(ctx, nil, nil, nil, nil, "", 0, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,6 +333,7 @@ func TestTokenDenylistTrimsServerDiscoverInstructions(t *testing.T) {
 	if _, err := st.CreateToken(ctx, store.TokenCreate{
 		Name: "discover-deny", Hash: store.TokenHash("secret-discover"), AllHosts: true,
 		DisabledTools: []string{"memory", "exec"},
+		CommandPolicy: cmdpolicy.TokenPolicy{Mode: "deny", Deny: []string{`rm\s+-rf`}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -393,6 +398,10 @@ func TestTokenDenylistTrimsServerDiscoverInstructions(t *testing.T) {
 	}
 	if !strings.Contains(instructions, "hosts_list") {
 		t.Fatalf("discover 提示词缺少仍允许的工具: %s", instructions)
+	}
+	// 令牌级策略也要经 discover 的 instructions 告诉模型“被拒不是连接失败”。
+	if !strings.Contains(instructions, "【命令策略】") {
+		t.Fatalf("discover 提示词缺少令牌级命令策略: %s", instructions)
 	}
 }
 

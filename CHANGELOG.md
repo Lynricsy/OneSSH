@@ -2,6 +2,16 @@
 
 本文件记录 OneSSH 的重要变更，格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [Unreleased]
+
+### 新增
+
+- 命令级策略：`ONESSH_COMMAND_POLICY=off|deny|allow` 配合 `ONESSH_COMMAND_DENY` / `ONESSH_COMMAND_ALLOW`（一行一条 Go 正则，非法正则与超限规则启动即报错，单列表上限 100 条、单条 512 字节，默认 `off` 保持现有行为）。判定同时覆盖命令原文、去首尾空白、NUL 截断前缀及其叠加形式，`^` 锚定的规则不会被前导换行或 NUL 填充绕过；白名单规则自动按整条命令锚定（`.` 不跨行，多行命令写 `(?s)`），`^git fetch` 只放行 `git fetch` 本身。`exec`、`exec_many`、`job_start` 在创建执行记录、取连接和 fan-out 之前判定，`exec_many` 整次调用全拒，`host_test` 固定执行的 `uptime` 同样判定；`session_env.set` 与 `job_start.env` 的敏感环境变量名一并限制（内置名单覆盖动态库劫持、解释器启动、git/sudo 配置注入等 30 键，`ONESSH_COMMAND_ENV_KEYS` 可追加），`exec` 每次执行前还会复查已有会话环境。令牌级策略在 WebUI 令牌页、OAuth 同意页与 REST 令牌接口中配置，只能收紧实例级策略，按逻辑 AND 组合，随请求编译一次缓存复用；`PUT /api/v1/tokens/{id}` 省略 `command_policy` 时保留原策略，显式 `{"mode":"off"}` 才清除。被拒调用不创建执行记录/后台任务，审计新增 `outcome=denied` 与 `deny_reason`，WebUI 活动页可单独筛选并展示拒绝原因，`instructions` 同步说明「被拒绝不是连接失败」。命令策略是误操作与明文 prompt injection 的护栏，不是沙箱；`file_write` 写环境文件劫持 `PATH` 的链路已在 README「命令策略」一节点明（[#32](https://github.com/Lynricsy/OneSSH/issues/32)）。
+
+### 安全
+
+- 审计结果新增持久化分类 `ok` / `failed` / `denied` 与拒绝原因：不再依赖错误文案区分「被网关策略拦下」与「真正执行失败」；迁移前历史记录保持 `outcome` 为空，筛选 `failed` 时仍会包含旧的 `ok=0` 记录。迁移 0016 对五列逐一幂等判存，手工补过列的库升级不会因 duplicate column 启动失败。
+
 ## [0.1.21] - 2026-11-01
 
 ### 新增

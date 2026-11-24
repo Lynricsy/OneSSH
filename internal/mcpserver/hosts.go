@@ -94,7 +94,7 @@ func (s *Server) registerHosts() {
 	register[HostRefInput, execx.Result](s, &mcp.Tool{
 		Name:        "host_test",
 		Title:       "测试主机连通性",
-		Description: "连接指定主机并执行只读的 uptime，验证网络、凭据与账号可用性，返回命令输出与退出码。首次连接会记录并固定该主机的公钥指纹（TOFU），之后指纹变化会导致连接被拒。可用于 hosts_list 之外的任意已配置主机。需要 manage_hosts 权限。",
+		Description: "连接指定主机并执行只读的 uptime，验证网络、凭据与账号可用性，返回命令输出与退出码。首次连接会记录并固定该主机的公钥指纹（TOFU），之后指纹变化会导致连接被拒。可用于 hosts_list 之外的任意已配置主机。需要 manage_hosts 权限。启用 allow 档命令策略时，白名单需放行 ^uptime$ 才能使用本工具。",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: new(false), IdempotentHint: false, OpenWorldHint: new(true)},
 	}, s.hostTest)
 	register[HostRefInput, OKOutput](s, &mcp.Tool{
@@ -177,6 +177,11 @@ func (s *Server) hostUpdate(ctx context.Context, _ *mcp.CallToolRequest, in Host
 func (s *Server) hostTest(ctx context.Context, _ *mcp.CallToolRequest, in HostRefInput) (*mcp.CallToolResult, execx.Result, error) {
 	if _, err := AuthorizedHostManagement(ctx); err != nil {
 		return errorResult(err.Error()), execx.Result{}, nil
+	}
+	// host_test 与 exec 是同一个执行面：uptime 虽是网关写死的命令，也要过命令策略，
+	// 不能给它留一个绕过白名单的执行入口；拒绝时同样不建立连接、不固定指纹。
+	if reason, denied := s.commandDenial(ctx, "uptime"); denied {
+		return deny(ctx, reason), execx.Result{}, nil
 	}
 	host, err := s.hostByName(ctx, in.Host)
 	if err != nil {

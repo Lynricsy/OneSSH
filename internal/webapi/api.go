@@ -16,11 +16,13 @@ import (
 	"mime"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"onessh/internal/cmdpolicy"
 	"onessh/internal/cryptox"
 	"onessh/internal/events"
 	"onessh/internal/execx"
@@ -339,6 +341,8 @@ type tokenInput struct {
 	ManageHosts   bool     `json:"manage_hosts"`
 	HostIDs       []int64  `json:"host_ids"`
 	DisabledTools []string `json:"disabled_tools"`
+	// 省略 command_policy 表示保留原策略；显式 {"mode":"off"} 才清除。
+	CommandPolicy *cmdpolicy.TokenPolicy `json:"command_policy"`
 }
 type tokenView struct {
 	store.Token
@@ -368,6 +372,20 @@ func normalizeTokenDisabledTools(names []string) ([]string, error) {
 	return normalized, nil
 }
 
+// normalizeTokenCommandPolicy 在写库前校验令牌命令策略。非法正则必须在这里就报错：
+// 存进去以后才在调用时失败，运维会以为策略已经生效。nil 表示请求未带该字段，
+// 更新时保留原策略，避免旧客户端静默清空安全配置。
+func normalizeTokenCommandPolicy(policy *cmdpolicy.TokenPolicy) (*cmdpolicy.TokenPolicy, error) {
+	if policy == nil {
+		return nil, nil
+	}
+	normalized, err := policy.Normalize()
+	if err != nil {
+		return nil, err
+	}
+	return &normalized, nil
+}
+
 func (a *API) tokens(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		list, err := a.Store.ListTokens(r.Context())
@@ -393,15 +411,24 @@ func (a *API) tokens(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, err)
 		return
 	}
+	commandPolicy, err := normalizeTokenCommandPolicy(in.CommandPolicy)
+	if err != nil {
+		apiError(w, 400, err)
+		return
+	}
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		apiError(w, 500, err)
 		return
 	}
 	plain := "osh_" + base64.RawURLEncoding.EncodeToString(raw)
+	var policyValue cmdpolicy.TokenPolicy
+	if commandPolicy != nil {
+		policyValue = *commandPolicy
+	}
 	t, err := a.Store.CreateToken(r.Context(), store.TokenCreate{
 		Name: in.Name, Hash: store.TokenHash(plain), AllHosts: in.AllHosts, ManageHosts: in.ManageHosts,
-		DisabledTools: disabled, HostIDs: in.HostIDs,
+		DisabledTools: disabled, CommandPolicy: policyValue, HostIDs: in.HostIDs,
 	})
 	if err != nil {
 		apiError(w, 409, err)
@@ -427,6 +454,11 @@ func (a *API) token(w http.ResponseWriter, r *http.Request) {
 			apiError(w, 400, err)
 			return
 		}
+		commandPolicy, err := normalizeTokenCommandPolicy(in.CommandPolicy)
+		if err != nil {
+			apiError(w, 400, err)
+			return
+		}
 		hostIDs := in.HostIDs
 		if in.AllHosts {
 			hostIDs = nil
@@ -439,7 +471,7 @@ func (a *API) token(w http.ResponseWriter, r *http.Request) {
 		}
 		t, err := a.Store.UpdateToken(r.Context(), id, store.TokenUpdate{
 			Name: in.Name, AllHosts: in.AllHosts, ManageHosts: in.ManageHosts,
-			HostIDs: hostIDs, DisabledTools: disabled,
+			HostIDs: hostIDs, DisabledTools: disabled, CommandPolicy: commandPolicy,
 		})
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -540,7 +572,15 @@ func (a *API) audit(w http.ResponseWriter, r *http.Request) {
 		}
 		ok = &value
 	}
-	list, err := a.Store.ListAudit(r.Context(), tids, hosts, tools, ok, before, limit)
+	// outcome 是 ok 位的细分：denied 表示被网关策略拦下，failed 表示真执行失败。
+	// 空值不过滤，兼容迁移前没有 outcome 的历史记录。
+	outcome := strings.TrimSpace(q.Get("outcome"))
+	outcomes := store.AuditOutcomes()
+	if outcome != "" && !slices.Contains(outcomes, outcome) {
+		apiError(w, http.StatusBadRequest, fmt.Errorf("outcome 只接受 %s", strings.Join(outcomes, "、")))
+		return
+	}
+	list, err := a.Store.ListAudit(r.Context(), tids, hosts, tools, ok, outcome, before, limit)
 	if err != nil {
 		apiError(w, http.StatusInternalServerError, err)
 		return

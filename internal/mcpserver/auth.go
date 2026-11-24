@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"onessh/internal/cmdpolicy"
 	"onessh/internal/store"
 )
 
@@ -16,6 +17,10 @@ type Principal struct {
 	Token store.Token
 	Hosts map[string]store.Host
 	Store *store.Store
+	// commandPolicy 是令牌策略在本次请求内的编译缓存：Bearer 中间件装载时编译一次，
+	// policyActive / commandDenial / envDenial 直接复用，不再各自重复编译同一批正则。
+	// nil 表示未经中间件装载（测试手工构造的 Principal），调用方退回现场编译。
+	commandPolicy *cmdpolicy.Policy
 }
 
 func FromContext(ctx context.Context) (Principal, bool) {
@@ -42,7 +47,13 @@ func Bearer(st *store.Store, resolve ResourceResolver, next http.Handler) http.H
 		for _, h := range hosts {
 			allowed[h.Name] = h
 		}
-		ctx := context.WithValue(r.Context(), principalKey{}, Principal{Token: token, Hosts: allowed, Store: st})
+		// 令牌策略在装载时编译一次，整次请求复用；库里解析不出来按 fail-closed 全拒，
+		// 与 policyLayers 的语义一致。
+		policy, err := token.CommandPolicy.Compile()
+		if err != nil {
+			policy = cmdpolicy.DenyAll()
+		}
+		ctx := context.WithValue(r.Context(), principalKey{}, Principal{Token: token, Hosts: allowed, Store: st, commandPolicy: &policy})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

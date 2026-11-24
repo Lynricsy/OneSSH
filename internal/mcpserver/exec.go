@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -77,6 +76,11 @@ func (s *Server) registerExec(runner *execx.Runner) {
 		if strings.TrimSpace(in.Command) == "" {
 			return errorResult("command 不能为空"), ExecOutput{}, nil
 		}
+		// 策略在取会话、建执行记录与取连接之前判定：
+		// 被拒绝的调用不应在命令历史里留下一条假执行。
+		if reason, denied := s.commandDenial(ctx, in.Command); denied {
+			return deny(ctx, reason), ExecOutput{}, nil
+		}
 		p, _ := FromContext(ctx)
 		label := in.Session
 		if label == "" {
@@ -85,6 +89,11 @@ func (s *Server) registerExec(runner *execx.Runner) {
 		state, err := s.Store.GetSession(ctx, p.Token.ID, h.ID, label)
 		if err != nil {
 			return nil, ExecOutput{}, err
+		}
+		// 会话环境可能是在策略启用前写入的：只校验 session_env.set 会留下既有的
+		// PATH/BASH_ENV 等值继续生效。执行前按当前策略复查一次，命中时要求先删除。
+		if key, denied := s.envDenial(ctx, envNames(state.Env)); denied {
+			return deny(ctx, fmt.Sprintf("会话中残留敏感环境变量 %s，请先用 session_env 删除后再执行", key)), ExecOutput{}, nil
 		}
 		run, err := s.startCommandRun(ctx, "exec", h, in.Command, state.Cwd, label)
 		if err != nil {
@@ -130,7 +139,8 @@ func (s *Server) registerExec(runner *execx.Runner) {
 		Name:  "session_env",
 		Title: "设置会话环境变量",
 		Description: "设置或删除某台主机某个持久 exec 会话的环境变量，返回该会话的全部环境变量。" +
-			"设置后每次 exec 都会先 export 这些变量，适合固定 PATH、代理、语言等；一次性变量直接写在 exec 命令里即可。" +
+			"设置后每次 exec 都会先 export 这些变量，适合固定代理、语言等配置；一次性变量直接写在 exec 命令里即可。" +
+			"启用命令策略时，PATH、BASH_ENV、LD_PRELOAD 等能改变命令解释方式的敏感变量会被拒绝。" +
 			"job_start 不读取会话环境，需要在它自己的 env 参数里单独传。不要在这里存放密码或令牌。",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(false)},
 	}, s.sessionEnv)
@@ -155,7 +165,7 @@ func (s *Server) registerExec(runner *execx.Runner) {
 func (s *Server) sessionEnv(ctx context.Context, _ *mcp.CallToolRequest, in SessionEnvInput) (*mcp.CallToolResult, SessionEnvOutput, error) {
 	h, err := AuthorizedHost(ctx, in.Host)
 	if err != nil {
-		return errorResult(err.Error()), SessionEnvOutput{}, nil
+		return errorResult(err.Error()), SessionEnvOutput{Env: map[string]string{}}, nil
 	}
 	p, _ := FromContext(ctx)
 	if in.Session == "" {
@@ -163,23 +173,29 @@ func (s *Server) sessionEnv(ctx context.Context, _ *mcp.CallToolRequest, in Sess
 	}
 	state, err := s.Store.GetSession(ctx, p.Token.ID, h.ID, in.Session)
 	if err != nil {
-		return nil, SessionEnvOutput{}, err
+		return nil, SessionEnvOutput{Env: map[string]string{}}, err
 	}
 	if state.Env == nil {
 		state.Env = map[string]string{}
 	}
-	valid := regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-	for k, v := range in.Set {
-		if !valid.MatchString(k) {
-			return errorResult(fmt.Sprintf("环境变量名无效: %s", k)), SessionEnvOutput{}, nil
+	for k := range in.Set {
+		if !execx.ValidEnvName(k) {
+			return errorResult(fmt.Sprintf("环境变量名无效: %s", k)), SessionEnvOutput{Env: state.Env}, nil
 		}
+	}
+	// 环境变量不改命令文本，却能改下一条命令的解释方式（PATH、BASH_ENV、LD_PRELOAD），
+	// 启用命令策略后这一条路径必须一起堵上，否则敏感键就是现成的绕过入口。
+	if key, denied := s.envDenial(ctx, envNames(in.Set)); denied {
+		return deny(ctx, fmt.Sprintf("敏感环境变量 %s 不允许通过会话修改", key)), SessionEnvOutput{Env: state.Env}, nil
+	}
+	for k, v := range in.Set {
 		state.Env[k] = v
 	}
 	for _, k := range in.Unset {
 		delete(state.Env, k)
 	}
 	if err := s.Store.SaveSession(ctx, state); err != nil {
-		return nil, SessionEnvOutput{}, err
+		return nil, SessionEnvOutput{Env: state.Env}, err
 	}
 	return nil, SessionEnvOutput{Env: state.Env}, nil
 }

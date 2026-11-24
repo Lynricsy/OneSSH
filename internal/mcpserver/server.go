@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"onessh/internal/cmdpolicy"
 	"onessh/internal/events"
 	"onessh/internal/execx"
 	"onessh/internal/files"
@@ -38,6 +39,7 @@ type Server struct {
 	Memory        *memoryx.Engine
 	apps          *appCatalog
 	disabledTools toolgroups.Disabled
+	command       *commandPolicy
 }
 
 // Options 收拢 New 的可调参数：按组关闭工具属于实例级配置，再往位置参数上堆会让调用点
@@ -53,17 +55,21 @@ type Options struct {
 	MCPApps bool
 	// DisabledTools 列出不对外暴露的工具组，同时决定服务器提示词里能提到哪些工具。
 	DisabledTools toolgroups.Disabled
+	// CommandPolicy 是实例级命令策略，零值（off）表示不检查，与升级前的行为一致。
+	CommandPolicy cmdpolicy.Policy
+	// CommandEnvKeys 在内置敏感环境变量之外额外拦截的键名。
+	CommandEnvKeys []string
 }
 
 func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanager.Manager, memory *memoryx.Engine, opts Options) *Server {
-	s := &Server{Store: st, Pool: pool, Events: bus, HostManager: hosts, Memory: memory, Exec: execx.New(opts.DataDir), disabledTools: opts.DisabledTools}
+	s := &Server{Store: st, Pool: pool, Events: bus, HostManager: hosts, Memory: memory, Exec: execx.New(opts.DataDir), disabledTools: opts.DisabledTools, command: newCommandPolicy(opts.CommandPolicy, opts.CommandEnvKeys)}
 	if err := st.RecoverInterruptedCommandRuns(context.Background(), time.Now().UnixMilli()); err != nil {
 		log.Printf("恢复中断的命令执行记录失败: %v", err)
 	}
 	s.Jobs = jobs.New(st, pool, s.Exec, bus)
 	s.Files = files.New(pool, s.Exec)
 	s.Monitor = monitor.New(st, pool, s.Exec, opts.PollInterval)
-	s.MCP = newProtocolServer(opts.PublicURL, serverInstructions(opts.DisabledTools))
+	s.MCP = newProtocolServer(opts.PublicURL, serverInstructions(opts.DisabledTools, opts.CommandPolicy.Active()))
 	// 卡片资产在编译期内嵌，组装失败只可能是资产本身有问题，属于必须立刻暴露的构建错误。
 	apps, err := newAppCatalog(opts.MCPApps, opts.DisabledTools)
 	if err != nil {
@@ -103,6 +109,21 @@ func New(st *store.Store, pool *sshpool.Pool, bus *events.Bus, hosts *hostmanage
 	s.installTokenDenylist()
 	if names := opts.DisabledTools.Names(); len(names) > 0 {
 		log.Printf("已禁用 MCP 工具组: %s", strings.Join(names, ","))
+	}
+	// 策略配置了两个容易自己把自己坑住的形态，启动时直接说清楚，
+	// 不要等运维发现「命令全被拒」或「一条也没拦住」再回来查。
+	if opts.CommandPolicy.Active() {
+		log.Printf("已启用命令策略: %s（拒绝规则 %d 条、白名单 %d 条）", opts.CommandPolicy.Mode, len(opts.CommandPolicy.Deny), len(opts.CommandPolicy.Allow))
+		if opts.CommandPolicy.Mode == cmdpolicy.Allow && len(opts.CommandPolicy.Allow) == 0 {
+			log.Printf("命令策略为 allow 但白名单为空：所有命令都会被拒绝")
+		}
+	} else {
+		if opts.CommandPolicy.Mode == cmdpolicy.Deny && len(opts.CommandPolicy.Deny) == 0 {
+			log.Printf("命令策略为 deny 但拒绝规则为空：等同于 off")
+		}
+		if len(opts.CommandPolicy.Deny) > 0 || len(opts.CommandPolicy.Allow) > 0 {
+			log.Printf("命令策略未启用（档位为空或 off）：已配置的规则不会生效")
+		}
 	}
 	s.Monitor.Start(context.Background())
 	s.Jobs.StartMaintenance(context.Background())
@@ -149,6 +170,10 @@ func register[In, Out any](s *Server, tool *mcp.Tool, handler mcp.ToolHandlerFor
 	s.apps.decorate(tool)
 	mcp.AddTool(s.MCP, tool, func(ctx context.Context, req *mcp.CallToolRequest, in In) (result *mcp.CallToolResult, out Out, err error) {
 		started := time.Now()
+		// 策略拒绝的原因要能进入下面的持久审计：工具结果只能表达失败，
+		// WebUI 不能靠错误文案区分「被拒」与「真跑挂了」。
+		policyDenial := &denial{}
+		ctx = context.WithValue(ctx, denialKey{}, policyDenial)
 		result, out, err = handler(ctx, req, in)
 		ok := err == nil && (result == nil || !result.IsError)
 		var exitCode *int64
@@ -158,7 +183,14 @@ func register[In, Out any](s *Server, tool *mcp.Tool, handler mcp.ToolHandlerFor
 		params := redactedJSON(in)
 		host := hostOf(in)
 		p, _ := FromContext(ctx)
-		a := store.Audit{Ts: store.NowAudit(), Tool: tool.Name, ParamsJSON: params, OK: ok, DurationMS: time.Since(started).Milliseconds()}
+		a := store.Audit{Ts: store.NowAudit(), Tool: tool.Name, ParamsJSON: params, OK: ok, DurationMS: time.Since(started).Milliseconds(), Outcome: store.AuditOutcomeOK}
+		if !ok {
+			a.Outcome = store.AuditOutcomeFailed
+		}
+		if policyDenial.reason != "" {
+			a.Outcome = store.AuditOutcomeDenied
+			a.DenyReason = policyDenial.reason
+		}
 		if p.Token.ID != 0 {
 			a.TokenID = sql.NullInt64{Int64: p.Token.ID, Valid: true}
 			a.TokenName = sql.NullString{String: p.Token.Name, Valid: true}
@@ -177,6 +209,9 @@ func register[In, Out any](s *Server, tool *mcp.Tool, handler mcp.ToolHandlerFor
 		}
 		_ = s.Store.AddAudit(context.Background(), a)
 		event := map[string]any{"tool": tool.Name, "host": host, "ok": ok, "duration_ms": a.DurationMS}
+		if policyDenial.reason != "" {
+			event["denied"] = true
+		}
 		if summary := callSummary(in); summary != "" {
 			event["summary"] = summary
 		}

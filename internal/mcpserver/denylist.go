@@ -32,7 +32,9 @@ func (s *Server) installTokenDenylist() {
 	s.MCP.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 			disabled := s.effectiveDisabled(ctx)
-			if len(disabled) == 0 {
+			// 令牌级命令策略也要参与提示词：被拒时模型需要知道那不是连接故障。
+			commandPolicy := s.policyActive(ctx)
+			if len(disabled) == 0 && !commandPolicy {
 				return next(ctx, method, req)
 			}
 			switch method {
@@ -40,17 +42,17 @@ func (s *Server) installTokenDenylist() {
 				name := callToolName(req)
 				// 解析不出工具名时 fail-closed：有 denylist 生效就不能放行空名绕过。
 				if name == "" {
-					s.auditDeniedTool(ctx, "(unparseable)")
+					s.auditDeniedTool(ctx, "(unparseable)", "工具名无法解析")
 					return errorResult("tool not authorized"), nil
 				}
 				if disabled.HidesTool(name) {
-					s.auditDeniedTool(ctx, name)
+					s.auditDeniedTool(ctx, name, "工具组已禁用")
 					return errorResult("tool not authorized: " + name), nil
 				}
 			case "resources/read":
 				if uri := readResourceURI(req); uri != "" {
 					if tool, ok := s.apps.toolNameForURI(uri); ok && disabled.HidesTool(tool) {
-						s.auditDeniedTool(ctx, tool)
+						s.auditDeniedTool(ctx, tool, "工具组已禁用")
 						return nil, mcp.ResourceNotFoundError(uri)
 					}
 				}
@@ -62,12 +64,12 @@ func (s *Server) installTokenDenylist() {
 			switch method {
 			case "initialize":
 				if initResult, ok := result.(*mcp.InitializeResult); ok && initResult != nil {
-					initResult.Instructions = serverInstructions(disabled)
+					initResult.Instructions = serverInstructions(disabled, commandPolicy)
 				}
 			case "server/discover":
 				// SEP-2575：现代客户端用 discover 代替 initialize 拿 instructions。
 				if discovered, ok := result.(*mcp.DiscoverResult); ok && discovered != nil {
-					discovered.Instructions = serverInstructions(disabled)
+					discovered.Instructions = serverInstructions(disabled, commandPolicy)
 				}
 			case "tools/list":
 				if listed, ok := result.(*mcp.ListToolsResult); ok && listed != nil {
@@ -162,7 +164,7 @@ func filterTemplates(templates []*mcp.ResourceTemplate, disabled toolgroups.Disa
 	return out
 }
 
-func (s *Server) auditDeniedTool(ctx context.Context, toolName string) {
+func (s *Server) auditDeniedTool(ctx context.Context, toolName, reason string) {
 	if s.Store == nil {
 		return
 	}
@@ -171,6 +173,10 @@ func (s *Server) auditDeniedTool(ctx context.Context, toolName string) {
 		Tool:       toolName,
 		ParamsJSON: "{}",
 		OK:         false,
+		// 工具组被关掉也是一次策略拒绝：与命令策略共用同一套 outcome，
+		// WebUI 不必为两种「被拒」各写一套判断。
+		Outcome:    store.AuditOutcomeDenied,
+		DenyReason: reason,
 	}
 	if p, ok := FromContext(ctx); ok && p.Token.ID != 0 {
 		a.TokenID = sql.NullInt64{Int64: p.Token.ID, Valid: true}

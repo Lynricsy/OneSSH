@@ -62,6 +62,11 @@ func (s *Server) registerFanout() {
 		if strings.TrimSpace(in.Command) == "" {
 			return errorResult("command 不能为空"), ExecManyOutput{}, nil
 		}
+		// 整次调用先判定：要么全部主机跑，要么一台都不跑。
+		// 按主机部分执行会让「被拦的命令已经在 3 台机器上跑过了」变成常态，审计也说不清边界。
+		if reason, denied := s.commandDenial(ctx, in.Command); denied {
+			return deny(ctx, reason), ExecManyOutput{}, nil
+		}
 		return nil, s.execMany(ctx, in), nil
 	})
 }

@@ -5,6 +5,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
 import { useCreateToken, useDeleteToken, useDeleteTokens, useHosts, useTokens, useToolGroups, useUpdateToken } from '@/api/queries'
 import type { Host, Token, TokenPayload, ToolGroup } from '@/api/types'
+import { CommandPolicyFields } from '@/components/command-policy-fields'
 import { ConfirmDialog } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -24,6 +25,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/cn'
 import { formatTime } from '@/lib/format'
+import {
+  commandPolicyActive,
+  commandPolicyFromForm,
+  commandPolicySummary,
+  commandPolicyToForm,
+  defaultCommandPolicyForm,
+  type CommandPolicyFormValues,
+} from '@/lib/command-policy'
 
 type TokenFormValues = {
   name: string
@@ -31,6 +40,7 @@ type TokenFormValues = {
   manage_hosts: boolean
   host_ids: number[]
   disabled_tools: string[]
+  command_policy: CommandPolicyFormValues
 }
 
 const defaultValues: TokenFormValues = {
@@ -39,6 +49,7 @@ const defaultValues: TokenFormValues = {
   manage_hosts: false,
   host_ids: [],
   disabled_tools: [],
+  command_policy: defaultCommandPolicyForm,
 }
 
 /**
@@ -88,6 +99,14 @@ function TokenPermissions({ token, hosts }: { token: Token; hosts: Host[] | unde
       {disabled.length > 0 && (
         <Badge variant="outline" title={`禁用工具组：${disabled.join('、')}`}>
           禁用 {disabled.length} 组
+        </Badge>
+      )}
+      {commandPolicyActive(token.command_policy) && (
+        <Badge
+          variant="warning"
+          title={`令牌级命令策略只能收紧实例策略：${commandPolicySummary(token.command_policy)}`}
+        >
+          命令策略 {token.command_policy?.mode} · {commandPolicySummary(token.command_policy)}
         </Badge>
       )}
     </div>
@@ -224,6 +243,12 @@ function TokenFormFields({ form, idPrefix, hosts, toolGroups }: TokenFormFieldsP
           />
         )}
       </Field>
+
+      <Controller
+        name="command_policy"
+        control={control}
+        render={({ field }) => <CommandPolicyFields value={field.value} onChange={field.onChange} />}
+      />
     </>
   )
 }
@@ -263,6 +288,7 @@ export function TokensPage() {
     manage_hosts: values.manage_hosts,
     host_ids: values.all_hosts ? undefined : values.host_ids,
     disabled_tools: values.disabled_tools,
+    command_policy: commandPolicyFromForm(values.command_policy),
   })
 
   const create = async (values: TokenFormValues) => {
@@ -280,6 +306,7 @@ export function TokensPage() {
       manage_hosts: token.manage_hosts,
       host_ids: token.host_ids ?? [],
       disabled_tools: token.disabled_tools ?? [],
+      command_policy: commandPolicyToForm(token.command_policy),
     })
     setEditing(token)
   }
