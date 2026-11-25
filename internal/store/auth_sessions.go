@@ -278,6 +278,16 @@ func (s *Store) TokenHostIDs(ctx context.Context, id int64) ([]int64, error) {
 	return out, rows.Err()
 }
 
+// TokenHasHost 判断令牌的显式授权列表中是否包含指定主机（忽略归档状态）。
+func (s *Store) TokenHasHost(ctx context.Context, tokenID, hostID int64) (bool, error) {
+	var one int
+	err := s.DB.QueryRowContext(ctx, `SELECT 1 FROM token_hosts WHERE token_id=? AND host_id=? LIMIT 1`, tokenID, hostID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (s *Store) GetSession(ctx context.Context, tokenID, hostID int64, label string) (Session, error) {
 	var x Session
 	var raw string

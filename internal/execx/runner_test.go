@@ -235,3 +235,58 @@ func TestReadCommandOutputPreservesUTF8AcrossPages(t *testing.T) {
 		t.Fatalf("二进制分页结果异常: offset=%d output=%q", offset, output.String())
 	}
 }
+
+func TestArtifactOwnershipAndCleanup(t *testing.T) {
+	dataDir := t.TempDir()
+	runner := New(dataDir)
+	id := uuid.NewString()
+	logPath, err := runner.ArtifactPath(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(logPath, []byte("secret-line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 缺少 .owner 归属文件时必须 fail-closed 拒绝。
+	if _, err = runner.ArtifactPathForToken(id, 42); err == nil {
+		t.Fatal("缺少归属文件的 artifact 不应放行")
+	}
+
+	if err = runner.WriteArtifactOwner(id, 42); err != nil {
+		t.Fatal(err)
+	}
+	gotPath, err := runner.ArtifactPathForToken(id, 42)
+	if err != nil || gotPath != logPath {
+		t.Fatalf("归属令牌读取失败: path=%q err=%v", gotPath, err)
+	}
+	if _, err = runner.ArtifactPathForToken(id, 99); err == nil {
+		t.Fatal("跨令牌读取 artifact 应被拒绝")
+	}
+	if _, err = runner.ArtifactPathForToken(id, 0); err == nil {
+		t.Fatal("无效令牌 ID 不应放行")
+	}
+
+	// 过期清理应同时删除 .log 与 .owner。
+	oldTime := time.Now().Add(-8 * 24 * time.Hour)
+	ownerPath := strings.TrimSuffix(logPath, ".log") + ".owner"
+	if err = os.Chtimes(logPath, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chtimes(ownerPath, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := runner.CleanupArtifacts(time.Now().Add(-7 * 24 * time.Hour))
+	if err != nil || removed != 1 {
+		t.Fatalf("CleanupArtifacts = %d, %v; want 1, nil", removed, err)
+	}
+	if _, err = os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("过期 .log 未清理: %v", err)
+	}
+	if _, err = os.Stat(ownerPath); !os.IsNotExist(err) {
+		t.Fatalf("过期 .owner 未清理: %v", err)
+	}
+}

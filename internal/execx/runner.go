@@ -22,11 +22,12 @@ import (
 const captureLimit = 256 << 10
 
 type Options struct {
-	Timeout   time.Duration
-	MaxLines  int
-	Tail      bool
-	CaptureID string
-	OnOutput  func(stream string, chunk []byte)
+	Timeout      time.Duration
+	MaxLines     int
+	Tail         bool
+	CaptureID    string
+	OwnerTokenID int64
+	OnOutput     func(stream string, chunk []byte)
 }
 type Result struct {
 	Stdout             string `json:"stdout"`
@@ -61,25 +62,36 @@ func (r *Runner) CleanupArtifacts(cutoff time.Time) (int, error) {
 	removed := 0
 	var cleanupErr error
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".log" {
+		if entry.IsDir() {
 			continue
 		}
-		if _, err := uuid.Parse(strings.TrimSuffix(entry.Name(), ".log")); err != nil {
+		name := entry.Name()
+		ext := filepath.Ext(name)
+		if ext != ".log" && ext != ".owner" {
+			continue
+		}
+		id := strings.TrimSuffix(name, ext)
+		if _, err := uuid.Parse(id); err != nil {
 			continue
 		}
 		info, err := entry.Info()
 		if err != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("读取 artifact %s: %w", entry.Name(), err))
+			if !os.IsNotExist(err) {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("读取 artifact %s: %w", name, err))
+			}
 			continue
 		}
 		if !info.ModTime().Before(cutoff) {
 			continue
 		}
-		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("删除 artifact %s: %w", entry.Name(), err))
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("删除 artifact %s: %w", name, err))
 			continue
 		}
-		removed++
+		if ext == ".log" {
+			_ = os.Remove(filepath.Join(dir, id+".owner"))
+			removed++
+		}
 	}
 	return removed, cleanupErr
 }
@@ -390,6 +402,12 @@ func (r *Runner) Run(ctx context.Context, client *ssh.Client, command, cwd strin
 		if err != nil {
 			return res, err
 		}
+		if opt.OwnerTokenID > 0 {
+			if ownerErr := r.WriteArtifactOwner(id, opt.OwnerTokenID); ownerErr != nil {
+				_ = os.Remove(artifactPath)
+				return res, ownerErr
+			}
+		}
 		res.ArtifactID = id
 	}
 	if waitErr != nil && !parsed && !timedOut {
@@ -542,6 +560,42 @@ func (r *Runner) ArtifactPath(id string) (string, error) {
 		return "", fmt.Errorf("artifact_id 无效")
 	}
 	return filepath.Join(r.dataDir, "artifacts", id+".log"), nil
+}
+
+// WriteArtifactOwner 记录 artifact 所属的令牌 ID，供 output_read 读取时做归属校验。
+func (r *Runner) WriteArtifactOwner(id string, tokenID int64) error {
+	if _, err := uuid.Parse(id); err != nil {
+		return fmt.Errorf("artifact_id 无效")
+	}
+	if tokenID <= 0 {
+		return fmt.Errorf("无效的令牌归属")
+	}
+	dir := filepath.Join(r.dataDir, "artifacts")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, id+".owner"), []byte(strconv.FormatInt(tokenID, 10)), 0o600)
+}
+
+// ArtifactPathForToken 校验 artifact 归属于指定令牌并返回其路径。
+// 缺少或损坏归属文件时按 fail-closed 拒绝，并与不存在使用同一错误文案，避免探测他人 UUID。
+func (r *Runner) ArtifactPathForToken(id string, tokenID int64) (string, error) {
+	path, err := r.ArtifactPath(id)
+	if err != nil {
+		return "", err
+	}
+	if tokenID <= 0 {
+		return "", fmt.Errorf("artifact 已过期或不存在")
+	}
+	raw, err := os.ReadFile(strings.TrimSuffix(path, ".log") + ".owner")
+	if err != nil {
+		return "", fmt.Errorf("artifact 已过期或不存在")
+	}
+	ownerID, err := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64)
+	if err != nil || ownerID != tokenID {
+		return "", fmt.Errorf("artifact 已过期或不存在")
+	}
+	return path, nil
 }
 
 func (r *Runner) CommandOutputPath(id, stream string) (string, error) {

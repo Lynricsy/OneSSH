@@ -2,8 +2,6 @@ package mcpserver
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -74,13 +72,18 @@ func AuthorizedHost(ctx context.Context, name string) (store.Host, error) {
 	if h, ok := p.Hosts[name]; ok {
 		return h, nil
 	}
+	// 仅对当前令牌确实被授权但已归档的主机返回明确归档提示；
+	// 不存在、未授权（含未授权的已归档主机）统一返回 host not authorized，
+	// 避免任意 Bearer 令牌枚举网关内的主机名。
 	if p.Store != nil {
-		h, err := p.Store.GetHostByName(ctx, name)
-		if errors.Is(err, sql.ErrNoRows) {
-			return store.Host{}, toolError("unknown host: " + name)
-		}
-		if err == nil && h.ArchivedAt.Valid {
-			return store.Host{}, toolError("host archived: " + name + "（主机已归档，需管理员在控制台取消归档）")
+		if h, err := p.Store.GetHostByName(ctx, name); err == nil && h.ArchivedAt.Valid {
+			authorized := p.Token.AllHosts
+			if !authorized && p.Token.ID != 0 {
+				authorized, _ = p.Store.TokenHasHost(ctx, p.Token.ID, h.ID)
+			}
+			if authorized {
+				return store.Host{}, toolError("host archived: " + name + "（主机已归档，需管理员在控制台取消归档）")
+			}
 		}
 	}
 	return store.Host{}, toolError("host not authorized: " + name)

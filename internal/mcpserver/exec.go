@@ -120,7 +120,7 @@ func (s *Server) registerExec(runner *execx.Runner) {
 		publisher := newCommandOutputPublisher(s, run)
 		res, err := runner.Run(ctx, client, in.Command, state.Cwd, state.Env, execx.Options{
 			Timeout: time.Duration(timeout) * time.Second, MaxLines: max, Tail: in.Tail,
-			CaptureID: run.ID, OnOutput: publisher.Publish,
+			CaptureID: run.ID, OwnerTokenID: p.Token.ID, OnOutput: publisher.Publish,
 		})
 		publisher.Finish()
 		if finishErr := s.finishCommandRun(ctx, run, res, err); finishErr != nil {
@@ -151,7 +151,11 @@ func (s *Server) registerExec(runner *execx.Runner) {
 			"artifact 保留 7 天，过期后返回错误，此时重新执行命令即可。",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(false)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in OutputReadInput) (*mcp.CallToolResult, OutputReadOutput, error) {
-		path, err := runner.ArtifactPath(in.ArtifactID)
+		p, ok := FromContext(ctx)
+		if !ok || p.Token.ID == 0 {
+			return errorResult("unauthorized"), OutputReadOutput{}, nil
+		}
+		path, err := runner.ArtifactPathForToken(in.ArtifactID, p.Token.ID)
 		if err != nil {
 			return errorResult(err.Error()), OutputReadOutput{}, nil
 		}
