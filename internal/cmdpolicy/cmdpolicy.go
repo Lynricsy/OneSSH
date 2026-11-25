@@ -74,8 +74,8 @@ func (r Rule) matchForms(forms []string) bool {
 // 以及截断前缀去首尾空白的形式（后三者仅在与原文不同时收录）。sshd 把远端命令
 // 交给用户 shell 时按 C 字符串解释，`"rm -rf /\x00echo ok"` 实际执行的是
 // `"rm -rf /"`；shell 对 `"\nrm -rf /"` 与 `"rm -rf /"` 的解释也完全相同。
-// 只匹配原文时，`^` 锚定的规则会被前导换行或 NUL 填充绕过——这恰是模型生成
-// 命令最常见的形态。文档语义是「首尾空白、NUL 及其后的内容不参与匹配」；
+// 拒绝规则只匹配原文时，`^` 锚定的规则会被前导换行或 NUL 填充绕过——这恰是模型生成
+// 命令最常见的形态；白名单模式则直接拒绝含 NUL 字节的畸形命令，不走截断前缀放行。
 // Check 对每条命令求值一次，多条规则共用同一组形式，避免逐规则重复扫描。
 func commandForms(command string) []string {
 	prefix := command
@@ -193,6 +193,7 @@ func DenyAll() Policy { return Policy{Mode: Allow} }
 // 把档位切到 off 后，配置里遗留的规则必须立即失效。
 func Check(layers []Layer, command string) Decision {
 	forms := commandForms(command)
+	hasNUL := strings.IndexByte(command, 0) >= 0
 	for _, layer := range layers {
 		if !layer.Policy.Active() {
 			continue
@@ -209,6 +210,11 @@ func Check(layers []Layer, command string) Decision {
 		}
 		if len(layer.Policy.Allow) == 0 {
 			return Decision{Denied: true, Reason: layer.Scope + "白名单为空，拒绝全部命令"}
+		}
+		// 白名单模式不放行含 NUL 字节的命令：远端执行脚本包裹在 `{ ... }` 内，
+		// NUL 截断会破坏脚本结构且非标准实现可能不截断，宁可拒绝也不按截断前缀放行。
+		if hasNUL {
+			return Decision{Denied: true, Reason: layer.Scope + "白名单拒绝含 NUL 字节的命令"}
 		}
 		matched := false
 		for _, rule := range layer.Policy.Allow {
@@ -246,25 +252,26 @@ var builtinSensitiveEnvKeys = []string{
 	"PYTHONPATH",
 	"PYTHONHOME", // 劫持标准库路径
 	"PERL5OPT",
-	"PERL5LIB",          // PERL5OPT 的同族
-	"RUBYOPT",           // -r 加载任意库
-	"NODE_OPTIONS",      // --require 可加载任意 JS
-	"GIT_SSH",           // git 走哪个 ssh
-	"GIT_SSH_COMMAND",   //
-	"GIT_EXEC_PATH",     // 换掉 git 子命令的二进制查找路径
-	"GIT_CONFIG_GLOBAL", // git 配置注入：core.pager / diff.external 都能执行命令
-	"GIT_CONFIG_SYSTEM", //
-	"GIT_CONFIG_COUNT",  // GIT_CONFIG_KEY_n/VALUE_n 的开关，单独拦编号键没有意义
-	"RUBYLIB",           // 改 Ruby 库搜索路径
-	"JAVA_TOOL_OPTIONS", // JVM 参数注入，可启用 -javaagent
-	"_JAVA_OPTIONS",     // 同上，老变量
-	"JDK_JAVA_OPTIONS",  // 同上，JDK 9+ 变量
-	"SSH_ASKPASS",       //
-	"SUDO_ASKPASS",      // 配合 sudo -A 执行任意取密程序
-	"OPENSSL_CONF",      // 劫持 openssl 行为
-	"SSL_CERT_FILE",     // 换掉证书校验
-	"HOSTALIASES",       // glibc 主机别名文件，改写解析结果
-	"BASH_XTRACEFD",     // xtrace 重定向到任意 fd
+	"PERL5LIB",              // PERL5OPT 的同族
+	"RUBYOPT",               // -r 加载任意库
+	"NODE_OPTIONS",          // --require 可加载任意 JS
+	"GIT_SSH",               // git 走哪个 ssh
+	"GIT_SSH_COMMAND",       //
+	"GIT_EXEC_PATH",         // 换掉 git 子命令的二进制查找路径
+	"GIT_CONFIG_GLOBAL",     // git 配置注入：core.pager / diff.external 都能执行命令
+	"GIT_CONFIG_SYSTEM",     //
+	"GIT_CONFIG_COUNT",      // GIT_CONFIG_KEY_n/VALUE_n 的开关，单独拦编号键没有意义
+	"GIT_CONFIG_PARAMETERS", // git -c 的环境变量形式，不写配置文件也能注入 core.fsmonitor / diff.external 等执行命令的配置
+	"RUBYLIB",               // 改 Ruby 库搜索路径
+	"JAVA_TOOL_OPTIONS",     // JVM 参数注入，可启用 -javaagent
+	"_JAVA_OPTIONS",         // 同上，老变量
+	"JDK_JAVA_OPTIONS",      // 同上，JDK 9+ 变量
+	"SSH_ASKPASS",           //
+	"SUDO_ASKPASS",          // 配合 sudo -A 执行任意取密程序
+	"OPENSSL_CONF",          // 劫持 openssl 行为
+	"SSL_CERT_FILE",         // 换掉证书校验
+	"HOSTALIASES",           // glibc 主机别名文件，改写解析结果
+	"BASH_XTRACEFD",         // xtrace 重定向到任意 fd
 }
 
 // SensitiveEnv 返回敏感环境变量名集合：内置键加上运维显式追加的键，统一大写比较。

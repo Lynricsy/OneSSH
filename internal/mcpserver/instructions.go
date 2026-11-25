@@ -87,7 +87,7 @@ func serverInstructions(disabled toolgroups.Disabled, commandPolicy bool) string
 	// 这段只在策略启用时出现，默认 off 时提示词与升级前保持一致。
 	// hosts 组也要算：host_test 的 uptime 同样过策略，只开 hosts 时模型也需要拒绝指引。
 	if commandPolicy && (on(toolgroups.Exec) || on(toolgroups.Jobs) || on(toolgroups.Fanout) || on(toolgroups.Hosts)) {
-		policy := "【命令策略】网关已启用命令策略：命中的命令在送到主机之前就被拒绝，返回“网关命令策略拒绝了本次调用”。这是策略拦截，不是主机连不上、也不是权限不足——原样重试不会成功，不要把它当连接故障去反复重连，也不要换 session 重发同一条命令；换一条不含被禁模式的命令，或告知用户由管理员调整策略。策略匹配命令原文及其去首尾空白、按 NUL 截断后的形式，以及环境变量名，不做 shell 解析。"
+		policy := "【命令策略】网关已启用命令策略：命中的命令在送到主机之前就被拒绝，返回“网关命令策略拒绝了本次调用”。这是策略拦截，不是主机连不上、也不是权限不足——原样重试不会成功，不要把它当连接故障去反复重连，也不要换 session 重发同一条命令；换一条不含被禁模式的命令，或告知用户由管理员调整策略。拒绝规则匹配命令原文及其去首尾空白、按 NUL 截断后的形式，白名单要求整条命令匹配且不接受含 NUL 字节的命令；策略同时校验环境变量名，不做 shell 解析。"
 		// 提示词只能提到当前实际暴露的工具：只开 fanout 时没有 session_env，
 		// 只开 jobs 时也没有 session_env，写进去会让模型反复调用不存在的工具。
 		var envPaths []string

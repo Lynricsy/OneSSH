@@ -171,7 +171,7 @@ func TestAllowRulesMatchWholeCommand(t *testing.T) {
 }
 
 // 回归：sshd 按 C 字符串解释远端命令，`"rm -rf /\x00echo ok"` 实际执行 `"rm -rf /"`，
-// NUL 填充不能绕过 `^` 锚定的规则；白名单按 NUL 截断前缀判定也与实际执行一致。
+// NUL 填充不能绕过 `^` 锚定的拒绝规则；白名单模式则直接拒绝含 NUL 字节的命令，不按截断前缀放行。
 func TestCheckMatchesNulTruncatedCommand(t *testing.T) {
 	deny := mustParse(t, "deny", []string{`^rm\s+-rf\s+/$`}, nil)
 	if got := Check([]Layer{{Scope: "实例", Policy: deny}}, "rm -rf /\x00echo ok"); !got.Denied {
@@ -181,8 +181,17 @@ func TestCheckMatchesNulTruncatedCommand(t *testing.T) {
 		t.Fatalf("空白加 NUL 的叠加形式同样不应绕过: %#v", got)
 	}
 	allow := mustParse(t, "allow", nil, []string{`^uptime$`})
-	if got := Check([]Layer{{Scope: "实例", Policy: allow}}, "  uptime\x00junk"); got.Denied {
-		t.Fatalf("NUL 截断前缀命中白名单不应拒绝（远端只执行 uptime）: %#v", got)
+	if got := Check([]Layer{{Scope: "实例", Policy: allow}}, "  uptime\x00junk"); !got.Denied || !strings.Contains(got.Reason, "NUL") {
+		t.Fatalf("白名单模式应拒绝含 NUL 字节的命令: %#v", got)
+	}
+	allowAll := mustParse(t, "allow", nil, []string{`(?s).*`})
+	if got := Check([]Layer{{Scope: "实例", Policy: allowAll}}, "uptime\x00junk"); !got.Denied || !strings.Contains(got.Reason, "NUL") {
+		t.Fatalf("通配白名单同样不应放行含 NUL 字节的命令: %#v", got)
+	}
+	// allow 模式下拒绝规则仍优先：命中 deny 的含 NUL 命令应先指向拒绝规则。
+	both := mustParse(t, "allow", []string{`^rm\s+-rf\s+/$`}, []string{`(?s).*`})
+	if got := Check([]Layer{{Scope: "实例", Policy: both}}, "rm -rf /\x00echo ok"); !got.Denied || !strings.Contains(got.Reason, "拒绝规则命中") {
+		t.Fatalf("allow 模式下拒绝规则应优先于 NUL 拒绝: %#v", got)
 	}
 	// 负向：截断前缀不命中时必须放行，prefix 匹配不能退化成前缀模糊匹配。
 	if got := Check([]Layer{{Scope: "实例", Policy: deny}}, "rm -rfx /\x00y"); got.Denied {
@@ -351,7 +360,7 @@ func TestSensitiveEnvAndEnvDenial(t *testing.T) {
 	for _, key := range []string{
 		"PATH", "BASH_ENV", "LD_PRELOAD", "LD_AUDIT", "GCONV_PATH",
 		"NODE_OPTIONS", "PYTHONHOME", "PYTHONPATH", "PERL5LIB", "RUBYOPT", "RUBYLIB",
-		"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_COUNT", "GIT_EXEC_PATH",
+		"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_EXEC_PATH",
 		"JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS",
 		"SUDO_ASKPASS", "OPENSSL_CONF", "SSL_CERT_FILE", "HOSTALIASES", "BASH_XTRACEFD",
 	} {

@@ -537,3 +537,117 @@ func TestTokenDenylistHidesLegacyAppTemplateWhenNoAppsRemain(t *testing.T) {
 		}
 	}
 }
+
+// 回归：denylist 生效时，空工具名 tools/call 必须 fail-closed 拒绝并记入 denied 审计；
+// 仅启用命令策略（无禁用工具组）时，空工具名畸形请求照旧落回 SDK 分发，不混入策略拒绝审计。
+func TestEmptyToolNameDenylistVsCommandPolicy(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	server := newTestServer(t, Options{MCPApps: true, SearchHelper: true})
+	st := server.Store
+	disabledTok, err := st.CreateToken(ctx, store.TokenCreate{
+		Name: "disabled-empty-tool", Hash: store.TokenHash("secret-empty-disabled"), AllHosts: true,
+		DisabledTools: []string{"memory"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policyOnlyTok, err := st.CreateToken(ctx, store.TokenCreate{
+		Name: "policy-only-empty-tool", Hash: store.TokenHash("secret-empty-policy"), AllHosts: true,
+		CommandPolicy: cmdpolicy.TokenPolicy{Mode: "deny", Deny: []string{`rm\s+-rf`}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resolve := func(*http.Request) (string, string) {
+		return "https://onessh.example/mcp", "https://onessh.example/.well-known/oauth-protected-resource/mcp"
+	}
+	httpServer := httptest.NewServer(Handler(st, server, resolve))
+	t.Cleanup(httpServer.Close)
+
+	callEmptyTool := func(token string) (int, []byte) {
+		t.Helper()
+		body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":""}}`
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, httpServer.URL, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		raw, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload := raw
+		if i := bytes.Index(raw, []byte("data: ")); i >= 0 {
+			payload = raw[i+len("data: "):]
+			if j := bytes.IndexByte(payload, '\n'); j >= 0 {
+				payload = payload[:j]
+			}
+		}
+		return resp.StatusCode, payload
+	}
+
+	t.Run("禁用工具组时空工具名 fail-closed 并写入 denied 审计", func(t *testing.T) {
+		status, payload := callEmptyTool("secret-empty-disabled")
+		if status != http.StatusOK {
+			t.Fatalf("status = %d body = %s", status, payload)
+		}
+		var rpc struct {
+			Result *mcp.CallToolResult `json:"result"`
+			Error  *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(payload, &rpc); err != nil {
+			t.Fatalf("unmarshal %q: %v", payload, err)
+		}
+		if rpc.Error != nil {
+			t.Fatalf("应返回工具级拒绝而不是 JSON-RPC error: %#v", rpc.Error)
+		}
+		if rpc.Result == nil || !rpc.Result.IsError || !strings.Contains(toolText(rpc.Result), "tool not authorized") {
+			t.Fatalf("预期 tool not authorized，实际 %#v", rpc.Result)
+		}
+		rows, err := st.ListAudit(ctx, []int64{disabledTok.ID}, nil, nil, nil, store.AuditOutcomeDenied, 0, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 1 || rows[0].Tool != "(unparseable)" || rows[0].Outcome != store.AuditOutcomeDenied || rows[0].DenyReason != "工具名无法解析" {
+			t.Fatalf("预期写入 (unparseable) 的 denied 审计，实际 %#v", rows)
+		}
+	})
+
+	t.Run("仅开命令策略时空工具名落回 SDK 报错且不写审计", func(t *testing.T) {
+		status, payload := callEmptyTool("secret-empty-policy")
+		if status != http.StatusOK {
+			t.Fatalf("status = %d body = %s", status, payload)
+		}
+		var rpc struct {
+			Result *mcp.CallToolResult `json:"result"`
+			Error  *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(payload, &rpc); err != nil {
+			t.Fatalf("unmarshal %q: %v", payload, err)
+		}
+		if rpc.Error == nil || !strings.Contains(strings.ToLower(rpc.Error.Message), "unknown tool") {
+			t.Fatalf("仅开命令策略时空工具名应由 SDK 返回 unknown tool 错误，实际 error=%#v result=%#v", rpc.Error, rpc.Result)
+		}
+		rows, err := st.ListAudit(ctx, []int64{policyOnlyTok.ID}, nil, nil, nil, "", 0, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 0 {
+			t.Fatalf("仅开命令策略时空工具名不应写入审计，实际 %#v", rows)
+		}
+	})
+}

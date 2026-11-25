@@ -296,7 +296,7 @@ WebUI 的「活动」页会为每次 `exec`、`job_start`，以及 `exec_many` �
 
 ### 命令策略（护栏，不是沙箱）
 
-`exec`、`exec_many`、`job_start` 的命令原文会在创建执行记录、取 SSH 连接之前先过一层策略；`host_test` 固定执行的 `uptime` 同样受策略约束，没有绕过白名单的执行入口。`session_env.set` 与 `job_start.env` 的变量名也会检查，避免用 `PATH`、`BASH_ENV`、`LD_PRELOAD` 改变下一条命令的解释方式。判定同时使用命令原文、去首尾空白与 NUL 截断前缀及其叠加形式，`^` 锚定的规则不会被前导换行或 NUL 填充绕过；白名单规则自动按整条命令锚定，`^git fetch` 只放行 `git fetch` 本身，不会放行 `git fetch && …`。注意 Go 正则的 `.` 默认不跨行，覆盖 heredoc 这类多行命令需写 `(?s)`。默认关闭，命令与敏感键的判定行为不变；环境变量键名始终要求合法 shell 标识符（`[A-Za-z_][A-Za-z0-9_]*`），该校验与档位无关（`session_env` 此前已有，`job_start.env` 为本次新增）。
+`exec`、`exec_many`、`job_start` 的命令原文会在创建执行记录、取 SSH 连接之前先过一层策略；`host_test` 固定执行的 `uptime` 同样受策略约束，没有绕过白名单的执行入口。`session_env.set` 与 `job_start.env` 的变量名也会检查，避免用 `PATH`、`BASH_ENV`、`LD_PRELOAD` 改变下一条命令的解释方式。拒绝规则同时匹配命令原文、去首尾空白与 NUL 截断前缀及其叠加形式，`^` 锚定的规则不会被前导换行或 NUL 填充绕过；白名单规则自动按整条命令（含去首尾空白）锚定并直接拒绝含 NUL 字节的命令，`^git fetch` 只放行 `git fetch` 本身，不会放行 `git fetch && …`。注意 Go 正则的 `.` 默认不跨行，覆盖 heredoc 这类多行命令需写 `(?s)`。默认关闭，命令与敏感键的判定行为不变；环境变量键名始终要求合法 shell 标识符（`[A-Za-z_][A-Za-z0-9_]*`），该校验与档位无关（`session_env` 此前已有，`job_start.env` 为本次新增）。
 
 | 档位 | 行为 |
 |---|---|
@@ -316,7 +316,7 @@ export ONESSH_COMMAND_ALLOW='^uptime$'
 export ONESSH_COMMAND_ENV_KEYS='HTTP_PROXY,HTTPS_PROXY'
 ```
 
-内置敏感键按「让后续进程加载或执行额外代码」的标准收录了常见的键（名单并不穷尽，`ONESSH_COMMAND_ENV_KEYS` 可追加）：`PATH`、`ENV`、`BASH_ENV`、`SHELLOPTS`、`BASHOPTS`、`PROMPT_COMMAND`、`PS4`、`IFS`、`LD_PRELOAD`、`LD_LIBRARY_PATH`、`LD_AUDIT`、`GCONV_PATH`、`PYTHONSTARTUP`、`PYTHONPATH`、`PYTHONHOME`、`PERL5OPT`、`PERL5LIB`、`RUBYOPT`、`RUBYLIB`、`NODE_OPTIONS`、`GIT_SSH`、`GIT_SSH_COMMAND`、`GIT_EXEC_PATH`、`GIT_CONFIG_GLOBAL`、`GIT_CONFIG_SYSTEM`、`GIT_CONFIG_COUNT`、`JAVA_TOOL_OPTIONS`、`_JAVA_OPTIONS`、`JDK_JAVA_OPTIONS`、`SSH_ASKPASS`、`SUDO_ASKPASS`、`OPENSSL_CONF`、`SSL_CERT_FILE`、`HOSTALIASES`、`BASH_XTRACEFD`。环境变量名必须是合法 shell 标识符（`[A-Za-z_][A-Za-z0-9_]*`）；`job_start.env` 与 `session_env` 都按这个规则拒绝 `PATH; export ...` 之类的键名，避免把变量名拼进远端脚本时注入命令。启用策略后 `exec` 每次执行前还会复查已有会话环境，残留这些键会直接拒绝，先用 `session_env` 的 `unset` 删除即可恢复（拒绝文案按实际存储的键名指认）。
+内置敏感键按「让后续进程加载或执行额外代码」的标准收录了常见的键（名单并不穷尽，`ONESSH_COMMAND_ENV_KEYS` 可追加）：`PATH`、`ENV`、`BASH_ENV`、`SHELLOPTS`、`BASHOPTS`、`PROMPT_COMMAND`、`PS4`、`IFS`、`LD_PRELOAD`、`LD_LIBRARY_PATH`、`LD_AUDIT`、`GCONV_PATH`、`PYTHONSTARTUP`、`PYTHONPATH`、`PYTHONHOME`、`PERL5OPT`、`PERL5LIB`、`RUBYOPT`、`RUBYLIB`、`NODE_OPTIONS`、`GIT_SSH`、`GIT_SSH_COMMAND`、`GIT_EXEC_PATH`、`GIT_CONFIG_GLOBAL`、`GIT_CONFIG_SYSTEM`、`GIT_CONFIG_COUNT`、`GIT_CONFIG_PARAMETERS`、`JAVA_TOOL_OPTIONS`、`_JAVA_OPTIONS`、`JDK_JAVA_OPTIONS`、`SSH_ASKPASS`、`SUDO_ASKPASS`、`OPENSSL_CONF`、`SSL_CERT_FILE`、`HOSTALIASES`、`BASH_XTRACEFD`。环境变量名必须是合法 shell 标识符（`[A-Za-z_][A-Za-z0-9_]*`）；`job_start.env` 与 `session_env` 都按这个规则拒绝 `PATH; export ...` 之类的键名，避免把变量名拼进远端脚本时注入命令。启用策略后 `exec` 每次执行前还会复查已有会话环境，残留这些键会直接拒绝，先用 `session_env` 的 `unset` 删除即可恢复（拒绝文案按实际存储的键名指认）。
 
 令牌级策略只能收紧实例级策略，二者按逻辑 AND 组合：任何一层的拒绝规则命中都会拒绝；处在 `allow` 档的每一层都必须放行。实例级的拒绝规则不会被令牌的 `off`/`deny` 放宽，令牌的 `allow` 也只是在实例白名单之上继续收窄。WebUI 的令牌创建/编辑与 OAuth 同意页都可以配置，REST 形状为：
 
@@ -364,7 +364,7 @@ export ONESSH_COMMAND_ENV_KEYS='HTTP_PROXY,HTTPS_PROXY'
 | `ONESSH_DISABLED_TOOLS` | | — | 逗号分隔的工具组名（见工具清单），列出的组不注册为 MCP 工具，服务器 `instructions` 里的对应说明同时移除；未知组名启动即报错 |
 | `ONESSH_COMMAND_POLICY` | | `off` | 命令策略档位：`off` / `deny` / `allow`；未知值启动报错。见「命令策略」 |
 | `ONESSH_COMMAND_DENY` | | — | 换行分隔的 Go 正则，一行一条，空行与 `#` 注释忽略；按子串匹配，判定同时覆盖命令原文、去首尾空白与 NUL 截断前缀。`deny` 档命中即拒绝，`allow` 档下仍优先拒绝。非法正则启动报错。单列表上限 100 条、单条上限 512 字节 |
-| `ONESSH_COMMAND_ALLOW` | | — | 换行分隔的 Go 正则，自动按整条命令锚定（无需手写 `^…$`，写了也不冲突）；`.` 不跨行，多行命令（如 heredoc）用 `(?s)`。`allow` 档必须命中才放行，空白名单拒绝全部命令。`off`/`deny` 档不使用。单列表上限 100 条、单条上限 512 字节 |
+| `ONESSH_COMMAND_ALLOW` | | — | 换行分隔的 Go 正则，自动按整条命令锚定（无需手写 `^…$`，写了也不冲突）并拒绝含 NUL 字节的命令；`.` 不跨行，多行命令（如 heredoc）用 `(?s)`。`allow` 档必须命中才放行，空白名单拒绝全部命令。`off`/`deny` 档不使用。单列表上限 100 条、单条上限 512 字节 |
 | `ONESSH_COMMAND_ENV_KEYS` | | — | 逗号分隔的额外敏感环境变量名，追加到内置键表；大小写不敏感 |
 | `ONESSH_EMBEDDING_API_URL` | | — | OpenAI 兼容 API 根地址，如 `https://api.example.com/v1`；需同时设置模型才启用 |
 | `ONESSH_EMBEDDING_API_KEY` | | — | embedding 服务 Bearer 密钥；服务不需要鉴权时可留空 |
