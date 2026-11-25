@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -322,7 +323,7 @@ func TestOpenUpgradesLegacyDatabase(t *testing.T) {
 	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 15 {
+	if versions != 16 {
 		t.Fatalf("二次迁移版本数 = %d", versions)
 	}
 }
@@ -351,8 +352,71 @@ func TestOpenRecordsPreexistingManageHostsColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 15 {
+	if versions != 16 {
 		t.Fatalf("迁移登记数 = %d", versions)
+	}
+}
+
+// 回归：0016 的五列可能被手工补过一部分（Docker 用户改表、中间开发版），
+// 迁移必须逐列幂等，而不是在已有列上以 duplicate column 失败到起不来。
+func TestOpenUpgradesPartiallyPatchedCommandPolicyColumns(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "onessh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(migration0001); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`ALTER TABLE tokens ADD COLUMN command_policy_json TEXT NOT NULL DEFAULT '{}'`); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatalf("部分补列的库升级失败: %v", err)
+	}
+	defer st.Close()
+	for _, column := range []string{
+		`SELECT outcome FROM audit LIMIT 0`,
+		`SELECT deny_reason FROM audit LIMIT 0`,
+		`SELECT command_policy_json FROM tokens LIMIT 0`,
+		`SELECT command_policy_json FROM oauth_authorization_codes LIMIT 0`,
+		`SELECT command_policy_json FROM oauth_refresh_tokens LIMIT 0`,
+	} {
+		if _, err = st.DB.Exec(column); err != nil {
+			t.Fatalf("迁移后列缺失（%s）: %v", column, err)
+		}
+	}
+	var versions int
+	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
+		t.Fatal(err)
+	}
+	if versions != 16 {
+		t.Fatalf("迁移登记数 = %d", versions)
+	}
+}
+
+// 钉死 case 16 的幂等 DDL 与 0016_command_policy.sql 的双向一致：case 16 只执行
+// migration0016Columns（m.sql 在该分支从不执行），改清单不改文件、或只在 .sql 里
+// 加语句（会静默漏迁）都必须在这里失败，而不止是「清单里的都在文件里」。
+func TestMigration0016DDLMatchesIdempotentCase(t *testing.T) {
+	sqlDDLs := make([]string, 0, len(migration0016Columns))
+	for line := range strings.SplitSeq(migration0016, "\n") {
+		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "ALTER TABLE ") {
+			sqlDDLs = append(sqlDDLs, strings.TrimSuffix(trimmed, ";"))
+		}
+	}
+	if len(sqlDDLs) != len(migration0016Columns) {
+		t.Fatalf("0016_command_policy.sql 的 ALTER 语句数 = %d，migration0016Columns = %d", len(sqlDDLs), len(migration0016Columns))
+	}
+	for i, c := range migration0016Columns {
+		if sqlDDLs[i] != c.ddl {
+			t.Fatalf("第 %d 条 DDL 不一致:\n.sql: %s\nGo:   %s", i+1, sqlDDLs[i], c.ddl)
+		}
 	}
 }
 
@@ -397,7 +461,7 @@ func TestOpenRecordsPreexistingAuditTokenNameColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 15 {
+	if versions != 16 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 }
@@ -426,7 +490,7 @@ func TestOpenRecordsPreexistingJobLogBytesColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 15 {
+	if versions != 16 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 }
@@ -522,7 +586,7 @@ func TestOpenAddsMissingCommandRunOutputCleanedColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 15 {
+	if versions != 16 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
 	var cleanedColumns int
@@ -559,10 +623,10 @@ func TestOpenRecordsPreexistingAuditCommandRunIDsColumn(t *testing.T) {
 	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 15 {
+	if versions != 16 {
 		t.Fatalf("迁移登记数 = %d", versions)
 	}
-	audit, err := st.ListAudit(context.Background(), nil, nil, nil, nil, 0, 10)
+	audit, err := st.ListAudit(context.Background(), nil, nil, nil, nil, "", 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -619,7 +683,7 @@ func TestOpenDoesNotAttributeReusedTokenAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	audit, err := st.ListAudit(ctx, nil, nil, nil, nil, 0, 10)
+	audit, err := st.ListAudit(ctx, nil, nil, nil, nil, "", 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -631,7 +695,7 @@ func TestOpenDoesNotAttributeReusedTokenAudit(t *testing.T) {
 			t.Fatalf("无快照旧审计被错误归属为 %q: %#v", row.TokenName.String, row)
 		}
 	}
-	filtered, err := st.ListAudit(ctx, []int64{newID}, nil, nil, nil, 0, 10)
+	filtered, err := st.ListAudit(ctx, []int64{newID}, nil, nil, nil, "", 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -648,7 +712,7 @@ func TestOpenDoesNotAttributeReusedTokenAudit(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	filtered, err = st.ListAudit(ctx, []int64{newID}, nil, nil, nil, 0, 10)
+	filtered, err = st.ListAudit(ctx, []int64{newID}, nil, nil, nil, "", 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -990,5 +1054,65 @@ func TestHostTagsRoundTrip(t *testing.T) {
 	}
 	if nullTags.Tags == nil || len(nullTags.Tags) != 0 {
 		t.Fatalf("JSON null 标签容忍异常: %#v", nullTags.Tags)
+	}
+}
+
+// 命令策略迁移必须同时覆盖审计分类与三处令牌存储：
+// 任何一处漏掉，升级后对应入口会在第一次写入时才失败。
+func TestOpenAddsCommandPolicyColumns(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "onessh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(migration0001); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`
+		INSERT INTO tokens(id,name,token_hash,all_hosts,created_at) VALUES(1,'legacy','legacy-hash',1,1);
+		INSERT INTO audit(id,ts,token_id,tool,params_json,ok) VALUES(1,2000,1,'exec','{}',0);`); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatalf("升级到命令策略迁移失败: %v", err)
+	}
+	defer st.Close()
+
+	for _, table := range []string{"tokens", "oauth_authorization_codes", "oauth_refresh_tokens"} {
+		var columns int
+		if err = st.DB.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name='command_policy_json'`, table).Scan(&columns); err != nil {
+			t.Fatal(err)
+		}
+		if columns != 1 {
+			t.Fatalf("%s 缺少 command_policy_json 列", table)
+		}
+	}
+	var outcome string
+	var denyReason sql.NullString
+	if err = st.DB.QueryRow(`SELECT outcome,deny_reason FROM audit WHERE id=1`).Scan(&outcome, &denyReason); err != nil {
+		t.Fatal(err)
+	}
+	if outcome != "" || denyReason.Valid {
+		t.Fatalf("历史审计不应被伪造分类: outcome=%q deny_reason=%#v", outcome, denyReason)
+	}
+	var policyJSON string
+	if err = st.DB.QueryRow(`SELECT command_policy_json FROM tokens WHERE id=1`).Scan(&policyJSON); err != nil {
+		t.Fatal(err)
+	}
+	if policyJSON != "{}" {
+		t.Fatalf("历史令牌默认策略 = %q，应为 {}", policyJSON)
+	}
+
+	var versions int
+	if err = st.DB.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
+		t.Fatal(err)
+	}
+	if versions != 16 {
+		t.Fatalf("迁移登记数 = %d", versions)
 	}
 }

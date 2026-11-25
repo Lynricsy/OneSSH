@@ -1,6 +1,10 @@
 package store
 
-import "database/sql"
+import (
+	"database/sql"
+
+	"onessh/internal/cmdpolicy"
+)
 
 type Key struct {
 	ID            int64  `json:"id"`
@@ -71,17 +75,18 @@ func (h Host) View() HostView {
 }
 
 type Token struct {
-	ID            int64          `json:"id"`
-	Name          string         `json:"name"`
-	AllHosts      bool           `json:"all_hosts"`
-	ManageHosts   bool           `json:"manage_hosts"`
-	DisabledTools []string       `json:"disabled_tools"`
-	Source        string         `json:"source"`
-	CreatedAt     int64          `json:"created_at"`
-	LastUsedAt    sql.NullInt64  `json:"-"`
-	ExpiresAt     sql.NullInt64  `json:"-"`
-	Resource      sql.NullString `json:"-"`
-	ClientID      sql.NullString `json:"-"`
+	ID            int64                 `json:"id"`
+	Name          string                `json:"name"`
+	AllHosts      bool                  `json:"all_hosts"`
+	ManageHosts   bool                  `json:"manage_hosts"`
+	DisabledTools []string              `json:"disabled_tools"`
+	CommandPolicy cmdpolicy.TokenPolicy `json:"command_policy"`
+	Source        string                `json:"source"`
+	CreatedAt     int64                 `json:"created_at"`
+	LastUsedAt    sql.NullInt64         `json:"-"`
+	ExpiresAt     sql.NullInt64         `json:"-"`
+	Resource      sql.NullString        `json:"-"`
+	ClientID      sql.NullString        `json:"-"`
 }
 
 type Session struct {
@@ -117,6 +122,10 @@ type Audit struct {
 	OK                   bool
 	ExitCode             sql.NullInt64
 	DurationMS, BytesOut int64
+	// Outcome 把「策略拒绝」与「执行失败」分开持久化；DenyReason 记下命中的规则。
+	// 迁移前的历史记录 Outcome 为空串，只能退回 ok 位判断。
+	Outcome    string
+	DenyReason string
 }
 
 // CommandRun 是一条用户可见的远程命令执行记录。host/token 名称与 ID 同时快照，

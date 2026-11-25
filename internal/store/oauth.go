@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"onessh/internal/cmdpolicy"
 )
 
 type OAuthClient struct {
@@ -27,6 +29,7 @@ type OAuthAuthorizationCode struct {
 	AllHosts      bool
 	ManageHosts   bool
 	DisabledTools []string
+	CommandPolicy cmdpolicy.TokenPolicy
 	HostIDs       []int64
 	ExpiresAt     int64
 	CreatedAt     int64
@@ -58,6 +61,7 @@ type OAuthRefreshToken struct {
 	AllHosts      bool
 	ManageHosts   bool
 	DisabledTools []string
+	CommandPolicy cmdpolicy.TokenPolicy
 	HostIDs       []int64
 	ExpiresAt     int64
 	CreatedAt     int64
@@ -120,10 +124,15 @@ func (s *Store) CreateOAuthAuthorizationCode(ctx context.Context, code OAuthAuth
 		return err
 	}
 	code.DisabledTools = disabledTools
+	policyJSON, commandPolicy, err := cmdpolicy.EncodeTokenPolicy(code.CommandPolicy)
+	if err != nil {
+		return err
+	}
+	code.CommandPolicy = commandPolicy
 	if code.CreatedAt == 0 {
 		code.CreatedAt = time.Now().Unix()
 	}
-	_, err = s.DB.ExecContext(ctx, `INSERT INTO oauth_authorization_codes(code_hash,client_id,redirect_uri,resource,code_challenge,scope,all_hosts,manage_hosts,host_ids_json,disabled_tools_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, code.CodeHash, code.ClientID, code.RedirectURI, code.Resource, code.CodeChallenge, code.Scope, boolInt(code.AllHosts), boolInt(code.ManageHosts), string(rawHostIDs), disabledJSON, code.ExpiresAt, code.CreatedAt)
+	_, err = s.DB.ExecContext(ctx, `INSERT INTO oauth_authorization_codes(code_hash,client_id,redirect_uri,resource,code_challenge,scope,all_hosts,manage_hosts,host_ids_json,disabled_tools_json,command_policy_json,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, code.CodeHash, code.ClientID, code.RedirectURI, code.Resource, code.CodeChallenge, code.Scope, boolInt(code.AllHosts), boolInt(code.ManageHosts), string(rawHostIDs), disabledJSON, policyJSON, code.ExpiresAt, code.CreatedAt)
 	return err
 }
 
@@ -136,13 +145,14 @@ func (s *Store) ExchangeOAuthAuthorizationCode(ctx context.Context, in OAuthAuth
 
 	var code OAuthAuthorizationCode
 	var allHosts, manageHosts int
-	var rawHostIDs, disabledJSON string
-	err = tx.QueryRowContext(ctx, `SELECT code_hash,client_id,redirect_uri,resource,code_challenge,scope,all_hosts,manage_hosts,host_ids_json,disabled_tools_json,expires_at,created_at,used_at,grant_id FROM oauth_authorization_codes WHERE code_hash=?`, in.CodeHash).Scan(&code.CodeHash, &code.ClientID, &code.RedirectURI, &code.Resource, &code.CodeChallenge, &code.Scope, &allHosts, &manageHosts, &rawHostIDs, &disabledJSON, &code.ExpiresAt, &code.CreatedAt, &code.UsedAt, &code.GrantID)
+	var rawHostIDs, disabledJSON, policyJSON string
+	err = tx.QueryRowContext(ctx, `SELECT code_hash,client_id,redirect_uri,resource,code_challenge,scope,all_hosts,manage_hosts,host_ids_json,disabled_tools_json,command_policy_json,expires_at,created_at,used_at,grant_id FROM oauth_authorization_codes WHERE code_hash=?`, in.CodeHash).Scan(&code.CodeHash, &code.ClientID, &code.RedirectURI, &code.Resource, &code.CodeChallenge, &code.Scope, &allHosts, &manageHosts, &rawHostIDs, &disabledJSON, &policyJSON, &code.ExpiresAt, &code.CreatedAt, &code.UsedAt, &code.GrantID)
 	if err != nil {
 		return OAuthAuthorizationCode{}, err
 	}
 	code.AllHosts = allHosts != 0
 	code.ManageHosts = manageHosts != 0
+	code.CommandPolicy = cmdpolicy.DecodeTokenPolicy(policyJSON)
 	if err = json.Unmarshal([]byte(rawHostIDs), &code.HostIDs); err != nil {
 		return OAuthAuthorizationCode{}, err
 	}
@@ -177,6 +187,7 @@ func (s *Store) ExchangeOAuthAuthorizationCode(ctx context.Context, in OAuthAuth
 		AllHosts:      code.AllHosts,
 		ManageHosts:   code.ManageHosts,
 		DisabledTools: code.DisabledTools,
+		CommandPolicy: code.CommandPolicy,
 		HostIDs:       code.HostIDs,
 		Source:        "oauth",
 		ExpiresAt:     in.AccessExpiresAt,
@@ -196,6 +207,7 @@ func (s *Store) ExchangeOAuthAuthorizationCode(ctx context.Context, in OAuthAuth
 		AllHosts:      code.AllHosts,
 		ManageHosts:   code.ManageHosts,
 		DisabledTools: code.DisabledTools,
+		CommandPolicy: code.CommandPolicy,
 		HostIDs:       code.HostIDs,
 		ExpiresAt:     in.RefreshExpiresAt,
 		CreatedAt:     in.Now,
@@ -254,13 +266,14 @@ func (s *Store) RotateOAuthRefreshToken(ctx context.Context, in OAuthRefreshToke
 
 	var token OAuthRefreshToken
 	var allHosts, manageHosts int
-	var rawHostIDs, disabledJSON string
-	err = tx.QueryRowContext(ctx, `SELECT token_hash,grant_id,access_token_id,client_id,resource,scope,all_hosts,manage_hosts,host_ids_json,disabled_tools_json,expires_at,created_at,used_at,revoked_at FROM oauth_refresh_tokens WHERE token_hash=?`, in.TokenHash).Scan(&token.TokenHash, &token.GrantID, &token.AccessTokenID, &token.ClientID, &token.Resource, &token.Scope, &allHosts, &manageHosts, &rawHostIDs, &disabledJSON, &token.ExpiresAt, &token.CreatedAt, &token.UsedAt, &token.RevokedAt)
+	var rawHostIDs, disabledJSON, policyJSON string
+	err = tx.QueryRowContext(ctx, `SELECT token_hash,grant_id,access_token_id,client_id,resource,scope,all_hosts,manage_hosts,host_ids_json,disabled_tools_json,command_policy_json,expires_at,created_at,used_at,revoked_at FROM oauth_refresh_tokens WHERE token_hash=?`, in.TokenHash).Scan(&token.TokenHash, &token.GrantID, &token.AccessTokenID, &token.ClientID, &token.Resource, &token.Scope, &allHosts, &manageHosts, &rawHostIDs, &disabledJSON, &policyJSON, &token.ExpiresAt, &token.CreatedAt, &token.UsedAt, &token.RevokedAt)
 	if err != nil {
 		return OAuthRefreshToken{}, err
 	}
 	token.AllHosts = allHosts != 0
 	token.ManageHosts = manageHosts != 0
+	token.CommandPolicy = cmdpolicy.DecodeTokenPolicy(policyJSON)
 	if err = json.Unmarshal([]byte(rawHostIDs), &token.HostIDs); err != nil {
 		return OAuthRefreshToken{}, err
 	}
@@ -297,6 +310,7 @@ func (s *Store) RotateOAuthRefreshToken(ctx context.Context, in OAuthRefreshToke
 		AllHosts:      token.AllHosts,
 		ManageHosts:   token.ManageHosts,
 		DisabledTools: token.DisabledTools,
+		CommandPolicy: token.CommandPolicy,
 		HostIDs:       token.HostIDs,
 		Source:        "oauth",
 		ExpiresAt:     in.AccessExpiresAt,
@@ -316,6 +330,7 @@ func (s *Store) RotateOAuthRefreshToken(ctx context.Context, in OAuthRefreshToke
 		AllHosts:      token.AllHosts,
 		ManageHosts:   token.ManageHosts,
 		DisabledTools: token.DisabledTools,
+		CommandPolicy: token.CommandPolicy,
 		HostIDs:       token.HostIDs,
 		ExpiresAt:     in.RefreshExpiresAt,
 		CreatedAt:     in.Now,
@@ -340,7 +355,11 @@ func insertOAuthRefreshTokenTx(ctx context.Context, tx *sql.Tx, token OAuthRefre
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(token_hash,grant_id,access_token_id,client_id,resource,scope,all_hosts,manage_hosts,host_ids_json,disabled_tools_json,expires_at,created_at,used_at,revoked_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, token.TokenHash, token.GrantID, token.AccessTokenID, token.ClientID, token.Resource, token.Scope, boolInt(token.AllHosts), boolInt(token.ManageHosts), string(rawHostIDs), disabledJSON, token.ExpiresAt, token.CreatedAt, nullInt(token.UsedAt), nullInt(token.RevokedAt))
+	policyJSON, _, err := cmdpolicy.EncodeTokenPolicy(token.CommandPolicy)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(token_hash,grant_id,access_token_id,client_id,resource,scope,all_hosts,manage_hosts,host_ids_json,disabled_tools_json,command_policy_json,expires_at,created_at,used_at,revoked_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, token.TokenHash, token.GrantID, token.AccessTokenID, token.ClientID, token.Resource, token.Scope, boolInt(token.AllHosts), boolInt(token.ManageHosts), string(rawHostIDs), disabledJSON, policyJSON, token.ExpiresAt, token.CreatedAt, nullInt(token.UsedAt), nullInt(token.RevokedAt))
 	return err
 }
 

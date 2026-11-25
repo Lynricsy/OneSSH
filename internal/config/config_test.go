@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"onessh/internal/cmdpolicy"
 	"onessh/internal/toolgroups"
 )
 
@@ -168,6 +169,90 @@ func TestLoadParsesDisabledToolGroups(t *testing.T) {
 		_, err := Load()
 		if err == nil || !strings.Contains(err.Error(), "ONESSH_DISABLED_TOOLS 未知工具组") {
 			t.Fatalf("非法值错误 = %v", err)
+		}
+	})
+}
+
+func TestLoadCommandPolicy(t *testing.T) {
+	t.Setenv("ONESSH_MASTER_KEY", strings.Repeat("01", 32))
+	t.Setenv("ONESSH_ADMIN_PASSWORD", "test-password")
+
+	t.Run("默认 off", func(t *testing.T) {
+		t.Setenv("ONESSH_COMMAND_POLICY", "")
+		t.Setenv("ONESSH_COMMAND_DENY", "")
+		t.Setenv("ONESSH_COMMAND_ALLOW", "")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.CommandPolicy.Mode != cmdpolicy.Off || cfg.CommandPolicy.Active() {
+			t.Fatalf("默认策略 = %#v", cfg.CommandPolicy)
+		}
+	})
+
+	t.Run("deny 多行规则与注释", func(t *testing.T) {
+		t.Setenv("ONESSH_COMMAND_POLICY", "DENY")
+		t.Setenv("ONESSH_COMMAND_DENY", "# 注释\nrm\\s+-rf\n\ndocker\\s+system\\s+prune")
+		t.Setenv("ONESSH_COMMAND_ALLOW", "")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.CommandPolicy.Mode != cmdpolicy.Deny || len(cfg.CommandPolicy.Deny) != 2 {
+			t.Fatalf("deny 策略 = %#v", cfg.CommandPolicy)
+		}
+		if !cfg.CommandPolicy.Active() {
+			t.Fatal("deny 有规则时应启用")
+		}
+	})
+
+	t.Run("allow 空白名单仍启用", func(t *testing.T) {
+		t.Setenv("ONESSH_COMMAND_POLICY", "allow")
+		t.Setenv("ONESSH_COMMAND_DENY", "")
+		t.Setenv("ONESSH_COMMAND_ALLOW", "")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !cfg.CommandPolicy.Active() {
+			t.Fatal("allow 空白名单必须按全拒处理，不能视为 off")
+		}
+	})
+
+	t.Run("未知档位", func(t *testing.T) {
+		t.Setenv("ONESSH_COMMAND_POLICY", "denny")
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "未知命令策略档位") {
+			t.Fatalf("未知档位错误 = %v", err)
+		}
+	})
+
+	t.Run("非法正则", func(t *testing.T) {
+		t.Setenv("ONESSH_COMMAND_POLICY", "deny")
+		t.Setenv("ONESSH_COMMAND_DENY", "(")
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "不是合法正则") {
+			t.Fatalf("非法正则错误 = %v", err)
+		}
+	})
+
+	t.Run("额外敏感环境变量", func(t *testing.T) {
+		t.Setenv("ONESSH_COMMAND_ENV_KEYS", "HTTP_PROXY, CUSTOM_KEY,,")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cfg.CommandEnvKeys) != 2 || cfg.CommandEnvKeys[0] != "HTTP_PROXY" || cfg.CommandEnvKeys[1] != "CUSTOM_KEY" {
+			t.Fatalf("CommandEnvKeys = %#v", cfg.CommandEnvKeys)
+		}
+	})
+
+	t.Run("非法环境变量键名", func(t *testing.T) {
+		// 拼错的键永远匹配不到运行时的环境变量名，等于没配却看似生效，启动即报错。
+		t.Setenv("ONESSH_COMMAND_ENV_KEYS", "HTTP_PROXY,HTTP-PROXY")
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "非法环境变量名") {
+			t.Fatalf("非法键名应报错: %v", err)
 		}
 	})
 }

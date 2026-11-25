@@ -9,6 +9,7 @@ import (
 	"errors"
 	"time"
 
+	"onessh/internal/cmdpolicy"
 	"onessh/internal/toolgroups"
 )
 
@@ -23,6 +24,7 @@ type TokenCreate struct {
 	AllHosts      bool
 	ManageHosts   bool
 	DisabledTools []string
+	CommandPolicy cmdpolicy.TokenPolicy
 	HostIDs       []int64
 	Source        string
 	ExpiresAt     int64
@@ -30,13 +32,42 @@ type TokenCreate struct {
 	ClientID      string
 }
 
-// TokenUpdate 用于手动更新已有令牌的主机范围与 MCP 工具组 denylist。
+// TokenUpdate 用于手动更新已有令牌的主机范围、MCP 工具组 denylist 与命令策略。
 type TokenUpdate struct {
 	Name          string
 	AllHosts      bool
 	ManageHosts   bool
 	HostIDs       []int64
 	DisabledTools []string
+	// CommandPolicy 为 nil 时保留原策略：旧客户端/旧前端不会因为没带这个字段
+	// 就把已有的收紧策略静默清空；显式传 &TokenPolicy{Mode:"off"} 才清除。
+	CommandPolicy *cmdpolicy.TokenPolicy
+}
+
+// tokenColumns 固定令牌查询的列顺序。数据库加列时必须同时改到这里与 scanToken：
+// 两处分开了，查询出来的字段会静默错位到别的名字上。
+const tokenColumns = `id,name,all_hosts,manage_hosts,disabled_tools_json,command_policy_json,source,created_at,last_used_at,expires_at,resource,client_id`
+
+// rowScanner 是 *sql.Row 与 *sql.Rows 的公共部分，令牌查询三种场景共用一份扫描逻辑。
+// 类型定义在 command_runs.go，这里直接复用。
+func scanToken(row rowScanner) (Token, error) {
+	var t Token
+	var allHosts, manageHosts int
+	var disabledJSON, policyJSON string
+	if err := row.Scan(&t.ID, &t.Name, &allHosts, &manageHosts, &disabledJSON, &policyJSON, &t.Source, &t.CreatedAt, &t.LastUsedAt, &t.ExpiresAt, &t.Resource, &t.ClientID); err != nil {
+		return Token{}, err
+	}
+	t.AllHosts = allHosts != 0
+	t.ManageHosts = manageHosts != 0
+	disabledTools, err := decodeDisabledTools(disabledJSON)
+	if err != nil {
+		return Token{}, err
+	}
+	t.DisabledTools = disabledTools
+	// 命令策略损坏时 DecodeTokenPolicy 返回全拒策略，不返回错误：
+	// 与 denylist 的 fail-closed 一致，但不至于让令牌彻底不可用。
+	t.CommandPolicy = cmdpolicy.DecodeTokenPolicy(policyJSON)
+	return t, nil
 }
 
 func (s *Store) CreateToken(ctx context.Context, in TokenCreate) (Token, error) {
@@ -68,7 +99,11 @@ func createTokenTx(ctx context.Context, tx *sql.Tx, in TokenCreate, now int64) (
 	if err != nil {
 		return Token{}, err
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO tokens(name,token_hash,all_hosts,manage_hosts,disabled_tools_json,created_at,source,expires_at,resource,client_id) VALUES(?,?,?,?,?,?,?,?,?,?)`, in.Name, in.Hash, boolInt(in.AllHosts), boolInt(in.ManageHosts), disabledJSON, now, source, expiresAt, nullableString(in.Resource), nullableString(in.ClientID))
+	policyJSON, commandPolicy, err := cmdpolicy.EncodeTokenPolicy(in.CommandPolicy)
+	if err != nil {
+		return Token{}, err
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO tokens(name,token_hash,all_hosts,manage_hosts,disabled_tools_json,command_policy_json,created_at,source,expires_at,resource,client_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, in.Name, in.Hash, boolInt(in.AllHosts), boolInt(in.ManageHosts), disabledJSON, policyJSON, now, source, expiresAt, nullableString(in.Resource), nullableString(in.ClientID))
 	if err != nil {
 		return Token{}, err
 	}
@@ -81,7 +116,7 @@ func createTokenTx(ctx context.Context, tx *sql.Tx, in TokenCreate, now int64) (
 			return Token{}, err
 		}
 	}
-	token := Token{ID: id, Name: in.Name, AllHosts: in.AllHosts, ManageHosts: in.ManageHosts, DisabledTools: disabledTools, Source: source, CreatedAt: now}
+	token := Token{ID: id, Name: in.Name, AllHosts: in.AllHosts, ManageHosts: in.ManageHosts, DisabledTools: disabledTools, CommandPolicy: commandPolicy, Source: source, CreatedAt: now}
 	token.ExpiresAt = sql.NullInt64{Int64: in.ExpiresAt, Valid: in.ExpiresAt > 0}
 	token.Resource = sql.NullString{String: in.Resource, Valid: in.Resource != ""}
 	token.ClientID = sql.NullString{String: in.ClientID, Valid: in.ClientID != ""}
@@ -96,22 +131,13 @@ func (s *Store) FindTokenForResource(ctx context.Context, hash, resource string)
 }
 
 func (s *Store) findToken(ctx context.Context, hash, resource string, requireResource bool) (Token, []Host, error) {
-	var t Token
-	var all, manage int
-	var disabledJSON string
-	q := `SELECT id,name,all_hosts,manage_hosts,disabled_tools_json,source,created_at,last_used_at,expires_at,resource,client_id FROM tokens WHERE token_hash=? AND (expires_at IS NULL OR expires_at>?)`
+	q := `SELECT ` + tokenColumns + ` FROM tokens WHERE token_hash=? AND (expires_at IS NULL OR expires_at>?)`
 	args := []any{hash, time.Now().Unix()}
 	if requireResource {
 		q += ` AND (source='manual' OR resource=?)`
 		args = append(args, resource)
 	}
-	err := s.DB.QueryRowContext(ctx, q, args...).Scan(&t.ID, &t.Name, &all, &manage, &disabledJSON, &t.Source, &t.CreatedAt, &t.LastUsedAt, &t.ExpiresAt, &t.Resource, &t.ClientID)
-	if err != nil {
-		return t, nil, err
-	}
-	t.AllHosts = all != 0
-	t.ManageHosts = manage != 0
-	t.DisabledTools, err = decodeDisabledTools(disabledJSON)
+	t, err := scanToken(s.DB.QueryRowContext(ctx, q, args...))
 	if err != nil {
 		return t, nil, err
 	}
@@ -143,22 +169,14 @@ func (s *Store) findToken(ctx context.Context, hash, resource string, requireRes
 	return t, hosts, rows.Err()
 }
 func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,all_hosts,manage_hosts,disabled_tools_json,source,created_at,last_used_at,expires_at,resource,client_id FROM tokens ORDER BY name`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+tokenColumns+` FROM tokens ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := make([]Token, 0)
 	for rows.Next() {
-		var t Token
-		var all, manage int
-		var disabledJSON string
-		if err := rows.Scan(&t.ID, &t.Name, &all, &manage, &disabledJSON, &t.Source, &t.CreatedAt, &t.LastUsedAt, &t.ExpiresAt, &t.Resource, &t.ClientID); err != nil {
-			return nil, err
-		}
-		t.AllHosts = all != 0
-		t.ManageHosts = manage != 0
-		t.DisabledTools, err = decodeDisabledTools(disabledJSON)
+		t, err := scanToken(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -177,7 +195,16 @@ func (s *Store) UpdateToken(ctx context.Context, id int64, in TokenUpdate) (Toke
 	if err != nil {
 		return Token{}, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE tokens SET name=?,all_hosts=?,manage_hosts=?,disabled_tools_json=? WHERE id=?`, in.Name, boolInt(in.AllHosts), boolInt(in.ManageHosts), disabledJSON, id)
+	var policyJSON any
+	if in.CommandPolicy != nil {
+		encoded, _, err := cmdpolicy.EncodeTokenPolicy(*in.CommandPolicy)
+		if err != nil {
+			return Token{}, err
+		}
+		policyJSON = encoded
+	}
+	// COALESCE 让“字段缺失”与“显式 off”走不同路径：前者保留原策略，后者写入 off。
+	result, err := tx.ExecContext(ctx, `UPDATE tokens SET name=?,all_hosts=?,manage_hosts=?,disabled_tools_json=?,command_policy_json=COALESCE(?,command_policy_json) WHERE id=?`, in.Name, boolInt(in.AllHosts), boolInt(in.ManageHosts), disabledJSON, policyJSON, id)
 	if err != nil {
 		return Token{}, err
 	}
@@ -200,7 +227,7 @@ func (s *Store) UpdateToken(ctx context.Context, id int64, in TokenUpdate) (Toke
 			return Token{}, err
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE oauth_refresh_tokens SET all_hosts=?,manage_hosts=?,host_ids_json=?,disabled_tools_json=? WHERE access_token_id=? AND used_at IS NULL AND revoked_at IS NULL`, boolInt(in.AllHosts), boolInt(in.ManageHosts), mustJSON(hostIDs), disabledJSON, id); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE oauth_refresh_tokens SET all_hosts=?,manage_hosts=?,host_ids_json=?,disabled_tools_json=?,command_policy_json=COALESCE(?,command_policy_json) WHERE access_token_id=? AND used_at IS NULL AND revoked_at IS NULL`, boolInt(in.AllHosts), boolInt(in.ManageHosts), mustJSON(hostIDs), disabledJSON, policyJSON, id); err != nil {
 		return Token{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -210,17 +237,7 @@ func (s *Store) UpdateToken(ctx context.Context, id int64, in TokenUpdate) (Toke
 }
 
 func (s *Store) GetToken(ctx context.Context, id int64) (Token, error) {
-	var t Token
-	var all, manage int
-	var disabledJSON string
-	err := s.DB.QueryRowContext(ctx, `SELECT id,name,all_hosts,manage_hosts,disabled_tools_json,source,created_at,last_used_at,expires_at,resource,client_id FROM tokens WHERE id=?`, id).Scan(&t.ID, &t.Name, &all, &manage, &disabledJSON, &t.Source, &t.CreatedAt, &t.LastUsedAt, &t.ExpiresAt, &t.Resource, &t.ClientID)
-	if err != nil {
-		return Token{}, err
-	}
-	t.AllHosts = all != 0
-	t.ManageHosts = manage != 0
-	t.DisabledTools, err = decodeDisabledTools(disabledJSON)
-	return t, err
+	return scanToken(s.DB.QueryRowContext(ctx, `SELECT `+tokenColumns+` FROM tokens WHERE id=?`, id))
 }
 func (s *Store) DeleteToken(ctx context.Context, id int64) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -286,6 +303,7 @@ func (s *Store) SaveSession(ctx context.Context, x Session) error {
 
 func encodeDisabledTools(names []string) (string, []string, error) {
 	// 持久化边界强制校验：未知分组名直接拒绝，API / OAuth 层的 NormalizeList 只是 UX。
+	// 新列必须同时改到 tokenColumns 与 scanToken，否则所有令牌查询都会错位。
 	normalized, err := toolgroups.NormalizeList(names)
 	if err != nil {
 		return "", nil, err

@@ -39,8 +39,12 @@ func TestLimitedWriterAndLines(t *testing.T) {
 	if string(selected) != "1\n2" || total != 3 || !cut {
 		t.Fatalf("行选择 %q %d %v", selected, total, cut)
 	}
-	if !strings.Contains(Script("pwd", "~", map[string]string{"A": "b"}), "export A='b'") {
-		t.Fatal("脚本缺少 env")
+	script, err := Script("pwd", "~", map[string]string{"A": "b"})
+	if err != nil || !strings.Contains(script, "export A='b'") {
+		t.Fatalf("脚本缺少 env: %q, %v", script, err)
+	}
+	if _, err = Script("pwd", "~", map[string]string{"PATH; export EVIL=1; #": "x"}); err == nil {
+		t.Fatal("非法环境变量名应被拒绝")
 	}
 }
 

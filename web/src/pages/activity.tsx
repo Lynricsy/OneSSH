@@ -8,7 +8,7 @@ import {
   useTokens,
   type AuditFilter,
 } from '@/api/queries'
-import type { Audit, StreamEvent } from '@/api/types'
+import type { Audit, AuditOutcome, StreamEvent } from '@/api/types'
 import { Badge, Dot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -30,7 +30,7 @@ import { formatBytes } from '@/lib/format'
 /** 审计与事件流的时间戳是「毫秒」，与 lib/format 的「秒」契约不同，故本页单独格式化 */
 const clock = (ms: number) => new Date(ms).toLocaleTimeString('zh-CN', { hour12: false })
 
-/** 结果筛选仍是单选（只有成功/失败两个值），故保留 'all' 哨兵；工具/令牌/主机改为多选数组 */
+/** 结果筛选是单选：成功/失败/策略拒绝，另加 'all' 哨兵；工具/令牌/主机为多选数组 */
 const ALL = 'all'
 const MAX_AUDIT_FILTER_VALUES = 100
 
@@ -99,7 +99,11 @@ const auditColumns: Column<Audit>[] = [
     className: 'w-[80px]',
     // 一屏几十行里全是绿 badge 会淹没真正需要注意的失败，成功态降级为中性文字 + 状态点
     render: (item) =>
-      item.OK ? (
+      item.Outcome === 'denied' ? (
+        <Badge variant="warning" title={item.DenyReason || undefined}>
+          策略拒绝
+        </Badge>
+      ) : item.OK ? (
         <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
           <Dot className="text-success" />
           成功
@@ -144,7 +148,7 @@ function EventPayload({ event }: { event: StreamEvent }) {
     const summary = typeof data.summary === 'string' ? data.summary : ''
     const host = typeof data.host === 'string' ? data.host : ''
     const duration = typeof data.duration_ms === 'number' ? formatDuration(data.duration_ms) : ''
-    const bits = [data.ok === false ? '失败' : '成功', host, duration].filter(Boolean)
+    const bits = [data.denied === true ? '策略拒绝' : data.ok === false ? '失败' : '成功', host, duration].filter(Boolean)
     return (
       <div className="mt-1.5 space-y-1">
         {summary ? (
@@ -210,7 +214,9 @@ function AuditDetail({ item }: { item: Audit }) {
         <div>
           <dt className="text-[11px] tracking-wide text-muted uppercase">结果</dt>
           <dd className="mt-1">
-            {item.OK ? (
+            {item.Outcome === 'denied' ? (
+              <Badge variant="warning">策略拒绝</Badge>
+            ) : item.OK ? (
               <span className="inline-flex items-center gap-1.5 text-muted">
                 <Dot className="text-success" />
                 成功
@@ -237,6 +243,10 @@ function AuditDetail({ item }: { item: Audit }) {
           </dd>
         </div>
       </dl>
+
+      {item.Outcome === 'denied' && item.DenyReason ? (
+        <CopyableBlock label="拒绝原因" value={item.DenyReason} />
+      ) : null}
 
       {command ? (
         <CopyableBlock label="命令" value={command} />
@@ -297,14 +307,14 @@ export function ActivityPage() {
   const [tool, setTool] = useState<string[]>([])
   const [token, setToken] = useState<number[]>([])
   const [host, setHost] = useState<string[]>([])
-  const [result, setResult] = useState(ALL)
+  const [result, setResult] = useState<typeof ALL | AuditOutcome>(ALL)
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<Audit | null>(null)
   const filter: AuditFilter = {
     tool,
     token,
     host,
-    ok: result === ALL ? undefined : result === 'ok',
+    outcome: result === ALL ? undefined : result,
   }
   const audit = useAudit(filter)
   const auditTools = useAuditTools()
@@ -407,7 +417,7 @@ export function ActivityPage() {
               </span>
             )}
           </CardHeader>
-          {/* 工具/令牌/主机支持多选 + 搜索；结果仅两个值，保留单选下拉；改动即查，不设「查询」按钮 */}
+          {/* 工具/令牌/主机支持多选 + 搜索；结果为成功/失败/策略拒绝三个值，单选下拉；改动即查，不设「查询」按钮 */}
           <div className="grid grid-cols-2 gap-2 border-b border-border p-3 lg:grid-cols-4">
             <div className="col-span-2 lg:col-span-4">
               <label htmlFor="audit-filter-query" className="sr-only">
@@ -468,7 +478,8 @@ export function ActivityPage() {
               options={[
                 { value: ALL, label: '全部结果' },
                 { value: 'ok', label: '成功' },
-                { value: 'fail', label: '失败' },
+                { value: 'failed', label: '失败' },
+                { value: 'denied', label: '策略拒绝' },
               ]}
             />
           </div>

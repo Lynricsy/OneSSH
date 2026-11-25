@@ -51,12 +51,14 @@ func main() {
 		log.Fatal(err)
 	}
 	mcpService := mcpserver.New(st, pool, bus, hosts, memEngine, mcpserver.Options{
-		DataDir:       cfg.DataDir,
-		PublicURL:     oauthService.PublicURL,
-		PollInterval:  cfg.PollInterval,
-		SearchHelper:  cfg.SearchHelper,
-		MCPApps:       cfg.MCPApps,
-		DisabledTools: cfg.DisabledTools,
+		DataDir:        cfg.DataDir,
+		PublicURL:      oauthService.PublicURL,
+		PollInterval:   cfg.PollInterval,
+		SearchHelper:   cfg.SearchHelper,
+		MCPApps:        cfg.MCPApps,
+		DisabledTools:  cfg.DisabledTools,
+		CommandPolicy:  cfg.CommandPolicy,
+		CommandEnvKeys: cfg.CommandEnvKeys,
 	})
 	defer mcpService.Close()
 	adminAuth := webapi.NewAdminAuth(cfg.AdminPassword, cfg.MasterKey)

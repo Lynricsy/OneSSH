@@ -26,6 +26,16 @@ export type SSHKey = {
   created_at: number
 }
 
+/** 三档与后端 cmdpolicy.Mode 一致；off 之外都只能相对实例策略收紧 */
+export type CommandPolicyMode = 'off' | 'deny' | 'allow'
+
+/** 每行一条 Go 正则；不做 shell 解析，只匹配收到的命令原文/环境变量名 */
+export type CommandPolicy = {
+  mode: CommandPolicyMode
+  deny: string[]
+  allow: string[]
+}
+
 export type Token = {
   id: number
   name: string
@@ -33,6 +43,8 @@ export type Token = {
   manage_hosts: boolean
   /** MCP 工具组 denylist，取值与 toolgroups.All / ONESSH_DISABLED_TOOLS 相同 */
   disabled_tools: string[]
+  /** 令牌级命令策略，只能收紧实例级策略；缺省视为 off */
+  command_policy?: CommandPolicy
   host_ids?: number[]
   created_at: number
   /** 仅创建响应携带的一次性明文 */
@@ -74,6 +86,8 @@ export type FileEntry = {
   symlink_target?: string
 }
 
+export type AuditOutcome = 'ok' | 'failed' | 'denied'
+
 export type Audit = {
   ID: number
   Ts: number
@@ -84,6 +98,10 @@ export type Audit = {
   ParamsJSON: string
   RunIDs?: string[]
   OK: boolean
+  /** ok / failed / denied；迁移前的历史记录为空串，只能按 OK 推断 */
+  Outcome: AuditOutcome | ''
+  /** 策略拒绝原因，例如命中的实例/令牌规则 */
+  DenyReason: string
   DurationMS: number
   BytesOut: number
 }
@@ -193,6 +211,7 @@ export type TokenPayload = {
   manage_hosts: boolean
   host_ids?: number[]
   disabled_tools?: string[]
+  command_policy?: CommandPolicy
 }
 
 export type ToolGroup = {
@@ -218,6 +237,7 @@ export type OAuthDecisionPayload = {
   manage_hosts: boolean
   host_ids?: number[]
   disabled_tools?: string[]
+  command_policy?: CommandPolicy
 }
 
 /** 无论批准还是拒绝，后端都给出下一跳；拒绝时带 error=access_denied */

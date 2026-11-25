@@ -121,11 +121,31 @@ func (r *Runner) CleanupCommandOutputs(deleteIDs map[string]struct{}) (int, erro
 }
 
 func SHQ(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
-func Script(command, cwd string, env map[string]string) string {
+
+var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// ValidEnvName 与 shell 的变量名规则一致。env 键会被拼进远端脚本，
+// 不能只依赖调用方校验：`PATH; export EVIL=1; #` 这类键名会直接注入命令。
+func ValidEnvName(name string) bool { return envNamePattern.MatchString(name) }
+
+// ValidateEnv 在把 env 交给 SSH 之前校验键名，避免 shell 注入。
+func ValidateEnv(env map[string]string) error {
+	for key := range env {
+		if !ValidEnvName(key) {
+			return fmt.Errorf("环境变量名无效: %s", key)
+		}
+	}
+	return nil
+}
+
+func Script(command, cwd string, env map[string]string) (string, error) {
 	return commandScript(command, cwd, env, "")
 }
 
-func commandScript(command, cwd string, env map[string]string, trailerID string) string {
+func commandScript(command, cwd string, env map[string]string, trailerID string) (string, error) {
+	if err := ValidateEnv(env); err != nil {
+		return "", err
+	}
 	var b strings.Builder
 	b.WriteString("cd ")
 	b.WriteString(SHQ(cwd))
@@ -150,7 +170,7 @@ func commandScript(command, cwd string, env map[string]string, trailerID string)
 		b.WriteByte(':')
 	}
 	b.WriteString("%d:%s\\001' \"$__ec\" \"$PWD\"\n")
-	return b.String()
+	return b.String(), nil
 }
 
 type limitedWriter struct {
@@ -255,6 +275,9 @@ func terminateSession(session *ssh.Session) {
 }
 
 func (r *Runner) Run(ctx context.Context, client *ssh.Client, command, cwd string, env map[string]string, opt Options) (Result, error) {
+	if err := ValidateEnv(env); err != nil {
+		return Result{}, err
+	}
 	if opt.Timeout <= 0 {
 		opt.Timeout = 60 * time.Second
 	}
@@ -281,7 +304,15 @@ func (r *Runner) Run(ctx context.Context, client *ssh.Client, command, cwd strin
 	}
 	session.Stdout = stdout
 	session.Stderr = stderr
-	if err = session.Start(commandScript(command, cwd, env, trailerID)); err != nil {
+	script, scriptErr := commandScript(command, cwd, env, trailerID)
+	if scriptErr != nil {
+		if capture != nil {
+			capture.close()
+			capture.remove()
+		}
+		return Result{}, scriptErr
+	}
+	if err = session.Start(script); err != nil {
 		if capture != nil {
 			capture.close()
 			capture.remove()

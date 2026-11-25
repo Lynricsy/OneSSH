@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { api, del, post, put, uploadFile } from './client'
 import type {
   Audit,
+  AuditOutcome,
   CommandOutputChunk,
   CommandRun,
   FileEntry,
@@ -136,8 +137,8 @@ export const useJobLogs = (id: string, running: boolean) =>
     refetchInterval: running ? 2000 : false,
   })
 
-/** 审计筛选：缺省即不过滤；tool/token/host 支持多值（OR），ok 单值 */
-export type AuditFilter = { tool?: string[]; token?: number[]; host?: string[]; ok?: boolean }
+/** 审计筛选：缺省即不过滤；tool/token/host 支持多值（OR），outcome 单值 */
+export type AuditFilter = { tool?: string[]; token?: number[]; host?: string[]; ok?: boolean; outcome?: AuditOutcome }
 
 export const useAudit = (filter: AuditFilter = {}) =>
   useQuery({
@@ -149,6 +150,7 @@ export const useAudit = (filter: AuditFilter = {}) =>
       for (const token of filter.token ?? []) params.append('token', String(token))
       for (const host of filter.host ?? []) params.append('host', host)
       if (filter.ok != null) params.set('ok', String(filter.ok))
+      if (filter.outcome) params.set('outcome', filter.outcome)
       return api<Audit[]>(`/audit?${params}`)
     },
     // 切换筛选时旧数据留在原位渐隐，避免每改一个条件表格就塌成骨架屏

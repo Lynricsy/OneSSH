@@ -11,7 +11,11 @@ import (
 // 提示词必须和 tools/list 严格对齐：模型在调用前只能读到这两处信息，提示词里出现一个
 // 未注册的工具名，模型就会反复尝试调用它并把失败当成权限问题。因此每段说明都绑定分组，
 // 分组关闭时整段（或对应的分句）一起消失。
-func serverInstructions(disabled toolgroups.Disabled) string {
+//
+// commandPolicy 表示当前请求至少有一层命令策略启用（实例级或令牌级）。
+// 初始 instructions 只能反映实例级；令牌级由 installTokenDenylist 在 initialize 与
+// server/discover 的响应上按请求重写，避免静态提示词与当前令牌的实际策略不一致。
+func serverInstructions(disabled toolgroups.Disabled, commandPolicy bool) string {
 	on := disabled.Enabled
 	sections := make([]string, 0, 8)
 
@@ -77,6 +81,29 @@ func serverInstructions(disabled toolgroups.Disabled) string {
 	}
 	if len(running) > 0 {
 		sections = append(sections, "【执行】"+strings.Join(running, ""))
+	}
+
+	// 被拒绝时模型最常做的事是重试：同一段危险命令反复发、把策略拦截当成连接故障。
+	// 这段只在策略启用时出现，默认 off 时提示词与升级前保持一致。
+	// hosts 组也要算：host_test 的 uptime 同样过策略，只开 hosts 时模型也需要拒绝指引。
+	if commandPolicy && (on(toolgroups.Exec) || on(toolgroups.Jobs) || on(toolgroups.Fanout) || on(toolgroups.Hosts)) {
+		policy := "【命令策略】网关已启用命令策略：命中的命令在送到主机之前就被拒绝，返回“网关命令策略拒绝了本次调用”。这是策略拦截，不是主机连不上、也不是权限不足——原样重试不会成功，不要把它当连接故障去反复重连，也不要换 session 重发同一条命令；换一条不含被禁模式的命令，或告知用户由管理员调整策略。拒绝规则匹配命令原文及其去首尾空白、按 NUL 截断后的形式，白名单要求整条命令匹配且不接受含 NUL 字节的命令；策略同时校验环境变量名，不做 shell 解析。"
+		// 提示词只能提到当前实际暴露的工具：只开 fanout 时没有 session_env，
+		// 只开 jobs 时也没有 session_env，写进去会让模型反复调用不存在的工具。
+		var envPaths []string
+		if on(toolgroups.Exec) {
+			envPaths = append(envPaths, "session_env")
+		}
+		if on(toolgroups.Jobs) {
+			envPaths = append(envPaths, "job_start.env")
+		}
+		if len(envPaths) > 0 {
+			policy += "启用期间 PATH、BASH_ENV、ENV、LD_PRELOAD 等敏感环境变量不能通过 " + strings.Join(envPaths, " 或 ") + " 修改。"
+			if on(toolgroups.Exec) {
+				policy += "已有会话里残留的敏感变量会让 exec 直接拒绝，先用 session_env 删除再执行。"
+			}
+		}
+		sections = append(sections, policy)
 	}
 
 	var care []string

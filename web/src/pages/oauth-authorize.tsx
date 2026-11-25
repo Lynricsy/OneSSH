@@ -27,16 +27,19 @@ import {
 import { EmptyState } from '@/components/ui/empty-state'
 import { Field } from '@/components/ui/field'
 import { Label } from '@/components/ui/label'
+import { CommandPolicyFields } from '@/components/command-policy-fields'
 import { MultiSelect } from '@/components/ui/multi-select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { useTheme, type ThemeMode } from '@/lib/theme'
+import { commandPolicyFromForm, defaultCommandPolicyForm, type CommandPolicyFormValues } from '@/lib/command-policy'
 
 type ConsentFormValues = {
   all_hosts: boolean
   manage_hosts: boolean
   host_ids: number[]
   disabled_tools: string[]
+  command_policy: CommandPolicyFormValues
 }
 
 /** 与令牌创建保持同一套默认值：先给最宽的执行范围，管理权限必须显式打开 */
@@ -45,6 +48,7 @@ const defaultValues: ConsentFormValues = {
   manage_hosts: false,
   host_ids: [],
   disabled_tools: [],
+  command_policy: defaultCommandPolicyForm,
 }
 
 /** 后端目前只签发 mcp 一种范围；未知范围原样展示，不编造语义 */
@@ -229,6 +233,7 @@ export function OAuthAuthorizePage() {
       manage_hosts: values.manage_hosts,
       host_ids: values.all_hosts ? undefined : values.host_ids,
       disabled_tools: values.disabled_tools,
+      command_policy: commandPolicyFromForm(values.command_policy),
     }
     try {
       const result = await post<OAuthDecisionResult>('/oauth/authorization', payload)
@@ -519,6 +524,17 @@ export function OAuthAuthorizePage() {
                         />
                       )}
                     </Field>
+                  </Section>
+
+                  <Section title="命令策略">
+                    <p className="mb-3 text-[12px] leading-5 text-muted">
+                      在实例策略之上进一步收紧本客户端：任何一层拒绝规则命中都会拒绝，白名单模式要求每一层都放行；令牌设置无法放宽实例策略。
+                    </p>
+                    <Controller
+                      name="command_policy"
+                      control={control}
+                      render={({ field }) => <CommandPolicyFields value={field.value} onChange={field.onChange} />}
+                    />
                   </Section>
 
                   <div className="border-t border-border px-5 py-4 sm:px-6">

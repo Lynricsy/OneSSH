@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 
+	"onessh/internal/cmdpolicy"
 	"onessh/internal/store"
 	"onessh/internal/toolgroups"
 )
@@ -26,12 +27,13 @@ type clientRegistrationRequest struct {
 }
 
 type authorizationDecision struct {
-	Query         string   `json:"query"`
-	Decision      string   `json:"decision"`
-	AllHosts      bool     `json:"all_hosts"`
-	ManageHosts   bool     `json:"manage_hosts"`
-	HostIDs       []int64  `json:"host_ids"`
-	DisabledTools []string `json:"disabled_tools"`
+	Query         string                `json:"query"`
+	Decision      string                `json:"decision"`
+	AllHosts      bool                  `json:"all_hosts"`
+	ManageHosts   bool                  `json:"manage_hosts"`
+	HostIDs       []int64               `json:"host_ids"`
+	DisabledTools []string              `json:"disabled_tools"`
+	CommandPolicy cmdpolicy.TokenPolicy `json:"command_policy"`
 }
 
 func (s *Server) AuthorizationServerMetadata(w http.ResponseWriter, r *http.Request) {
@@ -178,7 +180,9 @@ func (s *Server) AuthorizationInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) AuthorizationDecision(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	// 命令策略两份规则列表的合法上限就有约 100KB（100 条 × 512 字节 × 2 + JSON 信封），
+	// 64KB 会把合法的大策略挡在 JSON 解析之前，报错文案还指向「不是有效 JSON」。
+	r.Body = http.MaxBytesReader(w, r.Body, 256<<10)
 	var input authorizationDecision
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		oauthAPIError(w, http.StatusBadRequest, "授权请求不是有效 JSON")
@@ -220,6 +224,12 @@ func (s *Server) AuthorizationDecision(w http.ResponseWriter, r *http.Request) {
 		oauthAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// 令牌级命令策略只能收紧实例级策略；非法正则在这里就拒绝，不写进授权码。
+	commandPolicy, err := input.CommandPolicy.Normalize()
+	if err != nil {
+		oauthAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	plainCode, err := randomValue("osc_code_", 32)
 	if err != nil {
 		oauthAPIError(w, http.StatusInternalServerError, "无法生成授权码")
@@ -235,6 +245,7 @@ func (s *Server) AuthorizationDecision(w http.ResponseWriter, r *http.Request) {
 		AllHosts:      input.AllHosts,
 		ManageHosts:   input.ManageHosts,
 		DisabledTools: disabledTools,
+		CommandPolicy: commandPolicy,
 		HostIDs:       input.HostIDs,
 		ExpiresAt:     s.now().Add(codeLifetime).Unix(),
 	}); err != nil {
