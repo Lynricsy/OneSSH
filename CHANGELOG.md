@@ -2,7 +2,7 @@
 
 本文件记录 OneSSH 的重要变更，格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
-## [Unreleased]
+## [0.1.22] - 2026-11-25
 
 ### 新增
 
