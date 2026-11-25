@@ -349,7 +349,7 @@ export ONESSH_COMMAND_ENV_KEYS='HTTP_PROXY,HTTPS_PROXY'
 
 记忆工具沿用同一主机授权：令牌可读写其 `host_ids` 范围内的主机 bank，不能通过记忆 ID 越权更新或删除其他主机记忆。全局 bank 对所有有效令牌开放读写；`memory_stats` 只返回当前令牌可见的 bank。
 
-`manage_hosts` 是一项独立的全局配置管理权限，默认关闭，同时也是一项**高信任权限**：`host_create` / `host_update` / `host_test` 可以对任意 `addr:port` 建立真实 SSH 连接并透传错误详情，不建议授予暴露在不可信输入（prompt injection 风险）下的 Agent 令牌。开启后可以维护全部 SSH 目标，但**既不扩大执行范围，也不会把新建的目标自动加进该令牌的授权列表**。主机密码经管理工具只写不读；所有管理调用和权限拒绝都会写入审计，密码参数固定脱敏。
+`manage_hosts` 是一项独立的全局配置管理权限，默认关闭，同时也是一项**高信任权限**：`host_create` / `host_update` 可写入任意 `addr:port` 的目标配置（只写配置、不建立连接），`host_test` 随即可对任意已配置主机建立真实 SSH 连接并透传错误详情，不建议授予暴露在不可信输入（prompt injection 风险）下的 Agent 令牌。开启后可以维护全部 SSH 目标，但**既不扩大执行范围，也不会把新建的目标自动加进该令牌的授权列表**。主机密码经管理工具只写不读；所有管理调用和权限拒绝都会写入审计，密码参数固定脱敏。
 
 ## 配置
 
