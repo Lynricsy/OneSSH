@@ -340,7 +340,7 @@ func TestDecodeTokenPolicyDefaultsAndFailClosed(t *testing.T) {
 			t.Fatalf("DecodeTokenPolicy(%q) = %#v，应为 off", raw, policy)
 		}
 	}
-	for _, raw := range []string{`{"mode":"deny","deny":["("]}`, `{"mode":"bogus"}`, `not-json`, `null`, `{"deny":["rm"]}`, `{"mode":null,"deny":["rm"]}`, `{"mode":"","allow":["^uptime$"]}`} {
+	for _, raw := range []string{`{"mode":"deny","deny":["("]}`, `{"mode":"bogus"}`, `not-json`, `null`, `{"deny":["rm"]}`, `{"mode":null,"deny":["rm"]}`, `{"mode":"","allow":["^uptime$"]}`, `{"mode":"deny","deny":null}`, `{"mode":"allow","allow":null}`, `{"mode":"off","deny":null}`} {
 		policy := DecodeTokenPolicy(raw)
 		compiled, err := policy.Compile()
 		if err != nil {

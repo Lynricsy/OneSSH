@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"database/sql"
+	"log"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -184,7 +185,9 @@ func (s *Server) auditDeniedTool(ctx context.Context, toolName, reason string) {
 		a.TokenID = sql.NullInt64{Int64: p.Token.ID, Valid: true}
 		a.TokenName = sql.NullString{String: p.Token.Name, Valid: true}
 	}
-	_ = s.Store.AddAudit(context.Background(), a)
+	if err := s.Store.AddAudit(context.Background(), a); err != nil {
+		log.Printf("写入拒绝审计失败 (%s): %v", toolName, err)
+	}
 	if s.Events != nil {
 		s.Events.Publish("tool_call", map[string]any{
 			"tool": toolName, "ok": false, "duration_ms": int64(0), "denied": true,

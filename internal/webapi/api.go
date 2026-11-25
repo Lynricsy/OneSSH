@@ -581,6 +581,10 @@ func (a *API) audit(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusBadRequest, fmt.Errorf("outcome 只接受 %s", strings.Join(outcomes, "、")))
 		return
 	}
+	if ok != nil && outcome != "" {
+		apiError(w, http.StatusBadRequest, fmt.Errorf("ok 与 outcome 不能同时传入"))
+		return
+	}
 	list, err := a.Store.ListAudit(r.Context(), tids, hosts, tools, ok, outcome, before, limit)
 	if err != nil {
 		apiError(w, http.StatusInternalServerError, err)

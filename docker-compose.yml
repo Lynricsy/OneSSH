@@ -10,6 +10,12 @@ services:
       ONESSH_LISTEN: :8866
       ONESSH_DATA_DIR: /data
       ONESSH_PUBLIC_URL: ${ONESSH_PUBLIC_URL:-}
+      # 可选：命令级策略（护栏，不是沙箱），默认 off；详细规则见 README「命令策略」
+      # ONESSH_COMMAND_POLICY: deny
+      # ONESSH_COMMAND_DENY: |
+      #   rm\s+-rf\s+/(?:\s|$)
+      # ONESSH_COMMAND_ALLOW: ""
+      # ONESSH_COMMAND_ENV_KEYS: ""
     volumes:
       - onessh-data:/data
     restart: unless-stopped

@@ -15,6 +15,9 @@
 ### 安全
 
 - 审计结果新增持久化分类 `ok` / `failed` / `denied` 与拒绝原因：不再依赖错误文案区分「被网关策略拦下」与「真正执行失败」；迁移前历史记录保持 `outcome` 为空，筛选 `failed` 时仍会包含旧的 `ok=0` 记录。迁移 0016 对五列逐一幂等判存，手工补过列的库升级不会因 duplicate column 启动失败。
+- 管理员会话与登录加固：`AdminAuth` 会话签名密钥改为绑定管理员密码摘要（轮换 `ONESSH_ADMIN_PASSWORD` 重启后既有 cookie 立即失效）；`/api/v1/login` 新增按对端 IP 的失败限流（15 分钟内连续失败 10 次锁定 15 分钟并返回 `429` + `Retry-After`，[#35](https://github.com/Lynricsy/OneSSH/issues/35)）。
+- 消除主机名枚举 oracle 并补齐 artifact 令牌归属校验：`AuthorizedHost` 仅对本令牌已授权的归档主机返回 `host archived`，其余不存在或未授权主机统一返回 `host not authorized`；`exec` 截断生成的 artifact 同步写入 `.owner` 令牌归属，`output_read` 读取时强制校验归属并由定时清理同步回收过期 `.owner`（[#38](https://github.com/Lynricsy/OneSSH/issues/38)）。
+- 审计与命令策略边界打磨：审计写入失败改为记录服务端日志不再静默丢弃；`GET /api/v1/audit` 拒绝同时传入 `ok` 与 `outcome`；`DecodeTokenPolicy` 对字段级显式 `null`（如 `{"mode":"deny","deny":null}`）按损坏走 fail-closed；`docker-compose.yml` 补充命令策略环境变量注释示例（[#37](https://github.com/Lynricsy/OneSSH/issues/37)）。
 
 ## [0.1.21] - 2026-11-01
 

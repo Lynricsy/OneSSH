@@ -372,14 +372,23 @@ func EncodeTokenPolicy(t TokenPolicy) (string, TokenPolicy, error) {
 }
 
 // DecodeTokenPolicy 解析数据库里的令牌策略。空串与 {} 表示未配置（off）；
-// 内容损坏（包括 JSON null）时返回 fail-closed 的值而不是报错，避免一条坏记录让令牌整体不可用，
-// 也不能让一条被改成 null 的记录变成「没有策略」。
+// 内容损坏（包括 JSON null 或显式字段级 null 如 "deny":null）时返回 fail-closed 的值而不是报错，
+// 避免一条坏记录让令牌整体不可用，也不能让被篡改成 null 的记录变成「没有策略」。
 func DecodeTokenPolicy(raw string) TokenPolicy {
 	switch trimmed := strings.TrimSpace(raw); trimmed {
 	case "", "{}":
 		return TokenPolicy{Mode: string(Off), Deny: []string{}, Allow: []string{}}
 	case "null":
 		return DenyAllTokenPolicy()
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		return DenyAllTokenPolicy()
+	}
+	for _, key := range []string{"mode", "deny", "allow"} {
+		if val, exists := fields[key]; exists && strings.TrimSpace(string(val)) == "null" {
+			return DenyAllTokenPolicy()
+		}
 	}
 	var policy TokenPolicy
 	if err := json.Unmarshal([]byte(raw), &policy); err != nil {

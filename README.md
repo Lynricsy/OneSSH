@@ -151,6 +151,9 @@ flowchart LR
 | **控制台** | React 管理界面、记忆筛选与删除、SSE 实时活动流、Ghostty Web 浏览器终端 |
 | **审计** | 结构化审计记录，保留调用令牌名称与 ID；文件正文与编辑内容只留长度摘要 |
 
+> [!NOTE]
+> **目标主机平台要求**：OneSSH 服务端可部署在 Linux / macOS / Windows / FreeBSD 上，但被管理的远程 SSH 目标主机当前默认要求 POSIX shell（`exec`、`exec_many`、`job_start`）与 Linux `/proc`（`host_status` 监控）。连接 Windows OpenSSH 目标主机时，目前仅 SFTP 相关工具（`file_*` 及降级为纯 SFTP 的 `grep`/`find`）可用。
+
 ## MCP 接入
 
 端点固定为 `/mcp`：

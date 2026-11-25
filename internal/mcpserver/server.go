@@ -207,7 +207,9 @@ func register[In, Out any](s *Server, tool *mcp.Tool, handler mcp.ToolHandlerFor
 		if raw, e := json.Marshal(out); e == nil {
 			a.BytesOut = int64(len(raw))
 		}
-		_ = s.Store.AddAudit(context.Background(), a)
+		if auditErr := s.Store.AddAudit(context.Background(), a); auditErr != nil {
+			log.Printf("写入工具审计失败 (%s): %v", tool.Name, auditErr)
+		}
 		event := map[string]any{"tool": tool.Name, "host": host, "ok": ok, "duration_ms": a.DurationMS}
 		if policyDenial.reason != "" {
 			event["denied"] = true

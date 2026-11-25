@@ -548,4 +548,7 @@ func TestAuditOutcomeFilter(t *testing.T) {
 	if bad := get("outcome=bogus"); bad.Code != http.StatusBadRequest {
 		t.Fatalf("未知 outcome 状态码 = %d %s", bad.Code, bad.Body.String())
 	}
+	if conflict := get("ok=true&outcome=denied"); conflict.Code != http.StatusBadRequest {
+		t.Fatalf("同时传 ok 与 outcome 状态码 = %d %s", conflict.Code, conflict.Body.String())
+	}
 }
