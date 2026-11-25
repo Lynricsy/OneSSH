@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +27,8 @@ func TestToolCatalogGivesAgentsEnoughContext(t *testing.T) {
 	if len(tools.Tools) < 25 {
 		t.Fatalf("工具数量 = %d，疑似注册缺失", len(tools.Tools))
 	}
+	var readOnly []string
+	readOnlySet := make(map[string]bool)
 	for _, tool := range tools.Tools {
 		if tool.Title == "" {
 			t.Errorf("%s 缺少 Title", tool.Name)
@@ -35,11 +38,43 @@ func TestToolCatalogGivesAgentsEnoughContext(t *testing.T) {
 		}
 		if tool.Annotations == nil {
 			t.Errorf("%s 缺少 ToolAnnotations，客户端无法判断只读还是破坏性", tool.Name)
+			continue
+		}
+		// destructiveHint 在 readOnlyHint=true 时按协议规范无独立语义，但部分支持「只读工具
+		// 免确认自动放行」的客户端仍会读取该字段，且缺省值 true 会导致它们保守弹窗。
+		// 因此全部工具均显式声明 destructiveHint，只读工具一律显式写 false。
+		if tool.Annotations.DestructiveHint == nil {
+			t.Errorf("%s 未显式声明 destructiveHint，支持只读自动放行的客户端无法据以放行", tool.Name)
+		} else if tool.Annotations.ReadOnlyHint && *tool.Annotations.DestructiveHint {
+			t.Errorf("%s 标为只读却声明 destructiveHint=true，两处必须一致", tool.Name)
+		}
+		if tool.Annotations.ReadOnlyHint {
+			readOnly = append(readOnly, tool.Name)
+			readOnlySet[tool.Name] = true
 		}
 		for name, description := range schemaPropertyDescriptions(t, tool.Name, tool.InputSchema) {
 			if strings.TrimSpace(description) == "" {
 				t.Errorf("%s 的参数 %s 缺少说明", tool.Name, name)
 			}
+		}
+	}
+	// 只读口径为「不修改远端业务状态、不留常驻改动」：网关内部的观测缓存刷新、召回热度
+	// 记账及 grep/find 的自删临时搜索 helper（可通过 ONESSH_SEARCH_HELPER=off 关闭）均视为
+	// 语义只读。新增工具时先把副作用想清楚，再决定是否加入这份名单。
+	wantReadOnly := []string{
+		"file_list", "file_read", "find", "grep", "host_status",
+		"hosts_list", "hosts_manage_list", "image_view", "job_list", "job_logs",
+		"job_status", "memory_list", "memory_recall", "memory_stats", "output_read",
+	}
+	sort.Strings(readOnly)
+	if strings.Join(readOnly, ",") != strings.Join(wantReadOnly, ",") {
+		t.Errorf("只读工具集合 = %v，期望 %v", readOnly, wantReadOnly)
+	}
+	// MCP Apps 卡片允许直接回调的工具（只读导航白名单）必须全部位于只读工具集合内，
+	// 避免卡片回调权限与 MCP ToolAnnotations 口径漂移。
+	for _, binding := range appBindings {
+		if binding.Callable && !readOnlySet[binding.Tool] {
+			t.Errorf("MCP App 卡片允许只读回调 %s，但该工具未标记为 ReadOnlyHint=true", binding.Tool)
 		}
 	}
 }

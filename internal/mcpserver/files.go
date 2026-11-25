@@ -48,7 +48,7 @@ func (s *Server) registerFiles(f *files.Manager) {
 		Description: "按行读取远程文本文件，返回带行号的内容、全文 SHA-256、字节数和总行数。" +
 			"文件上限 4MiB，检测到二进制内容会拒绝（图片改用 image_view）。默认从第 1 行返回 500 行，用 offset/limit 翻页。" +
 			"准备用 file_edit 修改前先读一次，把返回的 sha256 作为 expected_sha256 传回去。",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(true)},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(true)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in FileReadInput) (*mcp.CallToolResult, files.ReadResult, error) {
 		if _, err := AuthorizedHost(ctx, in.Host); err != nil {
 			return errorResult(err.Error()), files.ReadResult{}, nil
@@ -106,7 +106,7 @@ func (s *Server) registerFiles(f *files.Manager) {
 		Title: "列出远程目录",
 		Description: "列出远程目录下的条目：名称、字节数、权限、mtime、是否目录、软链接目标；目录在前，同类按名称排序。" +
 			"只列一层，不递归；条目超过 500 会报错，这时请换更精确的目录或改用 find 按 glob 查找。",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(true)},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(true)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in FileListInput) (*mcp.CallToolResult, FileListOutput, error) {
 		if _, err := AuthorizedHost(ctx, in.Host); err != nil {
 			return errorResult(err.Error()), FileListOutput{}, nil

@@ -8,6 +8,10 @@
 
 - 命令级策略：`ONESSH_COMMAND_POLICY=off|deny|allow` 配合 `ONESSH_COMMAND_DENY` / `ONESSH_COMMAND_ALLOW`（一行一条 Go 正则，非法正则与超限规则启动即报错，单列表上限 100 条、单条 512 字节，默认 `off` 保持现有行为）。拒绝规则同时覆盖命令原文、去首尾空白、NUL 截断前缀及其叠加形式，`^` 锚定的规则不会被前导换行或 NUL 填充绕过；白名单规则自动按整条命令锚定并直接拒绝含 NUL 字节的命令（`.` 不跨行，多行命令写 `(?s)`），`^git fetch` 只放行 `git fetch` 本身。`exec`、`exec_many`、`job_start` 在创建执行记录、取连接和 fan-out 之前判定，`exec_many` 整次调用全拒，`host_test` 固定执行的 `uptime` 同样判定；`session_env.set` 与 `job_start.env` 的敏感环境变量名一并限制（内置名单覆盖动态库劫持、解释器启动、git/Java/sudo 配置注入等 36 键，`ONESSH_COMMAND_ENV_KEYS` 可追加且启动时校验键名合法性），`exec` 每次执行前还会复查已有会话环境。令牌级策略在 WebUI 令牌页、OAuth 同意页与 REST 令牌接口中配置，只能收紧实例级策略，按逻辑 AND 组合，随请求编译一次缓存复用；`PUT /api/v1/tokens/{id}` 省略或 `null` 时保留原策略，显式提交规范化后为 `off` 的策略（`{"mode":"off"}`、`{}` 等）才清除。被拒调用不创建执行记录/后台任务，审计新增 `outcome=denied` 与 `deny_reason`，WebUI 活动页可单独筛选并展示拒绝原因，`instructions` 同步说明「被拒绝不是连接失败」。命令策略是误操作与明文 prompt injection 的护栏，不是沙箱；`file_write` 写环境文件劫持 `PATH` 的链路已在 README「命令策略」一节点明（[#32](https://github.com/Lynricsy/OneSSH/issues/32)）。
 
+### 修复
+
+- 补全全部 15 个只读 MCP 工具的显式注解（`readOnlyHint: true`、`destructiveHint: false`），让同时检查 `destructiveHint` 的客户端可以正常自动放行：`hosts_list`、`hosts_manage_list`、`host_status`、`file_read`、`file_list`、`grep`、`find`、`image_view`、`output_read`、`job_list`、`job_status`、`job_logs`、`memory_recall`、`memory_list`、`memory_stats`。其中 `grep`/`find` 的临时搜索 helper 启动即自删、不留常驻改动（如需彻底禁用可在部署侧设置 `ONESSH_SEARCH_HELPER=off`），故恢复标注为只读；同时在 `TestToolCatalogGivesAgentsEnoughContext` 固化 32 个工具的 `destructiveHint` 显式声明、15 个只读工具名单以及与 MCP Apps 只读回调白名单的一致性断言。
+
 ### 安全
 
 - 审计结果新增持久化分类 `ok` / `failed` / `denied` 与拒绝原因：不再依赖错误文案区分「被网关策略拦下」与「真正执行失败」；迁移前历史记录保持 `outcome` 为空，筛选 `failed` 时仍会包含旧的 `ok=0` 记录。迁移 0016 对五列逐一幂等判存，手工补过列的库升级不会因 duplicate column 启动失败。

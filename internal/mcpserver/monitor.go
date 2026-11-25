@@ -19,7 +19,7 @@ func (s *Server) registerMonitor(mon *monitor.Manager) {
 		Description: "读取主机的 CPU 使用率、内存用量、1 分钟负载和各挂载点磁盘用量快照。" +
 			"默认返回后台轮询存下的最近一条采样，很快但可能有分钟级延迟；需要当前真实状态时传 fresh=true 现场采集。" +
 			"主机未开启监控或还没采过样时会提示改用 fresh=true。只看资源用这个，不要用 exec 跑 top/df 自己解析。",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(true)},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(true)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in HostStatusInput) (*mcp.CallToolResult, monitor.Snapshot, error) {
 		h, err := AuthorizedHost(ctx, in.Host)
 		if err != nil {
