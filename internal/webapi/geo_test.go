@@ -20,7 +20,7 @@ import (
 func TestIsPrivateIP(t *testing.T) {
 	for addr, want := range map[string]bool{
 		"10.0.0.1": true, "192.168.1.2": true, "127.0.0.1": true, "100.64.3.4": true, "198.18.0.9": true,
-		"183.87.138.207": false, "5.231.26.104": false, "8.8.8.8": false,
+		"203.0.113.7": false, "198.51.100.20": false, "8.8.8.8": false,
 	} {
 		if got := isPrivateIP(net.ParseIP(addr)); got != want {
 			t.Fatalf("isPrivateIP(%s) = %v，期望 %v", addr, got, want)
