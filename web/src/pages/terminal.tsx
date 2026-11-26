@@ -108,7 +108,7 @@ function TermPane({
     const mount = mountRef.current
     if (!id || !mount) return
     terminals.attach(id, mount)
-    const ro = new ResizeObserver(() => terminals.fit(id))
+    const ro = new ResizeObserver(() => terminals.scheduleFit(id))
     ro.observe(mount)
     return () => {
       ro.disconnect()
@@ -594,7 +594,7 @@ export function TerminalPage() {
                     terminals.focus(active.id)
                   }
                 }}
-                placeholder="在输出中搜索…"
+                placeholder={`在 ${sessionName(active)} 的输出中搜索…`}
                 className="h-7 w-52 bg-transparent px-1 text-[12.5px] text-text placeholder:text-faint focus:outline-none"
               />
               <span className="min-w-12 text-center text-[11px] text-muted tabular-nums">{search.hits.length ? `${search.i + 1}/${search.hits.length}` : search.q ? '0' : ''}</span>

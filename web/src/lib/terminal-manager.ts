@@ -217,7 +217,8 @@ class TerminalManager {
     term.loadAddon(fit)
     term.open(session.element)
     fit.fit()
-    fit.observeResize()
+    // 不用 FitAddon 自带的 observeResize：切换分屏时容器会经过若干中间宽度，逐个应用会让
+    // 已有输出被反复重排而丢字。尺寸变化统一走 scheduleFit 的防抖。
     session.term = term
     session.fit = fit
 
@@ -380,10 +381,8 @@ class TerminalManager {
     const s = this.sessions.get(id)
     if (!s) return
     if (s.element.parentElement !== mount) mount.appendChild(s.element)
-    requestAnimationFrame(() => {
-      s.fit?.fit()
-      if (s.unread || s.bell) this.patch(id, { unread: false, bell: false })
-    })
+    this.scheduleFit(id)
+    if (s.unread || s.bell) requestAnimationFrame(() => this.patch(id, { unread: false, bell: false }))
   }
 
   detach(id: string, mount: HTMLElement) {
@@ -393,6 +392,14 @@ class TerminalManager {
 
   fit(id: string) {
     this.sessions.get(id)?.fit?.fit()
+  }
+
+  private fitTimers = new Map<string, number>()
+
+  /** 尺寸稳定 120ms 后再重排一次，避免中间宽度导致回滚内容丢字 */
+  scheduleFit(id: string) {
+    window.clearTimeout(this.fitTimers.get(id))
+    this.fitTimers.set(id, window.setTimeout(() => this.sessions.get(id)?.fit?.fit(), 120))
   }
 
   focus(id: string) {
@@ -454,7 +461,7 @@ class TerminalManager {
       if (update.theme) term.renderer?.setTheme((THEMES[update.theme] ?? THEMES.onessh).theme)
       // 字号变化会触发整屏重绘；换主题时借它刷新一次画面
       if (update.fontSize || update.theme) term.options.fontSize = this.settings.fontSize
-      requestAnimationFrame(() => s.fit?.fit())
+      this.scheduleFit(s.id)
     }
     this.emit()
   }
