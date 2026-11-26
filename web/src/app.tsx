@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MotionConfig } from 'motion/react'
 import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
@@ -20,6 +20,9 @@ import { NotFoundPage } from '@/pages/not-found'
 import { OAuthAuthorizePage } from '@/pages/oauth-authorize'
 import { TerminalPage } from '@/pages/terminal'
 import { TokensPage } from '@/pages/tokens'
+
+// 地图页带着世界边界数据（约 100 KB），按需加载，不拖慢其余页面
+const MapPage = lazy(() => import('@/pages/map').then((m) => ({ default: m.MapPage })))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -78,6 +81,14 @@ export default function App() {
                 <Route path="/oauth/authorize" element={<OAuthAuthorizePage />} />
                 <Route element={<AppShell />}>
                   <Route index element={<DashboardPage />} />
+                  <Route
+                    path="map"
+                    element={
+                      <Suspense fallback={<div className="h-[60vh] animate-pulse rounded-[16px] bg-surface-2/60" />}>
+                        <MapPage />
+                      </Suspense>
+                    }
+                  />
                   <Route path="hosts" element={<HostsPage />} />
                   <Route path="keys" element={<KeysPage />} />
                   <Route path="tokens" element={<TokensPage />} />

@@ -1,4 +1,13 @@
-import { Broadcast, MagnifyingGlass, Pulse } from '@phosphor-icons/react'
+import {
+  Broadcast,
+  CheckCircle,
+  HardDrives,
+  Lightning,
+  MagnifyingGlass,
+  Pulse,
+  ShieldWarning,
+  Timer,
+} from '@phosphor-icons/react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useMemo, useState } from 'react'
 import {
@@ -19,6 +28,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { MultiSelect } from '@/components/ui/multi-select'
 import { PageHeader } from '@/components/ui/page-header'
+import { StatStrip } from '@/components/ui/stat-strip'
 import { PageTransition } from '@/components/ui/page-transition'
 import { Select } from '@/components/ui/select'
 import { Sheet } from '@/components/ui/sheet'
@@ -349,6 +359,26 @@ export function ActivityPage() {
   return (
     <PageTransition>
       <PageHeader title="活动与审计" subtitle="实时事件、每次工具调用及关联的命令输出" />
+
+      {(audit.data?.length ?? 0) > 0 && (() => {
+        const list = audit.data ?? []
+        const outcome = (row: (typeof list)[number]) => row.Outcome || (row.OK ? 'ok' : 'failed')
+        const ok = list.filter((row) => outcome(row) === 'ok').length
+        const denied = list.filter((row) => outcome(row) === 'denied').length
+        const avg = Math.round(list.reduce((sum, row) => sum + row.DurationMS, 0) / list.length)
+        const hostsTouched = new Set(list.filter((row) => row.Host.Valid).map((row) => row.Host.String)).size
+        return (
+          <StatStrip
+            items={[
+              { label: '最近调用', value: list.length, hint: filtered ? '当前筛选结果' : '最近 100 条', icon: <Lightning size={18} weight="duotone" />, tone: '#14b8a6' },
+              { label: '成功率', value: `${Math.round((ok / list.length) * 100)}%`, hint: `${list.length - ok - denied} 次失败`, icon: <CheckCircle size={18} weight="duotone" />, tone: ok / list.length >= 0.9 ? '#22c55e' : '#f59e0b' },
+              { label: '策略拒绝', value: denied, hint: '命中命令策略或权限', icon: <ShieldWarning size={18} weight="duotone" />, tone: denied ? '#f59e0b' : '#94a3b8' },
+              { label: '平均耗时', value: avg >= 1000 ? `${(avg / 1000).toFixed(1)} s` : `${avg} ms`, hint: '单次工具调用', icon: <Timer size={18} weight="duotone" />, tone: '#6366f1' },
+              { label: '涉及主机', value: hostsTouched, hint: `${new Set(list.map((row) => row.Tool)).size} 种工具`, icon: <HardDrives size={18} weight="duotone" />, tone: '#0ea5e9' },
+            ]}
+          />
+        )
+      })()}
 
       {/* 两栏在 xl 起固定为一屏高：事件与审计都是「持续刷新的流」，各自内部滚动比把页面拉成几千像素更好用 */}
       <div className="grid gap-4 xl:h-[calc(100dvh-11.5rem)] xl:min-h-[520px] xl:grid-cols-[2fr_3fr]">

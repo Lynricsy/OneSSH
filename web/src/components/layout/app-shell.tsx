@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { useHosts } from '@/api/queries'
 import { LogoTile } from '@/components/brand/logo'
+import { CommandPalette } from '@/components/command-palette'
 import { Sheet } from '@/components/ui/sheet'
 import { Spinner } from '@/components/ui/spinner'
 import { Brand, NavList, Sidebar } from './sidebar'
@@ -14,6 +15,19 @@ export function AppShell() {
   const hosts = useHosts()
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === 'collapsed')
   const [navOpen, setNavOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+
+  // Ctrl/⌘ + K 唤起快速跳转。终端页让出这个组合键：shell 里 Ctrl+K 是「删到行尾」
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'k') return
+      if (window.location.pathname.startsWith('/terminal')) return
+      event.preventDefault()
+      setPaletteOpen((open) => !open)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const toggle = () =>
     setCollapsed((prev) => {
@@ -50,6 +64,7 @@ export function AppShell() {
         <Topbar
           hostCount={hosts.data?.filter((host) => !host.archived).length ?? 0}
           onOpenNav={() => setNavOpen(true)}
+          onOpenSearch={() => setPaletteOpen(true)}
         />
         <main
           id="main"
@@ -58,6 +73,7 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
       <Sheet
         open={navOpen}
         onOpenChange={setNavOpen}

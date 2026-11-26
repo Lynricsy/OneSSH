@@ -1,6 +1,20 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Controller, useForm, type UseFormReturn } from 'react-hook-form'
-import { Check, Copy, PencilSimple, Plus, Ticket, Trash, Warning, WarningCircle } from '@phosphor-icons/react'
+import {
+  Check,
+  Copy,
+  Globe,
+  ListChecks,
+  PencilSimple,
+  Plus,
+  Prohibit,
+  ShieldWarning,
+  Ticket,
+  Trash,
+  Warning,
+  WarningCircle,
+} from '@phosphor-icons/react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
 import { useCreateToken, useDeleteToken, useDeleteTokens, useHosts, useTokens, useToolGroups, useUpdateToken } from '@/api/queries'
@@ -19,6 +33,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { MultiSelect } from '@/components/ui/multi-select'
 import { PageHeader } from '@/components/ui/page-header'
+import { StatStrip } from '@/components/ui/stat-strip'
 import { PageTransition } from '@/components/ui/page-transition'
 import { SelectionBar } from '@/components/ui/selection-bar'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -394,6 +409,25 @@ export function TokensPage() {
 
   const isEmpty = !tokens.isLoading && tokens.data?.length === 0
 
+  // ?new=1 直达创建弹窗（命令面板使用）
+  const [searchParams, setSearchParams] = useSearchParams()
+  useEffect(() => {
+    if (searchParams.get('new') !== '1') return
+    openCreate()
+    searchParams.delete('new')
+    setSearchParams(searchParams, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  const tokenList = tokens.data ?? []
+  const tokenStats = {
+    total: tokenList.length,
+    allHosts: tokenList.filter((t) => t.all_hosts).length,
+    manage: tokenList.filter((t) => t.manage_hosts).length,
+    policy: tokenList.filter((t) => t.command_policy && t.command_policy.mode !== 'off').length,
+    restricted: tokenList.filter((t) => t.disabled_tools.length > 0).length,
+  }
+
   return (
     <PageTransition>
       <PageHeader
@@ -406,6 +440,18 @@ export function TokensPage() {
           </Button>
         }
       />
+
+      {tokenStats.total > 0 && (
+        <StatStrip
+          items={[
+            { label: '令牌总数', value: tokenStats.total, hint: '手工令牌与 OAuth 授权', icon: <Ticket size={18} weight="duotone" />, tone: '#14b8a6' },
+            { label: '全部主机授权', value: tokenStats.allHosts, hint: `${tokenStats.total - tokenStats.allHosts} 个按主机限定`, icon: <Globe size={18} weight="duotone" />, tone: '#6366f1' },
+            { label: '可管理主机', value: tokenStats.manage, hint: '拥有 manage_hosts 权限', icon: <ShieldWarning size={18} weight="duotone" />, tone: tokenStats.manage ? '#f59e0b' : '#94a3b8' },
+            { label: '启用命令策略', value: tokenStats.policy, hint: '黑名单 / 白名单收紧', icon: <ListChecks size={18} weight="duotone" />, tone: '#22c55e' },
+            { label: '禁用工具组', value: tokenStats.restricted, hint: '按组裁剪 MCP 工具', icon: <Prohibit size={18} weight="duotone" />, tone: '#f43f5e' },
+          ]}
+        />
+      )}
 
       {tokens.isError ? (
         // 拉取失败原本是静默的（query 没有全局 error toast），只剩一具空表头，这里给出原因和重试

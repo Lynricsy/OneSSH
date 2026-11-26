@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import {
   Check,
@@ -353,6 +354,18 @@ export function KeysPage() {
     })
 
   const needsPassphrase = Boolean(pasted?.encrypted)
+
+  // ?upload=1 / ?new=1 直达上传或生成弹窗（命令面板使用）
+  const [searchParams, setSearchParams] = useSearchParams()
+  useEffect(() => {
+    const intent = searchParams.get('upload') === '1' ? 'import' : searchParams.get('new') === '1' ? 'generate' : null
+    if (!intent) return
+    openCreate(intent)
+    searchParams.delete('upload')
+    searchParams.delete('new')
+    setSearchParams(searchParams, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   return (
     <PageTransition>

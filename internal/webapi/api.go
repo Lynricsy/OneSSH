@@ -59,6 +59,10 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /hosts/{id}/reset-fingerprint", a.resetFingerprint)
 	mux.HandleFunc("POST /hosts/{id}/archive", a.hostArchive)
 	mux.HandleFunc("POST /hosts/{id}/unarchive", a.hostArchive)
+	mux.HandleFunc("GET /geo", a.geoList)
+	mux.HandleFunc("GET /geo/latency", a.geoLatency)
+	mux.HandleFunc("PUT /geo/{hostID}", a.geoManual) // hostID 为 origin 时设置网关自身位置
+	mux.HandleFunc("DELETE /geo/{hostID}", a.geoManual)
 	mux.HandleFunc("GET /keys", a.keys)
 	mux.HandleFunc("POST /keys", a.keys)
 	mux.HandleFunc("DELETE /keys/{id}", a.key)

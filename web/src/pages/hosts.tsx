@@ -1,4 +1,20 @@
-import { CaretUp, DotsThree, HardDrives, MagnifyingGlass, Plus, UploadSimple } from '@phosphor-icons/react'
+import {
+  Archive,
+  CaretUp,
+  ChartLine,
+  DotsThree,
+  FolderOpen,
+  GlobeHemisphereEast,
+  HardDrives,
+  Key,
+  LockKey,
+  MagnifyingGlass,
+  Plus,
+  Pulse,
+  Terminal,
+  UploadSimple,
+} from '@phosphor-icons/react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Controller, useForm } from 'react-hook-form'
 import { useEffect, useId, useMemo, useState } from 'react'
 import { toast } from 'sonner'
@@ -16,6 +32,9 @@ import {
 import type { Host, HostPayload } from '@/api/types'
 import { HostConnection } from '@/components/host-connection'
 import { InlineKeyUpload } from '@/components/inline-key-upload'
+import { LocationCell } from '@/components/location-cell'
+import { StatStrip } from '@/components/ui/stat-strip'
+import { useServerLocations } from '@/lib/use-locations'
 import { ConfirmDialog } from '@/components/ui/alert-dialog'
 import { Badge, Dot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -28,6 +47,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -179,6 +199,9 @@ export function HostsPage() {
   const archiveHost = useArchiveHost()
   const unarchiveHost = useUnarchiveHost()
   const testHost = useTestHost()
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const geo = useServerLocations({ includeArchived: true })
   const {
     register,
     control,
@@ -298,6 +321,27 @@ export function HostsPage() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
+        {!host.archived && (
+          <>
+            <DropdownMenuItem onSelect={() => navigate(`/terminal?host=${encodeURIComponent(host.name)}`)}>
+              <Terminal size={14} />
+              打开终端
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => navigate(`/files?host=${host.id}`)}>
+              <FolderOpen size={14} />
+              浏览文件
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => navigate(`/metrics?host=${host.id}`)}>
+              <ChartLine size={14} />
+              查看指标
+            </DropdownMenuItem>
+          </>
+        )}
+        <DropdownMenuItem onSelect={() => navigate(`/map?host=${host.id}`)}>
+          <GlobeHemisphereEast size={14} />
+          在地图中查看
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => openEdit(host)}>编辑</DropdownMenuItem>
         <DropdownMenuItem onSelect={() => setConfirm({ kind: 'reset', host })}>
           重置指纹
@@ -317,6 +361,25 @@ export function HostsPage() {
     </DropdownMenu>
   )
 
+  // 命令面板 / 其他页面带 ?new=1 进来：直接打开添加主机弹窗
+  useEffect(() => {
+    if (searchParams.get('new') !== '1') return
+    openCreate()
+    searchParams.delete('new')
+    setSearchParams(searchParams, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  const activeHosts = (hosts.data ?? []).filter((host) => !host.archived)
+  const hostStats = {
+    active: activeHosts.length,
+    archived: (hosts.data?.length ?? 0) - activeHosts.length,
+    key: activeHosts.filter((host) => host.auth_type === 'key').length,
+    password: activeHosts.filter((host) => host.auth_type === 'password').length,
+    monitored: activeHosts.filter((host) => host.monitor_enabled).length,
+    pending: activeHosts.filter((host) => !host.hostkey_fp).length,
+  }
+
   // 显式列宽：属性列定宽、余量全部给主机名列，避免最后一列前出现上百像素空档。
   const columns: Column<Host>[] = [
     {
@@ -328,6 +391,14 @@ export function HostsPage() {
           <HostName host={host} />
           <HostConnection host={host} />
         </div>
+      ),
+    },
+    {
+      key: 'location',
+      title: '位置 / 延迟',
+      className: 'hidden w-[190px] lg:table-cell',
+      render: (host) => (
+        <LocationCell info={geo.geoById.get(host.id)} latency={geo.latencyById.get(host.id)} />
       ),
     },
     {
@@ -349,7 +420,7 @@ export function HostsPage() {
     {
       key: 'hostkey_fp',
       title: '指纹',
-      className: 'w-[320px]',
+      className: 'hidden w-[280px] 2xl:table-cell',
       render: (host) => <FingerprintCell host={host} />,
     },
     {
@@ -427,6 +498,58 @@ export function HostsPage() {
             添加主机
           </Button>
         }
+      />
+
+      <StatStrip
+        items={[
+          {
+            label: '在役主机',
+            value: hostStats.active,
+            hint: hostStats.archived ? `另有 ${hostStats.archived} 台已归档` : '没有归档主机',
+            icon: <HardDrives size={18} weight="duotone" />,
+            tone: '#14b8a6',
+            onClick: () => setFilterArchived('active'),
+          },
+          {
+            label: '密钥认证',
+            value: hostStats.key,
+            hint: `${hostStats.password} 台使用密码`,
+            icon: <Key size={18} weight="duotone" />,
+            tone: '#6366f1',
+            onClick: () => setFilterAuth('key'),
+          },
+          {
+            label: '资源监控',
+            value: hostStats.monitored,
+            hint: hostStats.active ? `覆盖 ${Math.round((hostStats.monitored / hostStats.active) * 100)}%` : '—',
+            icon: <Pulse size={18} weight="duotone" />,
+            tone: '#22c55e',
+            onClick: () => setFilterMonitor('on'),
+          },
+          {
+            label: '待首次信任',
+            value: hostStats.pending,
+            hint: hostStats.pending ? '点「测试」完成 TOFU 指纹固定' : '指纹全部已固定',
+            icon: <LockKey size={18} weight="duotone" />,
+            tone: hostStats.pending ? '#f59e0b' : '#94a3b8',
+          },
+          {
+            label: '分布地区',
+            value: geo.countries.length,
+            hint: geo.avgLatency != null ? `平均延迟 ${geo.avgLatency} ms` : `${geo.cityCount} 座城市`,
+            icon: <GlobeHemisphereEast size={18} weight="duotone" />,
+            tone: '#0ea5e9',
+            onClick: () => navigate('/map'),
+          },
+          {
+            label: '已归档',
+            value: hostStats.archived,
+            hint: '保留配置，退出监控与 MCP',
+            icon: <Archive size={18} weight="duotone" />,
+            tone: '#94a3b8',
+            onClick: () => setFilterArchived('archived'),
+          },
+        ]}
       />
 
       {/* 一份过滤条同时驱动桌面表格与移动端卡片；窄屏下各项整行堆叠 */}

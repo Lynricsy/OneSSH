@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ChartLine } from '@phosphor-icons/react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Area,
   AreaChart,
@@ -139,7 +139,8 @@ function ChartSkeleton({ height }: { height: number }) {
 }
 
 export function MetricsPage() {
-  const [picked, setPicked] = useState<number>()
+  const [params] = useSearchParams()
+  const [picked, setPicked] = useState<number | undefined>(() => Number(params.get('host')) || undefined)
   const hosts = useHosts()
   // 归档主机不再采样，不作为可选目标；已选主机被归档后自动退回未选择
   const activeHosts = (hosts.data ?? []).filter((item) => !item.archived)

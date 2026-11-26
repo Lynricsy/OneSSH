@@ -1,5 +1,6 @@
 import { Terminal as TerminalIcon } from '@phosphor-icons/react'
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useHosts } from '@/api/queries'
 import { Dot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -24,7 +25,9 @@ const statusPresentation: Record<
 
 export function TerminalPage() {
   const { data: allHosts = [], isLoading } = useHosts()
-  const [picked, setPicked] = useState<string>()
+  const [params] = useSearchParams()
+  // 支持 ?host=<主机名> 直达：命令面板、主机页与地图都会带着它跳过来
+  const [picked, setPicked] = useState<string | undefined>(() => params.get('host') ?? undefined)
   // 归档主机不可作为连接目标；已选主机被归档后自动退回未选择
   const hosts = allHosts.filter((item) => !item.archived)
   const host = hosts.some((item) => item.name === picked) ? picked : undefined

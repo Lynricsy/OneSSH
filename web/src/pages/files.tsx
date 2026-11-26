@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   ArrowClockwise,
   CaretRight,
@@ -39,7 +40,8 @@ function startDownload(hostId: number, path: string, name: string) {
 }
 
 export function FilesPage() {
-  const [picked, setPicked] = useState<number>()
+  const [params] = useSearchParams()
+  const [picked, setPicked] = useState<number | undefined>(() => Number(params.get('host')) || undefined)
   const [path, setPath] = useState('~')
   // draft 非空即为路径编辑态：用一个状态代替「editing 布尔 + 直接改 path」，
   // 后者每敲一个字符就会发一次 SFTP 请求（并弹一条错误 toast）

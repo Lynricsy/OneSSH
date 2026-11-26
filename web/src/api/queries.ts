@@ -13,6 +13,10 @@ import type {
   CommandOutputChunk,
   CommandRun,
   FileEntry,
+  GeoInfo,
+  GeoLatency,
+  GeoManualPayload,
+  GeoResponse,
   Host,
   HostPayload,
   JobStatus,
@@ -44,6 +48,9 @@ export const queryKeys = {
   memoryList: (hostId: number | 'all', q: string, limit: number, offset: number) =>
     ['memories', 'list', hostId, q, limit, offset] as const,
   memoryStats: ['memories', 'stats'] as const,
+  /** 位置与延迟共用 ['geo'] 前缀：手动标注后一次失效即可刷新两者 */
+  geo: ['geo'] as const,
+  geoLatency: ['geo', 'latency'] as const,
 }
 
 /** 所有 mutation 的统一失败提示；成功提示由调用方按语义给 */
@@ -331,6 +338,44 @@ export const useDeleteMemory = () =>
 
 export const useDeleteMemories = () =>
   useBatchMutation<number>((id) => del(`/memories/${id}`), queryKeys.memories, '删除')
+
+/* ── 地理位置 ───────────────────────────────────────────────────── */
+
+/** 首次定位需要访问外部服务，结果在后端缓存；前端 5 分钟内不重复拉取 */
+export const useGeo = () =>
+  useQuery({ queryKey: queryKeys.geo, queryFn: () => api<GeoResponse>('/geo'), staleTime: 5 * 60_000 })
+
+export const useGeoLatency = () =>
+  useQuery({
+    queryKey: queryKeys.geoLatency,
+    queryFn: () => api<GeoLatency[]>('/geo/latency'),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  })
+
+export function useRefreshGeo() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api<GeoResponse>('/geo?refresh=1'),
+    onSuccess: (data) => {
+      qc.setQueryData(queryKeys.geo, data)
+      void qc.invalidateQueries({ queryKey: queryKeys.geoLatency })
+      toast.success('已重新定位全部主机')
+    },
+    onError,
+  })
+}
+
+/** hostId 传 'origin' 时设置的是网关自身位置（走代理时自动检测到的只是代理出口） */
+export const useSetGeo = () =>
+  useInvalidatingMutation<{ hostId: number | 'origin'; payload: GeoManualPayload }, GeoInfo>(
+    ({ hostId, payload }) => put<GeoInfo>(`/geo/${hostId}`, payload),
+    queryKeys.geo,
+    '位置已保存',
+  )
+
+export const useResetGeo = () =>
+  useInvalidatingMutation<number | 'origin', void>((id) => del(`/geo/${id}`), queryKeys.geo, '已恢复自动定位')
 
 /* ── SFTP 上传 ──────────────────────────────────────────────────── */
 

@@ -85,8 +85,8 @@ export function DataTable<T, K extends string | number = string | number>({
               <th
                 scope="col"
                 className={cn(
-                  'w-10 border-b border-border py-2.5 pr-0 pl-4',
-                  stickyHeader && 'sticky top-0 z-10 bg-surface',
+                  'w-10 border-b border-border bg-surface-2/45 py-2.5 pr-0 pl-4',
+                  stickyHeader && 'sticky top-0 z-10 bg-surface-2 backdrop-blur',
                 )}
               >
                 <Checkbox
@@ -102,8 +102,8 @@ export function DataTable<T, K extends string | number = string | number>({
                 key={c.key}
                 scope="col"
                 className={cn(
-                  'border-b border-border px-4 py-2.5 text-left text-[11px] font-medium tracking-wide whitespace-nowrap text-muted uppercase',
-                  stickyHeader && 'sticky top-0 z-10 bg-surface',
+                  'border-b border-border bg-surface-2/45 px-4 py-2.5 text-left text-[11px] font-semibold tracking-wide whitespace-nowrap text-muted uppercase',
+                  stickyHeader && 'sticky top-0 z-10 bg-surface-2 backdrop-blur',
                   c.className,
                 )}
               >
@@ -149,8 +149,8 @@ export function DataTable<T, K extends string | number = string | number>({
                 className={cn(
                   'transition-colors [&:last-child>td]:border-b-0',
                   onRowClick
-                    ? 'cursor-pointer hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none'
-                    : 'hover:bg-surface-2/60',
+                    ? 'cursor-pointer hover:bg-accent/[0.04] focus-visible:bg-accent/[0.06] focus-visible:outline-none'
+                    : 'hover:bg-accent/[0.035]',
                   selection?.selected.has(rowKey(row)) && 'bg-accent/5',
                 )}
               >

@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import {
   ArrowRight,
   ArrowsClockwise,
   ChartLineUp,
   Cpu,
+  GlobeHemisphereEast,
   HardDrive,
   HardDrives,
   Key,
@@ -43,6 +44,9 @@ import { PageTransition } from '@/components/ui/page-transition'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/cn'
 import { staggerContainer, staggerItem } from '@/lib/motion'
+
+// 分布地图连同世界边界数据按需加载，不拖慢概览页首屏
+const DashboardGeo = lazy(() => import('@/components/dashboard-geo'))
 
 /* ── 数据整形 ─────────────────────────────────────────────────────── */
 
@@ -111,7 +115,8 @@ type Snapshot = {
 function snapshotOf(host: Host, series: Metric[], color: string, now: number): Snapshot {
   const latest = series[series.length - 1]
   if (!latest) return { host, color, series, fresh: false, status: 'nodata' }
-  const cpu = latest.cpu_pct
+  // CPU 需要两次采样做差分，刚重启后的首个点没有它：退回最近一个有值的点，而不是显示破折号
+  const cpu = latest.cpu_pct ?? [...series].reverse().find((m) => m.cpu_pct != null)?.cpu_pct
   const mem = memPct(latest)
   const disk = diskPct(latest)
   const fresh = now - latest.ts < FRESH_MS
@@ -862,6 +867,11 @@ export function DashboardPage() {
             </Panel>
           </div>
 
+          {/* ── 分布地图 + 网络延迟 ── */}
+          <Suspense fallback={<Skeleton className="mt-4 h-[360px] rounded-[12px]" />}>
+            <DashboardGeo />
+          </Suspense>
+
           {/* ── 磁盘 + Agent 活动 ── */}
           <div className="mt-4 grid gap-4 xl:grid-cols-3">
             <Panel title="磁盘使用率" subtitle="各主机最满的数据盘" icon={<HardDrive size={16} weight="bold" />}>
@@ -989,11 +999,12 @@ export function DashboardPage() {
           </div>
 
           {/* ── 快捷入口 ── */}
-          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {[
               { to: '/keys', icon: <Key size={18} weight="duotone" />, title: 'SSH 密钥', value: `${keyCount} 把`, hint: `${keyHosts} 台主机用密钥登录` },
               { to: '/tokens', icon: <Ticket size={18} weight="duotone" />, title: 'Agent 令牌', value: `${tokens.data?.length ?? 0} 个`, hint: '管理 MCP 访问范围' },
               { to: '/metrics', icon: <ChartLineUp size={18} weight="duotone" />, title: '详细指标', value: `${sampled.length} 台`, hint: '查看单机 CPU / 内存 / 磁盘曲线' },
+              { to: '/map', icon: <GlobeHemisphereEast size={18} weight="duotone" />, title: '分布地图', value: `${hosts.length} 台`, hint: '服务器位置、延迟与当地时间' },
             ].map((item) => (
               <motion.div key={item.to} variants={staggerItem}>
                 <Link
