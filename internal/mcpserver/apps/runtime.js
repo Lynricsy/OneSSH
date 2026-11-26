@@ -28,7 +28,7 @@
 
   // 只读回调白名单。卡片里的任何交互都只能触发这些工具；写操作一律留给模型，
   // 避免用户点一下按钮就在远端机器上产生副作用。
-  var CALLABLE = ["hosts_list", "hosts_manage_list", "file_list", "file_read", "output_read",
+  var CALLABLE = ["hosts_list", "hosts_manage_list", "keys_list", "file_list", "file_read", "output_read",
     "job_list", "job_status", "job_logs", "host_status", "memory_list", "memory_stats", "memory_recall"];
 
   var views = {};
@@ -1336,6 +1336,7 @@
   var KICKERS = {
     hosts_list: "HOSTS", hosts_manage_list: "HOSTS", host_create: "HOST", host_update: "HOST",
     host_test: "TEST", host_reset_fingerprint: "HOST", host_delete: "HOST",
+    keys_list: "KEYS", key_generate: "KEY", key_import: "KEY",
     exec: "EXEC", session_env: "ENV", output_read: "OUTPUT", exec_many: "FANOUT",
     job_start: "JOB", job_list: "JOBS", job_status: "JOB", job_logs: "LOGS", job_kill: "JOB",
     file_read: "READ", file_write: "WRITE", file_edit: "EDIT", file_list: "LIST", file_transfer: "COPY",

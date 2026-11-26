@@ -59,6 +59,9 @@ var appBindings = []appBinding{
 	{Tool: "host_test", View: "hosts", Title: "连通性测试", Summary: "登录主机执行 uptime 的输出与退出码", Invoking: "正在测试连通性…", Invoked: "连通性测试完成"},
 	{Tool: "host_reset_fingerprint", View: "hosts", Title: "重置指纹", Summary: "TOFU 指纹重置结果", Invoking: "正在重置指纹…", Invoked: "指纹已重置"},
 	{Tool: "host_delete", View: "hosts", Title: "删除主机", Summary: "主机删除结果", Invoking: "正在删除主机…", Invoked: "主机已删除"},
+	{Tool: "keys_list", View: "hosts", Title: "SSH 密钥", Summary: "网关保存的密钥、指纹与使用它的主机", Invoking: "正在读取密钥…", Invoked: "已读取密钥", Callable: true},
+	{Tool: "key_generate", View: "hosts", Title: "生成密钥", Summary: "新生成 ed25519 密钥的公钥与指纹", Invoking: "正在生成密钥…", Invoked: "密钥已生成"},
+	{Tool: "key_import", View: "hosts", Title: "上传私钥", Summary: "导入私钥后的公钥与指纹", Invoking: "正在上传私钥…", Invoked: "私钥已上传"},
 
 	{Tool: "exec", View: "exec", Title: "命令执行", Summary: "命令输出、退出码、工作目录与截断信息", Invoking: "正在执行命令…", Invoked: "命令已执行"},
 	{Tool: "session_env", View: "exec", Title: "会话环境变量", Summary: "持久会话的环境变量列表", Invoking: "正在更新会话环境…", Invoked: "会话环境已更新"},

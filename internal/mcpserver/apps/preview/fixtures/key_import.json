@@ -1,0 +1,37 @@
+{
+  "input": {
+    "name": "db-rsa",
+    "from_host": "db-main",
+    "from_path": "~/.ssh/id_rsa"
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"id\": 5,\n  \"name\": \"db-rsa\",\n  \"type\": \"ssh-rsa\",\n  \"fingerprint\": \"SHA256:Q1b8mJmZ0YV2nZr5Gkq4cJ9yQm2fT8pWv3xLk0aHs6c\",\n  \"public_key\": \"ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDpreviewonly db-rsa\",\n  \"created_at\": 1795413035,\n  \"used_by\": [\n    \"db-main\"\n  ]\n}"
+      }
+    ],
+    "structuredContent": {
+      "id": 5,
+      "name": "db-rsa",
+      "type": "ssh-rsa",
+      "fingerprint": "SHA256:Q1b8mJmZ0YV2nZr5Gkq4cJ9yQm2fT8pWv3xLk0aHs6c",
+      "public_key": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDpreviewonly db-rsa",
+      "created_at": 1795413035,
+      "used_by": [
+        "db-main"
+      ]
+    },
+    "isError": false
+  },
+  "title": "上传私钥",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "这是公钥（.pub）内容，请选择对应的私钥文件（通常是不带 .pub 后缀的同名文件）"
+      }
+    ],
+    "isError": true
+  }
+}

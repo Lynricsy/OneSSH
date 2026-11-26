@@ -23,7 +23,7 @@ const RUNTIME = read('runtime.js');
 const FIXTURES = join(DIR, 'preview', 'fixtures');
 
 const GROUPS = {
-  hosts: ['hosts_list', 'hosts_manage_list', 'host_create', 'host_update', 'host_test', 'host_reset_fingerprint', 'host_delete'],
+  hosts: ['hosts_list', 'hosts_manage_list', 'host_create', 'host_update', 'host_test', 'host_reset_fingerprint', 'host_delete', 'keys_list', 'key_generate', 'key_import'],
   exec: ['exec', 'session_env', 'output_read', 'exec_many'],
   jobs: ['job_start', 'job_list', 'job_status', 'job_logs', 'job_kill'],
   files: ['file_read', 'file_write', 'file_edit', 'file_list', 'file_transfer'],
@@ -187,12 +187,12 @@ test('非宿主帧发来的消息一律不信', async () => {
 test('只读白名单：破坏性工具一律不能从卡片发起', async () => {
   const card = await boot('file_list');
   const ctx = await card.ctx();
-  const allowed = ['hosts_list', 'hosts_manage_list', 'file_list', 'file_read', 'output_read',
+  const allowed = ['hosts_list', 'hosts_manage_list', 'keys_list', 'file_list', 'file_read', 'output_read',
     'job_list', 'job_status', 'job_logs', 'host_status', 'memory_list', 'memory_stats', 'memory_recall'];
   // grep / find 虽然只读，但可能向远端上传临时 helper、开销也不确定，
   // 不适合由界面随手触发，所以同样不在白名单里。
   const forbidden = ['exec', 'exec_many', 'job_start', 'job_kill', 'file_write', 'file_edit', 'file_transfer',
-    'host_create', 'host_update', 'host_delete', 'host_test', 'host_reset_fingerprint', 'session_env',
+    'host_create', 'host_update', 'host_delete', 'host_test', 'host_reset_fingerprint', 'key_generate', 'key_import', 'session_env',
     'memory_remember', 'memory_update', 'memory_forget', 'memory_sleep', 'image_view', 'grep', 'find'];
   assert.equal(allowed.length + forbidden.length, ALL_TOOLS.length, '白名单与禁用名单应当覆盖全部工具');
   for (const name of allowed) assert.ok(ctx.can(name), name + ' 应当允许卡片回调');

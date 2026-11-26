@@ -9,7 +9,12 @@ export function Brand({ collapsed, className }: { collapsed?: boolean; className
   return (
     <div className={cn('flex items-center gap-2.5', collapsed ? 'justify-center' : 'px-3', className)}>
       <LogoTile className="size-8" />
-      {!collapsed && <span className="text-[15px] font-semibold tracking-tight text-text">OneSSH</span>}
+      {!collapsed && (
+        <span className="flex flex-col leading-none">
+          <span className="text-[15px] font-semibold tracking-tight text-text">OneSSH</span>
+          <span className="mt-1 text-[10px] font-medium tracking-[0.12em] text-muted uppercase">SSH Gateway</span>
+        </span>
+      )}
     </div>
   )
 }
@@ -46,7 +51,9 @@ export function NavList({
                 className={cn(
                   'relative flex h-9 items-center gap-2.5 rounded-[8px] px-2.5 text-[13px] font-medium transition-colors duration-150',
                   collapsed && 'justify-center px-0',
-                  isActive ? 'bg-accent-soft text-accent' : 'text-muted hover:bg-surface-2 hover:text-text',
+                  isActive
+                    ? 'bg-linear-to-r from-accent/16 to-accent/2 text-accent shadow-[inset_0_0_0_1px_var(--accent-soft)]'
+                    : 'text-muted hover:bg-surface-2 hover:text-text',
                 )}
               >
                 {/* 竖条偏移量必须等于 nav 的 px-3：正好贴在滚动容器左边缘，不会被 overflow 裁掉 */}
@@ -96,7 +103,7 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        'sticky top-0 hidden h-dvh shrink-0 flex-col border-r border-border bg-surface lg:flex',
+        'sticky top-0 hidden h-dvh shrink-0 flex-col border-r border-border bg-surface/85 backdrop-blur-xl lg:flex',
         collapsed ? 'w-16' : 'w-62',
       )}
     >

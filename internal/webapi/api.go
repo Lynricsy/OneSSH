@@ -2,13 +2,10 @@ package webapi
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -21,7 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/ssh"
 	"onessh/internal/cmdpolicy"
 	"onessh/internal/cryptox"
 	"onessh/internal/events"
@@ -31,6 +27,7 @@ import (
 	"onessh/internal/jobs"
 	"onessh/internal/memoryx"
 	"onessh/internal/monitor"
+	"onessh/internal/sshkeys"
 	"onessh/internal/sshpool"
 	"onessh/internal/store"
 	"onessh/internal/toolgroups"
@@ -234,31 +231,25 @@ func (a *API) keys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in keyInput
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4*sshkeys.MaxPrivateKeyBytes)).Decode(&in); err != nil {
 		apiError(w, 400, err)
+		return
+	}
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" {
+		apiError(w, 400, errors.New("密钥名称不能为空"))
 		return
 	}
 	var private []byte
 	var public string
 	switch in.Mode {
 	case "generate":
-		pub, priv, err := ed25519.GenerateKey(rand.Reader)
+		var err error
+		private, public, err = sshkeys.Generate(in.Name)
 		if err != nil {
 			apiError(w, 500, err)
 			return
 		}
-		block, err := ssh.MarshalPrivateKey(priv, in.Name)
-		if err != nil {
-			apiError(w, 500, err)
-			return
-		}
-		private = pem.EncodeToMemory(block)
-		sshPub, err := ssh.NewPublicKey(pub)
-		if err != nil {
-			apiError(w, 500, err)
-			return
-		}
-		public = string(ssh.MarshalAuthorizedKey(sshPub))
 	case "import":
 		var err error
 		private, public, err = importPrivateKey([]byte(in.PrivateKey), []byte(in.Passphrase), in.Name)
@@ -289,38 +280,9 @@ func (a *API) keys(w http.ResponseWriter, r *http.Request) {
 // importPrivateKey 解析导入的私钥，返回待加密入库的私钥与 authorized_keys 格式公钥。
 // 未加密私钥原样保存，此时 passphrase 被忽略；受口令保护的私钥在这里解密并重新编码为
 // 无口令 OpenSSH 格式：静态保护交给 OneSSH 主密钥，连接阶段仍走 ssh.ParsePrivateKey，口令不落库。
+// 具体规则（BOM/CRLF 容错、公钥与 .ppk 识别、口令解密）集中在 sshkeys，MCP 的 key_import 共用同一套。
 func importPrivateKey(pemBytes, passphrase []byte, comment string) ([]byte, string, error) {
-	defer clear(passphrase)
-	signer, err := ssh.ParsePrivateKey(pemBytes)
-	if err == nil {
-		return pemBytes, string(ssh.MarshalAuthorizedKey(signer.PublicKey())), nil
-	}
-	var missing *ssh.PassphraseMissingError
-	if !errors.As(err, &missing) {
-		return nil, "", fmt.Errorf("解析私钥: %w", err)
-	}
-	if len(passphrase) == 0 {
-		return nil, "", errors.New("该私钥受口令保护，请填写口令")
-	}
-	raw, err := ssh.ParseRawPrivateKeyWithPassphrase(pemBytes, passphrase)
-	if errors.Is(err, x509.IncorrectPasswordError) {
-		return nil, "", errors.New("私钥口令错误")
-	}
-	if err != nil {
-		return nil, "", fmt.Errorf("解密私钥: %w", err)
-	}
-	signer, err = ssh.NewSignerFromKey(raw)
-	if err != nil {
-		return nil, "", fmt.Errorf("解析私钥: %w", err)
-	}
-	// DSA 等 OpenSSH 新格式不支持的类型会在这里失败，不能退回保存加密原文，否则连接阶段无法使用。
-	block, err := ssh.MarshalPrivateKey(raw, comment)
-	if err != nil {
-		return nil, "", fmt.Errorf("该私钥类型不支持口令导入: %w", err)
-	}
-	plain := pem.EncodeToMemory(block)
-	clear(block.Bytes)
-	return plain, string(ssh.MarshalAuthorizedKey(signer.PublicKey())), nil
+	return sshkeys.Import(pemBytes, passphrase, comment)
 }
 func (a *API) key(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r, "id")

@@ -1,0 +1,33 @@
+{
+  "input": {
+    "name": "ci-runner"
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"id\": 7,\n  \"name\": \"ci-runner\",\n  \"type\": \"ssh-ed25519\",\n  \"fingerprint\": \"SHA256:Zx9cV7bN5mQ3wE1rT6yU8iO0pA2sD4fG6hJ8kL0zX1c\",\n  \"public_key\": \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPreviewCiRunnerKeyOnly0000000000000000000000 ci-runner\",\n  \"created_at\": 1795665035,\n  \"used_by\": []\n}"
+      }
+    ],
+    "structuredContent": {
+      "id": 7,
+      "name": "ci-runner",
+      "type": "ssh-ed25519",
+      "fingerprint": "SHA256:Zx9cV7bN5mQ3wE1rT6yU8iO0pA2sD4fG6hJ8kL0zX1c",
+      "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPreviewCiRunnerKeyOnly0000000000000000000000 ci-runner",
+      "created_at": 1795665035,
+      "used_by": []
+    },
+    "isError": false
+  },
+  "title": "生成密钥",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host management not authorized"
+      }
+    ],
+    "isError": true
+  }
+}

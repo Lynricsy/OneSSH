@@ -64,7 +64,7 @@ func TestToolCatalogGivesAgentsEnoughContext(t *testing.T) {
 	wantReadOnly := []string{
 		"file_list", "file_read", "find", "grep", "host_status",
 		"hosts_list", "hosts_manage_list", "image_view", "job_list", "job_logs",
-		"job_status", "memory_list", "memory_recall", "memory_stats", "output_read",
+		"job_status", "keys_list", "memory_list", "memory_recall", "memory_stats", "output_read",
 	}
 	sort.Strings(readOnly)
 	if strings.Join(readOnly, ",") != strings.Join(wantReadOnly, ",") {

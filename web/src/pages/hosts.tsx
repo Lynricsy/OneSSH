@@ -1,4 +1,4 @@
-import { DotsThree, HardDrives, MagnifyingGlass, Plus } from '@phosphor-icons/react'
+import { CaretUp, DotsThree, HardDrives, MagnifyingGlass, Plus, UploadSimple } from '@phosphor-icons/react'
 import { Controller, useForm } from 'react-hook-form'
 import { useEffect, useId, useMemo, useState } from 'react'
 import { toast } from 'sonner'
@@ -15,6 +15,7 @@ import {
 } from '@/api/queries'
 import type { Host, HostPayload } from '@/api/types'
 import { HostConnection } from '@/components/host-connection'
+import { InlineKeyUpload } from '@/components/inline-key-upload'
 import { ConfirmDialog } from '@/components/ui/alert-dialog'
 import { Badge, Dot } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -168,6 +169,8 @@ export function HostsPage() {
   const [testingId, setTestingId] = useState<number>()
   const [confirm, setConfirm] = useState<ConfirmState>(null)
   const [selected, setSelected] = useState<Set<number>>(new Set())
+  // 主机弹窗里的「就地上传私钥」面板；没有任何密钥时直接展开，省一次点击
+  const [uploadOpen, setUploadOpen] = useState(false)
   const monitorId = useId()
   const save = useSaveHost(editing?.id)
   const deleteHost = useDeleteHost()
@@ -181,6 +184,7 @@ export function HostsPage() {
     control,
     watch,
     reset,
+    setValue,
     handleSubmit,
     formState: { errors },
   } = useForm<HostPayload>({ defaultValues: emptyForm, shouldUnregister: true })
@@ -241,6 +245,7 @@ export function HostsPage() {
   const openCreate = () => {
     setEditing(undefined)
     reset(emptyForm)
+    setUploadOpen(false)
     setDialogOpen(true)
   }
 
@@ -253,6 +258,7 @@ export function HostsPage() {
       password: undefined,
       jump_host: hosts.data?.find((item) => item.id === host.jump_host_id)?.name,
     })
+    setUploadOpen(false)
     setDialogOpen(true)
   }
 
@@ -674,14 +680,14 @@ export function HostsPage() {
               label="密钥"
               required
               error={errors.key_id?.message}
-              hint={keys.data?.length === 0 ? '密钥页尚未创建任何密钥' : undefined}
+              hint={keys.data?.length === 0 ? '还没有密钥，可在下方直接上传私钥文件' : undefined}
               className="sm:col-span-3"
             >
               {(id) => (
                 <Controller
                   name="key_id"
                   control={control}
-                  rules={{ required: '请选择密钥' }}
+                  rules={{ required: '请选择或上传密钥' }}
                   render={({ field }) => (
                     <Select
                       id={id}
@@ -713,6 +719,30 @@ export function HostsPage() {
                 />
               )}
             </Field>
+          )}
+
+          {authType === 'key' && (
+            <div className="space-y-2 sm:col-span-6">
+              {(uploadOpen || keys.data?.length === 0) && (
+                <InlineKeyUpload
+                  existingNames={(keys.data ?? []).map((key) => key.name)}
+                  onCreated={(key) => {
+                    setValue('key_id', key.id, { shouldValidate: true, shouldDirty: true })
+                    setUploadOpen(false)
+                  }}
+                />
+              )}
+              {(keys.data?.length ?? 0) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setUploadOpen((open) => !open)}
+                  className="inline-flex items-center gap-1.5 rounded-[6px] px-1 py-0.5 text-[12px] font-medium text-accent transition-colors hover:text-accent-hover"
+                >
+                  {uploadOpen ? <CaretUp size={13} /> : <UploadSimple size={13} />}
+                  {uploadOpen ? '收起上传' : '没有合适的密钥？上传私钥文件'}
+                </button>
+              )}
+            </div>
           )}
 
           <Field label="跳板主机" hint="选中后先经该主机建立隧道再连目标" className="sm:col-span-6">

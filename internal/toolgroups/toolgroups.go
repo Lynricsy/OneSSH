@@ -36,7 +36,7 @@ type Definition struct {
 
 // All 的顺序决定错误提示与文档中的展示次序。
 var All = []Definition{
-	{Hosts, []string{"hosts_list", "hosts_manage_list", "host_create", "host_update", "host_test", "host_reset_fingerprint", "host_delete"}},
+	{Hosts, []string{"hosts_list", "hosts_manage_list", "host_create", "host_update", "host_test", "host_reset_fingerprint", "host_delete", "keys_list", "key_generate", "key_import"}},
 	{Exec, []string{"exec", "session_env", "output_read"}},
 	{Fanout, []string{"exec_many"}},
 	{Jobs, []string{"job_start", "job_list", "job_status", "job_logs", "job_kill"}},

@@ -443,4 +443,88 @@
         : ui.empty(t("网关没有确认删除结果", "The gateway did not confirm the deletion"))
     });
   });
+
+  /* ------------------------------------------------------------------ *
+   * keys_list / key_generate / key_import —— SSH 密钥
+   * 私钥永远不出网关，卡片里只有公钥、指纹与引用关系。
+   * ------------------------------------------------------------------ */
+
+  function keysOf(data) {
+    return listOf(data.keys).filter(function (item) { return item && typeof item === "object"; });
+  }
+
+  function keyIdText(value) {
+    var id = numOf(value);
+    return id === null ? "" : "#" + id;
+  }
+
+  function usageCell(item) {
+    var used = cleanTags(item.used_by);
+    if (!used.length) return ui.pill("muted", t("未使用", "Unused"));
+    return ui.row.apply(null, used.map(function (name) { return ui.chip(name, { mono: true, title: name }); }));
+  }
+
+  OneSSH.view("keys_list", function (data, ctx) {
+    data = data || {};
+    var list = keysOf(data);
+    var inUse = list.filter(function (item) { return cleanTags(item.used_by).length > 0; }).length;
+    var action = ctx.can("keys_list") ? ui.button({
+      label: t("刷新", "Refresh"),
+      icon: "refresh",
+      title: t("重新拉取密钥列表", "Reload the key list"),
+      onClick: function () { ctx.refresh({}); }
+    }) : null;
+    var status = list.length
+      ? ui.pill("info", fmt.num(list.length) + t(" 把 · ", " keys · ") + fmt.num(inUse) + t(" 在用", " in use"))
+      : ui.pill("muted", t("没有密钥", "No keys"));
+    var body = list.length ? ui.table({
+      columns: [
+        { label: "ID", mono: true, render: function (item) { return keyIdText(item.id); } },
+        { label: t("名称", "Name"), mono: true, render: function (item) { return textOf(item.name); } },
+        { label: t("算法", "Type"), secondary: true, render: function (item) { return textOf(item.type); } },
+        { label: t("指纹", "Fingerprint"), mono: true, render: function (item) { return textOf(item.fingerprint); } },
+        { label: t("使用主机", "Used by"), render: usageCell },
+        { label: t("创建", "Created"), secondary: true, render: function (item) { return stampCell(item.created_at); } }
+      ],
+      rows: list
+    }) : ui.empty(t("网关里还没有密钥，可以用 key_import 上传已有私钥，或用 key_generate 生成一把",
+      "No keys yet; upload an existing private key with key_import or create one with key_generate"));
+    return ui.card({
+      kicker: "KEYS",
+      title: t("SSH 密钥", "SSH keys"),
+      status: status,
+      actions: [action],
+      body: body
+    });
+  });
+
+  function keyDetailCard(data, statusText, generated) {
+    var rows = [
+      { label: t("密钥 ID", "Key ID"), value: keyIdText(data.id), mono: true },
+      { label: t("算法", "Type"), value: textOf(data.type) },
+      { label: t("指纹", "Fingerprint"), value: textOf(data.fingerprint), mono: true, copy: true },
+      { label: t("公钥", "Public key"), value: textOf(data.public_key), mono: true, copy: true },
+      { label: t("创建时间", "Created"), value: fmt.time(data.created_at) }
+    ];
+    var hint = generated
+      ? t("把上面的公钥追加到目标主机的 ~/.ssh/authorized_keys，再用 host_create 以 key_id 引用这把密钥",
+        "Append the public key to ~/.ssh/authorized_keys on the target, then reference it from host_create via key_id")
+      : t("私钥已用主密钥加密保存，任何工具都不会再返回它；用 host_create 以 key_id 引用即可",
+        "The private key is sealed with the master key and never returned again; reference it from host_create via key_id");
+    return ui.card({
+      kicker: "KEY",
+      title: textOf(data.name) || t("SSH 密钥", "SSH key"),
+      subtitle: textOf(data.fingerprint),
+      status: ui.pill("ok", statusText),
+      body: ui.stack(ui.kv(rows), ui.note(hint, "info"))
+    });
+  }
+
+  OneSSH.view("key_generate", function (data) {
+    return keyDetailCard(data || {}, t("已生成", "Generated"), true);
+  });
+
+  OneSSH.view("key_import", function (data) {
+    return keyDetailCard(data || {}, t("已上传", "Uploaded"), false);
+  });
 })();
