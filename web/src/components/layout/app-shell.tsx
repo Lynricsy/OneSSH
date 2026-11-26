@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react'
-import { Outlet, useLocation } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { toast } from 'sonner'
+import { useIdleLock } from '@/lib/idle-lock'
 import { useHosts } from '@/api/queries'
 import { LogoTile } from '@/components/brand/logo'
 import { CommandPalette } from '@/components/command-palette'
@@ -16,6 +19,14 @@ export function AppShell() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === 'collapsed')
   const [navOpen, setNavOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  const onIdle = useCallback(() => {
+    qc.clear()
+    navigate('/login', { replace: true, state: { from: window.location.pathname + window.location.search } })
+    toast.info('长时间没有操作，已自动退出登录')
+  }, [navigate, qc])
+  useIdleLock(onIdle)
 
   // Ctrl/⌘ + K 唤起快速跳转。终端页让出这个组合键：shell 里 Ctrl+K 是「删到行尾」
   useEffect(() => {

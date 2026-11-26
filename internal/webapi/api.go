@@ -9,10 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
-	"mime"
 	"net/http"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -44,6 +41,10 @@ type API struct {
 	Monitor *monitor.Manager
 	Memory  *memoryx.Engine
 	Events  *events.Bus
+	// Auth 非空时挂载 /account 账户接口（改密码、会话管理）
+	Auth *AdminAuth
+	// System 是网关自身的描述，由 main 填写
+	System SystemInfo
 }
 
 func NewAPI(st *store.Store, box *cryptox.Box, pool *sshpool.Pool, hosts *hostmanager.Manager, exec *execx.Runner, files *files.Manager, jobs *jobs.Manager, mon *monitor.Manager, memory *memoryx.Engine, bus *events.Bus) *API {
@@ -84,6 +85,26 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("DELETE /memories/{id}", a.memory)
 	mux.HandleFunc("GET /metrics/{hostID}", a.metrics)
 	mux.HandleFunc("GET /sftp/{hostID}/list", a.sftpList)
+	mux.HandleFunc("GET /sftp/{hostID}/ls", a.sftpLs)
+	mux.HandleFunc("GET /sftp/{hostID}/stat", a.sftpStat)
+	mux.HandleFunc("GET /sftp/{hostID}/read", a.sftpRead)
+	mux.HandleFunc("PUT /sftp/{hostID}/write", a.sftpWrite)
+	mux.HandleFunc("POST /sftp/{hostID}/mkdir", a.sftpMkdir)
+	mux.HandleFunc("POST /sftp/{hostID}/create", a.sftpCreate)
+	mux.HandleFunc("POST /sftp/{hostID}/rename", a.sftpRename)
+	mux.HandleFunc("POST /sftp/{hostID}/delete", a.sftpDelete)
+	mux.HandleFunc("POST /sftp/{hostID}/chmod", a.sftpChmod)
+	mux.HandleFunc("POST /sftp/{hostID}/compress", a.sftpCompress)
+	mux.HandleFunc("POST /sftp/{hostID}/extract", a.sftpExtract)
+	mux.HandleFunc("GET /sftp/{hostID}/archive", a.sftpArchive)
+	mux.HandleFunc("GET /sftp/transfers", a.transferList)
+	mux.HandleFunc("POST /sftp/transfers", a.transferStart)
+	mux.HandleFunc("DELETE /sftp/transfers/{id}", a.transferCancel)
+	mux.HandleFunc("GET /hosts/{id}/sysinfo", a.hostSysinfo)
+	mux.HandleFunc("GET /system", a.systemInfo)
+	if a.Auth != nil {
+		a.Auth.registerAccount(mux)
+	}
 	mux.HandleFunc("HEAD /sftp/{hostID}/download", a.sftpDownload)
 	mux.HandleFunc("GET /sftp/{hostID}/download", a.sftpDownload)
 	mux.HandleFunc("POST /sftp/{hostID}/upload", a.sftpUpload)
@@ -608,64 +629,6 @@ func (a *API) sftpList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOut(w, 200, items)
-}
-func (a *API) sftpDownload(w http.ResponseWriter, r *http.Request) {
-	name, err := a.hostNameByID(r.Context(), r.PathValue("hostID"))
-	if err != nil {
-		apiError(w, 404, err)
-		return
-	}
-	p := r.URL.Query().Get("path")
-	file, size, err := a.Files.OpenRead(r.Context(), name, p, 100<<20)
-	if err != nil {
-		apiError(w, 502, err)
-		return
-	}
-	defer file.Close()
-	if typ := mime.TypeByExtension(filepath.Ext(p)); typ != "" {
-		w.Header().Set("Content-Type", typ)
-	}
-	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(p)))
-	if r.Method == http.MethodHead {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	if _, err = io.CopyN(w, file, size); err != nil {
-		log.Printf("SFTP 下载 %s 中断: %v", p, err)
-	}
-}
-func (a *API) sftpUpload(w http.ResponseWriter, r *http.Request) {
-	name, err := a.hostNameByID(r.Context(), r.PathValue("hostID"))
-	if err != nil {
-		apiError(w, 404, err)
-		return
-	}
-	if err = r.ParseMultipartForm(100 << 20); err != nil {
-		apiError(w, 400, err)
-		return
-	}
-	f, h, err := r.FormFile("file")
-	if err != nil {
-		apiError(w, 400, err)
-		return
-	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, 100<<20+1))
-	if err != nil || len(data) > 100<<20 {
-		apiError(w, 400, fmt.Errorf("上传文件过大或读取失败"))
-		return
-	}
-	p := r.FormValue("path")
-	if strings.HasSuffix(p, "/") || p == "" {
-		p += h.Filename
-	}
-	out, err := a.Files.Write(r.Context(), name, p, data, 0o644)
-	if err != nil {
-		apiError(w, 502, err)
-		return
-	}
-	jsonOut(w, 201, out)
 }
 func (a *API) sse(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)

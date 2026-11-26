@@ -1,5 +1,7 @@
-import { Check, Desktop, HardDrives, List, MagnifyingGlass, Moon, Sun } from '@phosphor-icons/react'
-import { Link, useLocation } from 'react-router-dom'
+import { Check, Desktop, GearSix, HardDrives, List, LockKey, MagnifyingGlass, Moon, SignOut, Sun, UserCircle } from '@phosphor-icons/react'
+import { useQueryClient } from '@tanstack/react-query'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { logout, useAccount } from '@/api/account'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -26,7 +28,16 @@ export function Topbar({
   onOpenSearch: () => void
 }) {
   const { pathname } = useLocation()
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  const account = useAccount()
+  const username = account.data?.username ?? 'admin'
   const { mode, resolved, setMode } = useTheme()
+  const signOut = async () => {
+    await logout()
+    qc.clear()
+    navigate('/login', { replace: true })
+  }
   const current =
     mode === 'system' ? <Desktop size={16} /> : resolved === 'dark' ? <Moon size={16} /> : <Sun size={16} />
 
@@ -80,6 +91,38 @@ export function Topbar({
                 {mode === m.value && <Check size={14} className="text-accent" />}
               </DropdownMenuItem>
             ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button type="button" aria-label="账户菜单" className="ml-1 inline-flex h-9 items-center gap-2 rounded-[10px] py-1 pr-2.5 pl-1 text-[12.5px] text-text transition-colors hover:bg-surface-2">
+              <span className="grid size-7 place-items-center rounded-full bg-linear-to-br from-accent to-[var(--accent-2)] text-[12px] font-bold text-white uppercase">
+                {username.slice(0, 1)}
+              </span>
+              <span className="hidden max-w-[110px] truncate font-medium sm:inline">{username}</span>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <div className="px-2.5 py-2">
+              <p className="text-[13px] font-semibold text-text">{username}</p>
+              <p className="text-[11.5px] text-muted">管理员 · {account.data?.sessions.length ?? 1} 个登录设备</p>
+            </div>
+            <DropdownMenuItem onSelect={() => navigate('/settings?tab=security')}>
+              <LockKey size={15} />
+              修改密码
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => navigate('/settings?tab=sessions')}>
+              <UserCircle size={15} />
+              登录设备与记录
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => navigate('/settings')}>
+              <GearSix size={15} />
+              系统设置
+            </DropdownMenuItem>
+            <DropdownMenuItem danger onSelect={() => void signOut()}>
+              <SignOut size={15} />
+              退出登录
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

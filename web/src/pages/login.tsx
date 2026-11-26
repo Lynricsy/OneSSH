@@ -9,6 +9,7 @@ import {
   GlobeHemisphereEast,
   LockKey,
   ShieldCheck,
+  User,
   WarningCircle,
 } from '@phosphor-icons/react'
 import { post, type ApiError } from '@/api/client'
@@ -33,12 +34,19 @@ export function LoginPage() {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<{ password: string }>()
+  } = useForm<{ username: string; password: string; remember: boolean }>({
+    defaultValues: {
+      username: localStorage.getItem('onessh-last-user') || 'admin',
+      password: '',
+      remember: localStorage.getItem('onessh-login-remember') === '1',
+    },
+  })
 
-  const submit = handleSubmit(async ({ password }) => {
+  const submit = handleSubmit(async ({ username, password, remember }) => {
     setError('')
     try {
-      await post('/login', { password })
+      await post('/login', { username: username.trim(), password, remember })
+      localStorage.setItem('onessh-last-user', username.trim())
       // 换会话必须丢弃旧缓存，否则上一个身份的数据会闪现
       queryClient.clear()
       // from 已带查询串（OAuth 授权链接全靠它）；只认站内相对路径，"//host" 会被浏览器当协议相对 URL 跳走
@@ -48,7 +56,13 @@ export function LoginPage() {
     } catch (e) {
       // 后端 401 只会回 "Unauthorized"，直接透出对中文界面既突兀也没信息量
       const err = e as ApiError
-      setError(err.status === 401 ? '密码不正确，请重新输入' : err.message)
+      setError(
+        err.status === 401
+          ? '用户名或密码错误，请重新输入'
+          : err.status === 429
+            ? '登录失败次数过多，该 IP 已被临时锁定 15 分钟，请稍后再试'
+            : err.message,
+      )
     }
   })
 
@@ -151,10 +165,22 @@ export function LoginPage() {
               管理员登录
             </p>
             <h1 className="mt-4 text-[24px] leading-tight font-semibold tracking-tight text-text">欢迎回来</h1>
-            <p className="mt-1.5 text-[13px] text-muted">输入管理员密码进入 OneSSH 控制台</p>
+            <p className="mt-1.5 text-[13px] text-muted">使用管理员账户登录 OneSSH 控制台</p>
 
             <form onSubmit={submit} className="mt-7 space-y-4">
-              <Field label="管理员密码" required error={errors.password?.message}>
+              <Field label="用户名" required error={errors.username?.message}>
+                {(id) => (
+                  <Input
+                    id={id}
+                    autoComplete="username"
+                    prefix={<User size={15} />}
+                    className="h-11"
+                    invalid={!!errors.username}
+                    {...register('username', { required: '请输入用户名' })}
+                  />
+                )}
+              </Field>
+              <Field label="密码" required error={errors.password?.message}>
                 {(id) => (
                   <Input
                     id={id}
@@ -178,13 +204,19 @@ export function LoginPage() {
                 </p>
               )}
 
+              <label className="flex cursor-pointer items-center gap-2 text-[13px] text-muted select-none">
+                <input type="checkbox" className="size-4 accent-[var(--accent)]" {...register('remember')} />
+                记住我 30 天
+                <span className="ml-auto text-[11.5px] text-faint">公共电脑请勿勾选</span>
+              </label>
+
               <Button type="submit" variant="primary" size="lg" className="w-full" loading={isSubmitting}>
                 进入控制台
               </Button>
             </form>
           </div>
           <p className="mt-5 text-center text-[12px] text-faint">
-            密码来自启动配置 <code className="rounded bg-surface-2 px-1 font-mono text-[11px] text-muted">ONESSH_ADMIN_PASSWORD</code>
+            默认用户名 <code className="rounded bg-surface-2 px-1 font-mono text-[11px] text-muted">admin</code>，初始密码来自启动配置 <code className="rounded bg-surface-2 px-1 font-mono text-[11px] text-muted">ONESSH_ADMIN_PASSWORD</code>，可在「系统设置」中修改
           </p>
         </motion.div>
       </main>

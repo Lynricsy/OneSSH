@@ -20,6 +20,7 @@ import { NotFoundPage } from '@/pages/not-found'
 import { OAuthAuthorizePage } from '@/pages/oauth-authorize'
 import { TerminalPage } from '@/pages/terminal'
 import { TokensPage } from '@/pages/tokens'
+import { SettingsPage } from '@/pages/settings'
 
 // 地图页带着世界边界数据（约 100 KB），按需加载，不拖慢其余页面
 const MapPage = lazy(() => import('@/pages/map').then((m) => ({ default: m.MapPage })))
@@ -98,6 +99,7 @@ export default function App() {
                   <Route path="activity" element={<ActivityPage />} />
                   <Route path="metrics" element={<MetricsPage />} />
                   <Route path="memories" element={<MemoriesPage />} />
+                  <Route path="settings" element={<SettingsPage />} />
                   {/* 未知路径仍留在 AppShell 内，用户可直接从侧边栏跳走 */}
                   <Route path="*" element={<NotFoundPage />} />
                 </Route>

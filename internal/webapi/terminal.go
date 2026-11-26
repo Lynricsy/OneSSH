@@ -6,8 +6,11 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/coder/websocket"
+	"onessh/internal/execx"
 )
 
 type terminalMessage struct {
@@ -57,7 +60,13 @@ func (a *API) terminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session.Stderr = session.Stdout
-	if err = session.Shell(); err != nil {
+	// ?cwd= 让「在此处打开终端」直接落在目标目录；目录不存在时 cd 失败也照样进入 shell
+	if cwd := strings.TrimSpace(r.URL.Query().Get("cwd")); cwd != "" {
+		err = session.Start("cd -- " + execx.SHQ(cwd) + " 2>/dev/null; exec \"${SHELL:-/bin/sh}\" -l")
+	} else {
+		err = session.Shell()
+	}
+	if err != nil {
 		apiError(w, 502, err)
 		return
 	}
@@ -68,6 +77,29 @@ func (a *API) terminal(w http.ResponseWriter, r *http.Request) {
 	defer conn.CloseNow()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// 心跳：防止反向代理与 NAT 在终端空闲时把连接悄悄掐掉
+	go func() {
+		ticker := time.NewTicker(25 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				pingCtx, done := context.WithTimeout(ctx, 10*time.Second)
+				err := conn.Ping(pingCtx)
+				done()
+				if err != nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	if a.Events != nil {
+		a.Events.Publish("terminal", map[string]any{"host": host, "action": "open"})
+		defer a.Events.Publish("terminal", map[string]any{"host": host, "action": "close"})
+	}
 	go func() {
 		buf := make([]byte, 4096)
 		for {
@@ -97,6 +129,8 @@ func (a *API) terminal(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		switch msg.Type {
+		case "ping":
+			continue
 		case "input":
 			_, _ = io.WriteString(stdin, msg.Data)
 		case "resize":

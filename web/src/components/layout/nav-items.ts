@@ -6,6 +6,7 @@ import {
   GlobeHemisphereEast,
   HardDrives,
   Key,
+  GearSix,
   Pulse,
   SquaresFour,
   Terminal,
@@ -46,6 +47,10 @@ export const navGroups: NavGroup[] = [
       { to: '/metrics', label: '指标', icon: ChartLine },
       { to: '/memories', label: '记忆', icon: Brain },
     ],
+  },
+  {
+    title: '系统',
+    items: [{ to: '/settings', label: '系统设置', icon: GearSix }],
   },
 ]
 
