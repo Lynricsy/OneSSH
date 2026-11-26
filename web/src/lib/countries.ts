@@ -4,12 +4,9 @@ import zh from 'i18n-iso-countries/langs/zh.json'
 
 countries.registerLocale(zh)
 
-// 国旗 SVG 以独立资源文件发布（不内联进 JS），只有真正显示的那几面会被浏览器加载
-const FLAGS = import.meta.glob<string>('/node_modules/flag-icons/flags/4x3/*.svg', {
-  eager: true,
-  query: '?url&no-inline',
-  import: 'default',
-})
+// 国旗地址：生产构建由 vite.config 的 resolve.alias 把 virtual:flags 指向 flags.prod.ts（glob 出带哈希的资源），
+// 开发模式指向 flags.dev.ts 直接拼 /node_modules 路径——eager glob 在 dev 下会让首屏发出约 270 个模块请求。
+import { FLAG_PREFIX, flagAsset } from 'virtual:flags'
 
 export function countryName(code?: string | null, fallback?: string) {
   if (!code) return fallback || '未知地区'
@@ -27,6 +24,6 @@ export function countryNameByNumeric(id?: string | number) {
 }
 
 export function flagUrl(code?: string | null) {
-  if (!code) return undefined
-  return FLAGS[`/node_modules/flag-icons/flags/4x3/${code.toLowerCase()}.svg`]
+  if (!code || !/^[a-z]{2}$/i.test(code)) return undefined
+  return flagAsset(`${FLAG_PREFIX}${code.toLowerCase()}.svg`)
 }

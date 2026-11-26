@@ -1,4 +1,6 @@
 @import 'tailwindcss';
+/* 构建产物（数百个国旗 SVG、代码编辑器语言包）不含任何类名，排除后 dev 冷启动从约 1 分钟降到秒级 */
+@source not '../../dist';
 @import '@fontsource-variable/geist';
 @import '@fontsource-variable/jetbrains-mono';
 
