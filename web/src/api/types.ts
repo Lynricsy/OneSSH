@@ -197,6 +197,52 @@ export type HostPayload = {
   tags?: string[]
 }
 
+/** 主机地理位置；source 说明定位来源，manual 为手动标注 */
+export type GeoInfo = {
+  host_id: number
+  host: string
+  addr: string
+  archived: boolean
+  ip: string
+  country_code: string
+  country: string
+  region: string
+  city: string
+  lat: number
+  lon: number
+  isp: string
+  org: string
+  asn: string
+  timezone: string
+  source: 'auto' | 'manual' | 'private' | 'unresolved' | 'origin'
+  error?: string
+  updated_at: number
+}
+
+export type GeoResponse = {
+  enabled: boolean
+  origin: GeoInfo | null
+  hosts: GeoInfo[]
+}
+
+export type GeoLatency = {
+  host_id: number
+  latency_ms: number | null
+  /** ssh：计时到收到 SSH 横幅；tcp：端口不是 SSH，只完成了 TCP 握手 */
+  method?: 'ssh' | 'tcp'
+  via_jump: boolean
+  error?: string
+}
+
+export type GeoManualPayload = {
+  country_code: string
+  country: string
+  region: string
+  city: string
+  lat: number
+  lon: number
+}
+
 export type KeyPayload = {
   name: string
   mode: 'generate' | 'import'

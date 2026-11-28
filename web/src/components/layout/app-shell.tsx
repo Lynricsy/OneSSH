@@ -1,7 +1,11 @@
-import { useState } from 'react'
-import { Outlet, useLocation } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { toast } from 'sonner'
+import { useIdleLock } from '@/lib/idle-lock'
 import { useHosts } from '@/api/queries'
 import { LogoTile } from '@/components/brand/logo'
+import { CommandPalette } from '@/components/command-palette'
 import { Sheet } from '@/components/ui/sheet'
 import { Spinner } from '@/components/ui/spinner'
 import { Brand, NavList, Sidebar } from './sidebar'
@@ -14,6 +18,27 @@ export function AppShell() {
   const hosts = useHosts()
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === 'collapsed')
   const [navOpen, setNavOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  const onIdle = useCallback(() => {
+    qc.clear()
+    navigate('/login', { replace: true, state: { from: window.location.pathname + window.location.search } })
+    toast.info('长时间没有操作，已自动退出登录')
+  }, [navigate, qc])
+  useIdleLock(onIdle)
+
+  // Ctrl/⌘ + K 唤起快速跳转。终端页让出这个组合键：shell 里 Ctrl+K 是「删到行尾」
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'k') return
+      if (window.location.pathname.startsWith('/terminal')) return
+      event.preventDefault()
+      setPaletteOpen((open) => !open)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const toggle = () =>
     setCollapsed((prev) => {
@@ -50,6 +75,7 @@ export function AppShell() {
         <Topbar
           hostCount={hosts.data?.filter((host) => !host.archived).length ?? 0}
           onOpenNav={() => setNavOpen(true)}
+          onOpenSearch={() => setPaletteOpen(true)}
         />
         <main
           id="main"
@@ -58,6 +84,7 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
       <Sheet
         open={navOpen}
         onOpenChange={setNavOpen}

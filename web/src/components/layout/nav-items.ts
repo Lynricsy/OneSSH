@@ -3,8 +3,10 @@ import {
   Broadcast,
   ChartLine,
   FolderOpen,
+  GlobeHemisphereEast,
   HardDrives,
   Key,
+  GearSix,
   Pulse,
   SquaresFour,
   Terminal,
@@ -16,7 +18,12 @@ export type NavItem = { to: string; label: string; icon: Icon }
 export type NavGroup = { title?: string; items: NavItem[] }
 
 export const navGroups: NavGroup[] = [
-  { items: [{ to: '/', label: '概览', icon: SquaresFour }] },
+  {
+    items: [
+      { to: '/', label: '概览', icon: SquaresFour },
+      { to: '/map', label: '分布地图', icon: GlobeHemisphereEast },
+    ],
+  },
   {
     title: '资源',
     items: [
@@ -41,9 +48,16 @@ export const navGroups: NavGroup[] = [
       { to: '/memories', label: '记忆', icon: Brain },
     ],
   },
+  {
+    title: '系统',
+    items: [{ to: '/settings', label: '系统设置', icon: GearSix }],
+  },
 ]
 
 const flat = navGroups.flatMap((g) => g.items)
+
+export const navItemForPath = (pathname: string) =>
+  flat.find((i) => (i.to === '/' ? pathname === '/' : pathname.startsWith(i.to)))
 
 /** 顶栏标题取自同一份导航定义，避免路由与标题两处维护 */
 export const titleForPath = (pathname: string) =>

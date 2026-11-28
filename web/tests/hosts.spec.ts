@@ -26,6 +26,19 @@ test('clearing an existing jump host stays direct and omits jump_host when saved
     if (path === '/api/v1/keys' && request.method() === 'GET') {
       return route.fulfill({ json: [] })
     }
+    // 外壳组件（账户菜单、分布地图、延迟、传输队列）的只读请求：给空数据即可，与本用例无关
+    const shell: Record<string, unknown> = {
+      '/api/v1/account': { username: 'admin', password_source: 'env', password_changed_at: 0, store_enabled: true, sessions: [], logins: [], failed_24h: 0 },
+      '/api/v1/geo': { hosts: [], origin: null },
+      '/api/v1/geo/latency': [],
+      '/api/v1/sftp/transfers': [],
+    }
+    if (request.method() === 'GET' && path in shell) {
+      return route.fulfill({ json: shell[path] })
+    }
+    if (request.method() === 'GET' && path === '/api/v1/events') {
+      return route.fulfill({ status: 204, body: '' })
+    }
     if (path === '/api/v1/hosts/2' && request.method() === 'PUT') {
       const payload = request.postDataJSON()
       hosts = hosts.map((host) => host.id === 2
@@ -33,6 +46,7 @@ test('clearing an existing jump host stays direct and omits jump_host when saved
         : host)
       return route.fulfill({ json: hosts[1] })
     }
+    console.log('UNMOCKED', request.method(), path)
     await route.abort()
     throw new Error(`Unexpected fixture API: ${request.method()} ${path}`)
   })

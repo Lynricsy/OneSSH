@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ChartLine } from '@phosphor-icons/react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Area,
   AreaChart,
@@ -20,6 +20,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { PageTransition } from '@/components/ui/page-transition'
 import { Select } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { HostProfile } from '@/components/host-profile'
 
 /** 系列元信息单点定义：图例取色、Tooltip 的中文名/单位/小数位都从这里来，避免各处各写一份 */
 const SERIES = {
@@ -139,11 +140,13 @@ function ChartSkeleton({ height }: { height: number }) {
 }
 
 export function MetricsPage() {
-  const [picked, setPicked] = useState<number>()
+  const [params] = useSearchParams()
+  const [picked, setPicked] = useState<number | undefined>(() => Number(params.get('host')) || undefined)
   const hosts = useHosts()
   // 归档主机不再采样，不作为可选目标；已选主机被归档后自动退回未选择
   const activeHosts = (hosts.data ?? []).filter((item) => !item.archived)
-  const selected = activeHosts.find((item) => item.id === picked)
+  // 没指定时默认第一台：进页面就能看到内容，而不是一句「请选择」
+  const selected = activeHosts.find((item) => item.id === picked) ?? (picked == null ? activeHosts[0] : undefined)
   const host = selected?.id
   const metrics = useMetrics(host, 24)
   const navigate = useNavigate()
@@ -167,8 +170,8 @@ export function MetricsPage() {
   return (
     <PageTransition>
       <PageHeader
-        title="指标"
-        subtitle="24 小时 CPU、内存、负载与磁盘趋势"
+        title="服务器指标"
+        subtitle="系统信息、硬件与网络档案，以及 24 小时 CPU、内存、负载与磁盘趋势"
         actions={
           <Select
             className="w-52"
@@ -179,6 +182,8 @@ export function MetricsPage() {
           />
         }
       />
+
+      {host && <HostProfile key={host} hostId={host} />}
 
       {!host ? (
         // text-balance：中文按字断行，不均分的话说明文字常掉出一个两字尾行

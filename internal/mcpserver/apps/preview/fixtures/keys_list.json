@@ -1,0 +1,59 @@
+{
+  "input": {},
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"keys\": [\n    {\n      \"id\": 7,\n      \"name\": \"ci-runner\",\n      \"type\": \"ssh-ed25519\",\n      \"fingerprint\": \"SHA256:Zx9cV7bN5mQ3wE1rT6yU8iO0pA2sD4fG6hJ8kL0zX1c\",\n      \"public_key\": \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPreviewCiRunnerKeyOnly0000000000000000000000 ci-runner\",\n      \"created_at\": 1795665035,\n      \"used_by\": []\n    },\n    {\n      \"id\": 3,\n      \"name\": \"deploy-ed25519\",\n      \"type\": \"ssh-ed25519\",\n      \"fingerprint\": \"SHA256:2fV3n0aQm8x4C1yEwz7Ztq9kq3Q0q0mJb2c6tXo1RzE\",\n      \"public_key\": \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK7xY2p0n1y0bW9ja2tleWZvcnByZXZpZXdvbmx5MDAwMDAw deploy-ed25519\",\n      \"created_at\": 1794894635,\n      \"used_by\": [\n        \"web-01\",\n        \"web-02\",\n        \"cache-02\"\n      ]\n    },\n    {\n      \"id\": 5,\n      \"name\": \"db-rsa\",\n      \"type\": \"ssh-rsa\",\n      \"fingerprint\": \"SHA256:Q1b8mJmZ0YV2nZr5Gkq4cJ9yQm2fT8pWv3xLk0aHs6c\",\n      \"public_key\": \"ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDpreviewonly db-rsa\",\n      \"created_at\": 1795413035,\n      \"used_by\": [\n        \"db-main\"\n      ]\n    }\n  ]\n}"
+      }
+    ],
+    "structuredContent": {
+      "keys": [
+        {
+          "id": 7,
+          "name": "ci-runner",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:Zx9cV7bN5mQ3wE1rT6yU8iO0pA2sD4fG6hJ8kL0zX1c",
+          "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPreviewCiRunnerKeyOnly0000000000000000000000 ci-runner",
+          "created_at": 1795665035,
+          "used_by": []
+        },
+        {
+          "id": 3,
+          "name": "deploy-ed25519",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:2fV3n0aQm8x4C1yEwz7Ztq9kq3Q0q0mJb2c6tXo1RzE",
+          "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK7xY2p0n1y0bW9ja2tleWZvcnByZXZpZXdvbmx5MDAwMDAw deploy-ed25519",
+          "created_at": 1794894635,
+          "used_by": [
+            "web-01",
+            "web-02",
+            "cache-02"
+          ]
+        },
+        {
+          "id": 5,
+          "name": "db-rsa",
+          "type": "ssh-rsa",
+          "fingerprint": "SHA256:Q1b8mJmZ0YV2nZr5Gkq4cJ9yQm2fT8pWv3xLk0aHs6c",
+          "public_key": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDpreviewonly db-rsa",
+          "created_at": 1795413035,
+          "used_by": [
+            "db-main"
+          ]
+        }
+      ]
+    },
+    "isError": false
+  },
+  "title": "SSH 密钥",
+  "error": {
+    "content": [
+      {
+        "type": "text",
+        "text": "host management not authorized"
+      }
+    ],
+    "isError": true
+  }
+}

@@ -50,6 +50,7 @@ export function Dialog({
                 exit={{ opacity: 0, scale: 0.96 }}
                 transition={popTransition}
               >
+                <div className="h-[3px] shrink-0 rounded-t-[12px] bg-linear-to-r from-accent via-[var(--accent-2)] to-accent opacity-80" />
                 <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
                   <div className="space-y-1">
                     <DialogPrimitive.Title className="text-sm font-semibold text-text">

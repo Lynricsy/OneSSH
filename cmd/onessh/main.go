@@ -62,10 +62,20 @@ func main() {
 	})
 	defer mcpService.Close()
 	adminAuth := webapi.NewAdminAuth(cfg.AdminPassword, cfg.MasterKey)
+	if err := adminAuth.UseStore(st.DB); err != nil {
+		log.Fatalf("初始化管理员账户存储失败: %v", err)
+	}
 	adminAPI := webapi.NewAPI(st, box, pool, hosts, mcpService.Exec, mcpService.Files, mcpService.Jobs, mcpService.Monitor, memEngine, bus)
+	adminAPI.Auth = adminAuth
+	keySource := "环境变量 ONESSH_MASTER_KEY"
+	if os.Getenv("ONESSH_MASTER_KEY_FILE") != "" {
+		keySource = "文件 " + os.Getenv("ONESSH_MASTER_KEY_FILE")
+	}
+	adminAPI.System = webapi.SystemInfo{Version: version, StartedAt: time.Now().Unix(), Listen: cfg.Listen, DataDir: cfg.DataDir, MasterKeySource: keySource}
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /api/v1/login", http.HandlerFunc(adminAuth.Login))
+	mux.Handle("POST /api/v1/logout", http.HandlerFunc(adminAuth.Logout))
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", oauthService.ProtectedResourceMetadata)
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", oauthService.ProtectedResourceMetadata)
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", oauthService.AuthorizationServerMetadata)

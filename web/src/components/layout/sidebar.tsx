@@ -1,4 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom'
+import { useHosts } from '@/api/queries'
 import { CaretLineLeft, CaretLineRight } from '@phosphor-icons/react'
 import { cn } from '@/lib/cn'
 import { LogoTile } from '@/components/brand/logo'
@@ -9,7 +10,12 @@ export function Brand({ collapsed, className }: { collapsed?: boolean; className
   return (
     <div className={cn('flex items-center gap-2.5', collapsed ? 'justify-center' : 'px-3', className)}>
       <LogoTile className="size-8" />
-      {!collapsed && <span className="text-[15px] font-semibold tracking-tight text-text">OneSSH</span>}
+      {!collapsed && (
+        <span className="flex flex-col leading-none">
+          <span className="text-[15px] font-semibold tracking-tight text-text">OneSSH</span>
+          <span className="mt-1 text-[10px] font-medium tracking-[0.12em] text-muted uppercase">SSH Gateway</span>
+        </span>
+      )}
     </div>
   )
 }
@@ -46,7 +52,9 @@ export function NavList({
                 className={cn(
                   'relative flex h-9 items-center gap-2.5 rounded-[8px] px-2.5 text-[13px] font-medium transition-colors duration-150',
                   collapsed && 'justify-center px-0',
-                  isActive ? 'bg-accent-soft text-accent' : 'text-muted hover:bg-surface-2 hover:text-text',
+                  isActive
+                    ? 'bg-linear-to-r from-accent/16 to-accent/2 text-accent shadow-[inset_0_0_0_1px_var(--accent-soft)]'
+                    : 'text-muted hover:bg-surface-2 hover:text-text',
                 )}
               >
                 {/* 竖条偏移量必须等于 nav 的 px-3：正好贴在滚动容器左边缘，不会被 overflow 裁掉 */}
@@ -68,6 +76,31 @@ export function NavList({
         </div>
       ))}
     </nav>
+  )
+}
+
+/** 侧边栏底部的网关状态卡：一眼确认网关在线、纳管了多少台主机 */
+function GatewayStatus() {
+  const { data: hosts = [] } = useHosts()
+  const active = hosts.filter((host) => !host.archived)
+  const monitored = active.filter((host) => host.monitor_enabled).length
+  return (
+    <div className="mx-3 mb-3 overflow-hidden rounded-[12px] border border-border bg-linear-to-br from-accent/10 via-surface to-[var(--accent-2)]/8 p-3">
+      <p className="flex items-center gap-2 text-[12px] font-medium text-text">
+        <span className="relative flex size-2">
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60" />
+          <span className="relative inline-flex size-2 rounded-full bg-success" />
+        </span>
+        网关运行中
+      </p>
+      <p className="mt-1.5 text-[11.5px] leading-5 text-muted">
+        纳管 <b className="font-semibold text-text tabular-nums">{active.length}</b> 台主机 · 监控{' '}
+        <b className="font-semibold text-text tabular-nums">{monitored}</b> 台
+      </p>
+      <p className="mt-1 text-[11px] text-faint">
+        按 <kbd className="rounded border border-border bg-surface px-1 font-mono text-[10px]">Ctrl K</kbd> 快速跳转
+      </p>
+    </div>
   )
 }
 
@@ -96,7 +129,7 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        'sticky top-0 hidden h-dvh shrink-0 flex-col border-r border-border bg-surface lg:flex',
+        'sticky top-0 hidden h-dvh shrink-0 flex-col border-r border-border bg-surface/85 backdrop-blur-xl lg:flex',
         collapsed ? 'w-16' : 'w-62',
       )}
     >
@@ -106,6 +139,7 @@ export function Sidebar({
       <div className="flex-1 overflow-y-auto pt-2 pb-4">
         <NavList collapsed={collapsed} />
       </div>
+      {!collapsed && <GatewayStatus />}
       {/* 顶边框把折叠钮与导航分开，避免它被误读成第五个分组 */}
       <div className="shrink-0 border-t border-border px-3 py-2">
         {collapsed ? <Tooltip content="展开侧边栏">{toggle}</Tooltip> : toggle}

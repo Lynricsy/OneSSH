@@ -2,26 +2,19 @@ package webapi
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
-	"log"
-	"mime"
 	"net/http"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/ssh"
 	"onessh/internal/cmdpolicy"
 	"onessh/internal/cryptox"
 	"onessh/internal/events"
@@ -31,6 +24,7 @@ import (
 	"onessh/internal/jobs"
 	"onessh/internal/memoryx"
 	"onessh/internal/monitor"
+	"onessh/internal/sshkeys"
 	"onessh/internal/sshpool"
 	"onessh/internal/store"
 	"onessh/internal/toolgroups"
@@ -47,6 +41,10 @@ type API struct {
 	Monitor *monitor.Manager
 	Memory  *memoryx.Engine
 	Events  *events.Bus
+	// Auth 非空时挂载 /account 账户接口（改密码、会话管理）
+	Auth *AdminAuth
+	// System 是网关自身的描述，由 main 填写
+	System SystemInfo
 }
 
 func NewAPI(st *store.Store, box *cryptox.Box, pool *sshpool.Pool, hosts *hostmanager.Manager, exec *execx.Runner, files *files.Manager, jobs *jobs.Manager, mon *monitor.Manager, memory *memoryx.Engine, bus *events.Bus) *API {
@@ -62,6 +60,10 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /hosts/{id}/reset-fingerprint", a.resetFingerprint)
 	mux.HandleFunc("POST /hosts/{id}/archive", a.hostArchive)
 	mux.HandleFunc("POST /hosts/{id}/unarchive", a.hostArchive)
+	mux.HandleFunc("GET /geo", a.geoList)
+	mux.HandleFunc("GET /geo/latency", a.geoLatency)
+	mux.HandleFunc("PUT /geo/{hostID}", a.geoManual) // hostID 为 origin 时设置网关自身位置
+	mux.HandleFunc("DELETE /geo/{hostID}", a.geoManual)
 	mux.HandleFunc("GET /keys", a.keys)
 	mux.HandleFunc("POST /keys", a.keys)
 	mux.HandleFunc("DELETE /keys/{id}", a.key)
@@ -83,6 +85,26 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("DELETE /memories/{id}", a.memory)
 	mux.HandleFunc("GET /metrics/{hostID}", a.metrics)
 	mux.HandleFunc("GET /sftp/{hostID}/list", a.sftpList)
+	mux.HandleFunc("GET /sftp/{hostID}/ls", a.sftpLs)
+	mux.HandleFunc("GET /sftp/{hostID}/stat", a.sftpStat)
+	mux.HandleFunc("GET /sftp/{hostID}/read", a.sftpRead)
+	mux.HandleFunc("PUT /sftp/{hostID}/write", a.sftpWrite)
+	mux.HandleFunc("POST /sftp/{hostID}/mkdir", a.sftpMkdir)
+	mux.HandleFunc("POST /sftp/{hostID}/create", a.sftpCreate)
+	mux.HandleFunc("POST /sftp/{hostID}/rename", a.sftpRename)
+	mux.HandleFunc("POST /sftp/{hostID}/delete", a.sftpDelete)
+	mux.HandleFunc("POST /sftp/{hostID}/chmod", a.sftpChmod)
+	mux.HandleFunc("POST /sftp/{hostID}/compress", a.sftpCompress)
+	mux.HandleFunc("POST /sftp/{hostID}/extract", a.sftpExtract)
+	mux.HandleFunc("GET /sftp/{hostID}/archive", a.sftpArchive)
+	mux.HandleFunc("GET /sftp/transfers", a.transferList)
+	mux.HandleFunc("POST /sftp/transfers", a.transferStart)
+	mux.HandleFunc("DELETE /sftp/transfers/{id}", a.transferCancel)
+	mux.HandleFunc("GET /hosts/{id}/sysinfo", a.hostSysinfo)
+	mux.HandleFunc("GET /system", a.systemInfo)
+	if a.Auth != nil {
+		a.Auth.registerAccount(mux)
+	}
 	mux.HandleFunc("HEAD /sftp/{hostID}/download", a.sftpDownload)
 	mux.HandleFunc("GET /sftp/{hostID}/download", a.sftpDownload)
 	mux.HandleFunc("POST /sftp/{hostID}/upload", a.sftpUpload)
@@ -234,31 +256,25 @@ func (a *API) keys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in keyInput
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4*sshkeys.MaxPrivateKeyBytes)).Decode(&in); err != nil {
 		apiError(w, 400, err)
+		return
+	}
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" {
+		apiError(w, 400, errors.New("密钥名称不能为空"))
 		return
 	}
 	var private []byte
 	var public string
 	switch in.Mode {
 	case "generate":
-		pub, priv, err := ed25519.GenerateKey(rand.Reader)
+		var err error
+		private, public, err = sshkeys.Generate(in.Name)
 		if err != nil {
 			apiError(w, 500, err)
 			return
 		}
-		block, err := ssh.MarshalPrivateKey(priv, in.Name)
-		if err != nil {
-			apiError(w, 500, err)
-			return
-		}
-		private = pem.EncodeToMemory(block)
-		sshPub, err := ssh.NewPublicKey(pub)
-		if err != nil {
-			apiError(w, 500, err)
-			return
-		}
-		public = string(ssh.MarshalAuthorizedKey(sshPub))
 	case "import":
 		var err error
 		private, public, err = importPrivateKey([]byte(in.PrivateKey), []byte(in.Passphrase), in.Name)
@@ -289,38 +305,9 @@ func (a *API) keys(w http.ResponseWriter, r *http.Request) {
 // importPrivateKey 解析导入的私钥，返回待加密入库的私钥与 authorized_keys 格式公钥。
 // 未加密私钥原样保存，此时 passphrase 被忽略；受口令保护的私钥在这里解密并重新编码为
 // 无口令 OpenSSH 格式：静态保护交给 OneSSH 主密钥，连接阶段仍走 ssh.ParsePrivateKey，口令不落库。
+// 具体规则（BOM/CRLF 容错、公钥与 .ppk 识别、口令解密）集中在 sshkeys，MCP 的 key_import 共用同一套。
 func importPrivateKey(pemBytes, passphrase []byte, comment string) ([]byte, string, error) {
-	defer clear(passphrase)
-	signer, err := ssh.ParsePrivateKey(pemBytes)
-	if err == nil {
-		return pemBytes, string(ssh.MarshalAuthorizedKey(signer.PublicKey())), nil
-	}
-	var missing *ssh.PassphraseMissingError
-	if !errors.As(err, &missing) {
-		return nil, "", fmt.Errorf("解析私钥: %w", err)
-	}
-	if len(passphrase) == 0 {
-		return nil, "", errors.New("该私钥受口令保护，请填写口令")
-	}
-	raw, err := ssh.ParseRawPrivateKeyWithPassphrase(pemBytes, passphrase)
-	if errors.Is(err, x509.IncorrectPasswordError) {
-		return nil, "", errors.New("私钥口令错误")
-	}
-	if err != nil {
-		return nil, "", fmt.Errorf("解密私钥: %w", err)
-	}
-	signer, err = ssh.NewSignerFromKey(raw)
-	if err != nil {
-		return nil, "", fmt.Errorf("解析私钥: %w", err)
-	}
-	// DSA 等 OpenSSH 新格式不支持的类型会在这里失败，不能退回保存加密原文，否则连接阶段无法使用。
-	block, err := ssh.MarshalPrivateKey(raw, comment)
-	if err != nil {
-		return nil, "", fmt.Errorf("该私钥类型不支持口令导入: %w", err)
-	}
-	plain := pem.EncodeToMemory(block)
-	clear(block.Bytes)
-	return plain, string(ssh.MarshalAuthorizedKey(signer.PublicKey())), nil
+	return sshkeys.Import(pemBytes, passphrase, comment)
 }
 func (a *API) key(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r, "id")
@@ -642,64 +629,6 @@ func (a *API) sftpList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOut(w, 200, items)
-}
-func (a *API) sftpDownload(w http.ResponseWriter, r *http.Request) {
-	name, err := a.hostNameByID(r.Context(), r.PathValue("hostID"))
-	if err != nil {
-		apiError(w, 404, err)
-		return
-	}
-	p := r.URL.Query().Get("path")
-	file, size, err := a.Files.OpenRead(r.Context(), name, p, 100<<20)
-	if err != nil {
-		apiError(w, 502, err)
-		return
-	}
-	defer file.Close()
-	if typ := mime.TypeByExtension(filepath.Ext(p)); typ != "" {
-		w.Header().Set("Content-Type", typ)
-	}
-	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(p)))
-	if r.Method == http.MethodHead {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	if _, err = io.CopyN(w, file, size); err != nil {
-		log.Printf("SFTP 下载 %s 中断: %v", p, err)
-	}
-}
-func (a *API) sftpUpload(w http.ResponseWriter, r *http.Request) {
-	name, err := a.hostNameByID(r.Context(), r.PathValue("hostID"))
-	if err != nil {
-		apiError(w, 404, err)
-		return
-	}
-	if err = r.ParseMultipartForm(100 << 20); err != nil {
-		apiError(w, 400, err)
-		return
-	}
-	f, h, err := r.FormFile("file")
-	if err != nil {
-		apiError(w, 400, err)
-		return
-	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, 100<<20+1))
-	if err != nil || len(data) > 100<<20 {
-		apiError(w, 400, fmt.Errorf("上传文件过大或读取失败"))
-		return
-	}
-	p := r.FormValue("path")
-	if strings.HasSuffix(p, "/") || p == "" {
-		p += h.Filename
-	}
-	out, err := a.Files.Write(r.Context(), name, p, data, 0o644)
-	if err != nil {
-		apiError(w, 502, err)
-		return
-	}
-	jsonOut(w, 201, out)
 }
 func (a *API) sse(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)

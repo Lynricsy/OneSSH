@@ -1,4 +1,6 @@
 @import 'tailwindcss';
+/* 构建产物（数百个国旗 SVG、代码编辑器语言包）不含任何类名，排除后 dev 冷启动从约 1 分钟降到秒级 */
+@source not '../../dist';
 @import '@fontsource-variable/geist';
 @import '@fontsource-variable/jetbrains-mono';
 
@@ -24,9 +26,9 @@
 :root {
   color-scheme: light;
 
-  --bg: #f6f7f8;
+  --bg: #f3f5f8;
   --surface: #ffffff;
-  --surface-2: #f0f2f4;
+  --surface-2: #f0f2f5;
   --border: #e3e6ea;
   --border-strong: #c9ced5;
   --text: #17191c;
@@ -48,15 +50,26 @@
   --chart-load: #f59e0b;
   --chart-disk: #f43f5e;
 
-  --elev-card: 0 1px 2px #17191c0a, 0 4px 16px #17191c08;
-  --elev-pop: 0 4px 8px #17191c0f, 0 16px 40px #17191c14;
+  --accent-2: #6366f1;
+  --glow-1: #0d948814;
+  --glow-2: #6366f10f;
+
+  --map-ocean-1: #f2f8fa;
+  --map-ocean-2: #e4eef3;
+  --map-land: #d3dce5;
+  --map-border: #f6f9fb;
+  --map-edge: #c9d6df;
+  --map-grid: #b8c8d466;
+
+  --elev-card: 0 1px 2px #17191c0a, 0 6px 20px #17191c08;
+  --elev-pop: 0 6px 12px #17191c0d, 0 20px 44px #17191c17;
 }
 
 .dark {
   color-scheme: dark;
 
-  --bg: #0b0d10;
-  --surface: #12151a;
+  --bg: #090b0f;
+  --surface: #111419;
   --surface-2: #1a1e25;
   --border: #262b33;
   --border-strong: #353c46;
@@ -74,8 +87,19 @@
   --danger: #f87171;
   --danger-fg: #2b0808;
 
-  --elev-card: 0 1px 2px #0000004d, 0 4px 16px #00000040;
-  --elev-pop: 0 4px 8px #00000059, 0 16px 40px #00000073;
+  --accent-2: #818cf8;
+  --glow-1: #2dd4bf12;
+  --glow-2: #818cf810;
+
+  --map-ocean-1: #101b24;
+  --map-ocean-2: #0a1118;
+  --map-land: #222c38;
+  --map-border: #0c1219;
+  --map-edge: #1f2a35;
+  --map-grid: #2a384566;
+
+  --elev-card: 0 1px 2px #0000004d, 0 6px 20px #00000040;
+  --elev-pop: 0 6px 12px #00000059, 0 20px 44px #00000073;
 }
 
 /* ── Tailwind token 映射（inline：直接引用上面的 CSS 变量） ───────── */
@@ -123,6 +147,11 @@
   body {
     margin: 0;
     background-color: var(--bg);
+    /* 两团极淡的品牌色光晕：让大面积留白不至于死板，又不抢内容 */
+    background-image:
+      radial-gradient(1100px 560px at 100% -8%, var(--glow-1), transparent 62%),
+      radial-gradient(900px 520px at -10% 108%, var(--glow-2), transparent 60%);
+    background-attachment: fixed;
     color: var(--text);
     font-family: var(--font-sans);
     font-synthesis-weight: none;
@@ -160,6 +189,91 @@
   ::-webkit-scrollbar-thumb:hover {
     background: var(--faint);
   }
+}
+
+/* 页面标题图标：品牌色双色渐变底 + 内描边 */
+.page-header-icon {
+  background:
+    linear-gradient(135deg, color-mix(in oklab, var(--accent) 20%, transparent), color-mix(in oklab, var(--accent-2) 14%, transparent));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--accent) 26%, transparent),
+    0 6px 18px -8px color-mix(in oklab, var(--accent) 55%, transparent);
+}
+
+/* ── 世界地图 ── */
+.map-country {
+  stroke: none;
+  transition: fill 0.3s ease, filter 0.15s ease;
+}
+.map-country:hover {
+  filter: brightness(1.06) saturate(1.15);
+}
+.map-country-active {
+  stroke: var(--accent);
+  stroke-width: 0.8;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 6px color-mix(in oklab, var(--accent) 50%, transparent));
+}
+.map-label {
+  fill: var(--text);
+  stroke: var(--surface);
+  paint-order: stroke;
+  stroke-linejoin: round;
+}
+@keyframes map-pulse {
+  0% { transform: scale(0.35); opacity: 0.55; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+.map-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: map-pulse 2.6s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes map-dash {
+  to { stroke-dashoffset: -32; }
+}
+.map-arc {
+  stroke-dasharray: 3 5;
+  animation: map-dash 1.8s linear infinite;
+}
+
+/* ── 登录页左侧品牌区 ── */
+.login-brand {
+  background:
+    radial-gradient(900px 600px at 0% 0%, #0f766e 0%, transparent 60%),
+    radial-gradient(800px 600px at 100% 100%, #3730a3 0%, transparent 60%),
+    #06131a;
+}
+.login-grid {
+  background-image:
+    linear-gradient(#ffffff0d 1px, transparent 1px),
+    linear-gradient(90deg, #ffffff0d 1px, transparent 1px);
+  background-size: 36px 36px;
+  mask-image: radial-gradient(ellipse at 30% 40%, #000 30%, transparent 75%);
+}
+@keyframes login-caret {
+  50% { opacity: 0; }
+}
+.login-caret {
+  animation: login-caret 1s steps(1) infinite;
+}
+
+/* 概览页横幅：品牌渐变 + 右侧渐隐的点阵 */
+.dashboard-hero {
+  background:
+    radial-gradient(620px 240px at 0% 0%, color-mix(in oklab, var(--accent) 20%, transparent), transparent 70%),
+    radial-gradient(560px 260px at 100% 100%, color-mix(in oklab, var(--accent-2) 18%, transparent), transparent 70%),
+    linear-gradient(120deg, color-mix(in oklab, var(--accent) 5%, transparent), transparent 60%);
+}
+.dashboard-hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--border-strong) 1px, transparent 1px);
+  background-size: 18px 18px;
+  mask-image: linear-gradient(90deg, transparent 35%, #000 100%);
+  opacity: 0.45;
 }
 
 @media (prefers-reduced-motion: reduce) {

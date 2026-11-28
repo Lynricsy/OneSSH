@@ -82,7 +82,7 @@ func (s *Server) registerHosts() {
 	register[hostmanager.Input, ManagedHostItem](s, &mcp.Tool{
 		Name:        "host_create",
 		Title:       "新增主机配置",
-		Description: "新增一台 SSH 主机配置。auth_type=key 必须给 key_id，auth_type=password 必须给 password；port 省略按 22 处理，name 必须唯一。只写入配置、不建立连接，创建后用 host_test 验证凭据并固定主机公钥指纹。新主机不会自动加入当前令牌的授权列表。可选 jump_host 指定跳板主机名，连接经该主机中转，支持最多 5 级链但不允许成环。需要 manage_hosts 权限。",
+		Description: "新增一台 SSH 主机配置。auth_type=key 必须给 key_id（用 keys_list 查看已有密钥，或先用 key_import 上传私钥、key_generate 生成新密钥），auth_type=password 必须给 password；port 省略按 22 处理，name 必须唯一。只写入配置、不建立连接，创建后用 host_test 验证凭据并固定主机公钥指纹。新主机不会自动加入当前令牌的授权列表。可选 jump_host 指定跳板主机名，连接经该主机中转，支持最多 5 级链但不允许成环。需要 manage_hosts 权限。",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: new(false), IdempotentHint: false, OpenWorldHint: new(false)},
 	}, s.hostCreate)
 	register[HostUpdateInput, ManagedHostItem](s, &mcp.Tool{
@@ -109,6 +109,7 @@ func (s *Server) registerHosts() {
 		Description: "删除主机配置及其令牌授权、持久会话、后台任务记录、监控指标和该主机 bank 的全部记忆，不可撤销。被其他主机用作跳板的主机不能删除，需先解除依赖。仅在主机确实下线时使用；只是临时不用请改为关闭 monitor_enabled。需要 manage_hosts 权限。",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: new(true), IdempotentHint: false, OpenWorldHint: new(false)},
 	}, s.hostDelete)
+	s.registerKeys()
 }
 
 func (s *Server) hostsList(ctx context.Context, _ *mcp.CallToolRequest, _ Empty) (*mcp.CallToolResult, HostsOutput, error) {

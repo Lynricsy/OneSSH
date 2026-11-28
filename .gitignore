@@ -6,3 +6,5 @@ web/test-results/
 web/playwright-report/
 internal/searchx/helper/assets/*.gz
 /master.key
+
+/*.exe

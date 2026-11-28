@@ -45,7 +45,7 @@ func serverInstructions(disabled toolgroups.Disabled, commandPolicy bool) string
 	sections = append(sections, opening+"。")
 
 	if on(toolgroups.Hosts) {
-		sections = append(sections, "【主机与权限】所有工具的 host 参数只接受 hosts_list 返回的名称，任务开始前先调用一次 hosts_list 确认目标主机、标签与在线状态；可按 tags 区分环境或用途后再选主机。名称不在授权列表时会返回 host not authorized。hosts_manage_list、host_create、host_update、host_test、host_reset_fingerprint、host_delete 属于全局配置管理，需要独立的 manage_hosts 权限，且该权限不会扩大命令与文件工具的可访问主机范围。主机可配置 jump_host 跳板，连接自动经跳板隧道建立，对命令与文件工具透明。")
+		sections = append(sections, "【主机与权限】所有工具的 host 参数只接受 hosts_list 返回的名称，任务开始前先调用一次 hosts_list 确认目标主机、标签与在线状态；可按 tags 区分环境或用途后再选主机。名称不在授权列表时会返回 host not authorized。hosts_manage_list、host_create、host_update、host_test、host_reset_fingerprint、host_delete 以及密钥工具 keys_list、key_generate、key_import 属于全局配置管理，需要独立的 manage_hosts 权限，且该权限不会扩大命令与文件工具的可访问主机范围。主机可配置 jump_host 跳板，连接自动经跳板隧道建立，对命令与文件工具透明。用密钥登记主机时：已有私钥用 key_import 上传（可直接给私钥全文，或用 from_host + from_path 让网关从授权主机读取私钥文件，私钥不经过上下文），需要新密钥用 key_generate 生成并把返回的 public_key 写入目标主机 authorized_keys，再把返回的 id 作为 host_create 的 key_id；私钥任何时候都不会被返回。")
 	}
 
 	var specialized []string

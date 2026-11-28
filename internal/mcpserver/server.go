@@ -246,7 +246,7 @@ func redact(v any) {
 	case map[string]any:
 		for k, val := range x {
 			switch k {
-			case "password":
+			case "password", "private_key", "passphrase":
 				x[k] = "<redacted>"
 			case "content", "edits":
 				b, _ := json.Marshal(val)

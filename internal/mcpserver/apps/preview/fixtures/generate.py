@@ -69,6 +69,16 @@ F["host_test"] = {"input":{"host":"web-01"},
                                 "output_recorded":True})}
 F["host_reset_fingerprint"] = {"input":{"host":"cache-01"}, "result": sc({"ok":True})}
 F["host_delete"] = {"input":{"host":"cache-01"}, "result": sc({"ok":True})}
+key_ci = {"id":7,"name":"ci-runner","type":"ssh-ed25519","fingerprint":"SHA256:Zx9cV7bN5mQ3wE1rT6yU8iO0pA2sD4fG6hJ8kL0zX1c",
+          "public_key":"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPreviewCiRunnerKeyOnly0000000000000000000000 ci-runner","created_at":ago(2*HOUR),"used_by":[]}
+key_deploy = {"id":3,"name":"deploy-ed25519","type":"ssh-ed25519","fingerprint":"SHA256:2fV3n0aQm8x4C1yEwz7Ztq9kq3Q0q0mJb2c6tXo1RzE",
+              "public_key":"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK7xY2p0n1y0bW9ja2tleWZvcnByZXZpZXdvbmx5MDAwMDAw deploy-ed25519","created_at":ago(9*DAY),"used_by":["web-01","web-02","cache-02"]}
+key_db = {"id":5,"name":"db-rsa","type":"ssh-rsa","fingerprint":"SHA256:Q1b8mJmZ0YV2nZr5Gkq4cJ9yQm2fT8pWv3xLk0aHs6c",
+          "public_key":"ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDpreviewonly db-rsa","created_at":ago(3*DAY),"used_by":["db-main"]}
+F["keys_list"] = {"input":{}, "result": sc({"keys":[key_ci, key_deploy, key_db]})}
+F["key_generate"] = {"input":{"name":"ci-runner"}, "result": sc(key_ci)}
+F["key_import"] = {"input":{"name":"db-rsa","from_host":"db-main","from_path":"~/.ssh/id_rsa"}, "result": sc(key_db),
+                   "error": {"content":[{"type":"text","text":"这是公钥（.pub）内容，请选择对应的私钥文件（通常是不带 .pub 后缀的同名文件）"}],"isError":True}}
 
 head = [
  "● nginx.service - A high performance web server and a reverse proxy server",
@@ -276,6 +286,9 @@ TITLES = {
     "host_test": "连通性测试",
     "host_reset_fingerprint": "重置指纹",
     "host_delete": "删除主机",
+    "keys_list": "SSH 密钥",
+    "key_generate": "生成密钥",
+    "key_import": "上传私钥",
     "exec": "命令执行",
     "session_env": "会话环境变量",
     "output_read": "截断输出",
@@ -316,6 +329,9 @@ ERRORS = {
     "host_test": MANAGE_DENIED,
     "host_reset_fingerprint": MANAGE_DENIED,
     "host_delete": MANAGE_DENIED,
+    "keys_list": MANAGE_DENIED,
+    "key_generate": MANAGE_DENIED,
+    "key_import": MANAGE_DENIED,
     "exec": HOST_DENIED,
     "session_env": HOST_DENIED,
     "output_read": "artifact_id 无效",
@@ -361,6 +377,7 @@ for tool, data in F.items():
     with open(os.path.join(out, tool + ".json"), "w", encoding="utf-8") as fh:
         json.dump(data, fh, ensure_ascii=False, indent=2)
 expected = ("hosts_list hosts_manage_list host_create host_update host_test host_reset_fingerprint host_delete "
+            "keys_list key_generate key_import "
             "exec session_env output_read exec_many job_start job_list job_status job_logs job_kill file_read "
             "file_write file_edit file_list file_transfer grep find memory_remember memory_recall memory_list "
             "memory_update memory_forget memory_stats memory_sleep host_status image_view").split()

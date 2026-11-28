@@ -3,12 +3,9 @@ package webapi
 import (
 	"crypto/hmac"
 	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/hex"
-	"encoding/json"
+	"database/sql"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +31,8 @@ type AdminAuth struct {
 	now      func() time.Time
 	mu       sync.Mutex
 	attempts map[string]*loginAttempt
+	// db 非空即数据库模式：可修改密码、服务端会话与登录记录，见 account.go
+	db *sql.DB
 }
 
 func NewAdminAuth(password string, masterKey []byte) *AdminAuth {
@@ -129,71 +128,10 @@ func (a *AdminAuth) evictAttemptsLocked(now time.Time) {
 	}
 }
 
-func (a *AdminAuth) Login(w http.ResponseWriter, r *http.Request) {
-	now := a.now()
-	ip := clientIP(r)
-	if retryAfter, ok := a.checkRateLimit(ip, now); !ok {
-		seconds := int(retryAfter.Seconds())
-		if seconds < 1 {
-			seconds = 1
-		}
-		w.Header().Set("Retry-After", strconv.Itoa(seconds))
-		http.Error(w, "登录尝试过于频繁，请稍后再试", http.StatusTooManyRequests)
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
-	var in struct {
-		Password string `json:"password"`
-	}
-	if json.NewDecoder(r.Body).Decode(&in) != nil || subtle.ConstantTimeCompare([]byte(in.Password), []byte(a.password)) != 1 {
-		a.recordLoginFailure(ip, now)
-		http.Error(w, "密码错误", http.StatusUnauthorized)
-		return
-	}
-	a.clearLoginFailures(ip)
-	exp := now.Add(24 * time.Hour).Unix()
-	msg := strconv.FormatInt(exp, 10)
-	mac := hmac.New(sha256.New, a.key)
-	mac.Write([]byte(msg))
-	value := msg + "." + hex.EncodeToString(mac.Sum(nil))
-	http.SetCookie(w, &http.Cookie{Name: "onessh_session", Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: requestIsHTTPS(r), MaxAge: 86400})
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
-}
 func requestIsHTTPS(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
 	forwardedProto := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])
 	return strings.EqualFold(forwardedProto, "https")
-}
-func (a *AdminAuth) valid(r *http.Request) bool {
-	c, err := r.Cookie("onessh_session")
-	if err != nil {
-		return false
-	}
-	parts := strings.Split(c.Value, ".")
-	if len(parts) != 2 {
-		return false
-	}
-	exp, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || a.now().Unix() > exp {
-		return false
-	}
-	got, err := hex.DecodeString(parts[1])
-	if err != nil {
-		return false
-	}
-	mac := hmac.New(sha256.New, a.key)
-	mac.Write([]byte(parts[0]))
-	return hmac.Equal(got, mac.Sum(nil))
-}
-func (a *AdminAuth) Require(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !a.valid(r) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }

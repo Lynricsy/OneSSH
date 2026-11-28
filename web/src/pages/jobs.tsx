@@ -1,4 +1,13 @@
-import { ArrowClockwise, ArrowDown, Broadcast, FileText, WarningCircle } from '@phosphor-icons/react'
+import {
+  ArrowClockwise,
+  ArrowDown,
+  Broadcast,
+  CheckCircle,
+  FileText,
+  Lightning,
+  WarningCircle,
+  XCircle,
+} from '@phosphor-icons/react'
 import { animate, motion, useMotionValue, useReducedMotion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -14,6 +23,7 @@ import { DataTable, type Column } from '@/components/ui/data-table'
 import { Dialog } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
+import { StatStrip } from '@/components/ui/stat-strip'
 import { PageTransition } from '@/components/ui/page-transition'
 import { SelectionBar } from '@/components/ui/selection-bar'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -216,6 +226,17 @@ export function JobsPage() {
           </Button>
         }
       />
+
+      {(jobs.data?.length ?? 0) > 0 && (
+        <StatStrip
+          items={[
+            { label: '运行中', value: (jobs.data ?? []).filter((j) => j.job.status === 'running').length, hint: '每 4 秒刷新状态', icon: <Lightning size={18} weight="duotone" />, tone: '#14b8a6' },
+            { label: '正常结束', value: (jobs.data ?? []).filter((j) => j.job.status === 'exited' && j.job.exit_code === 0).length, hint: '退出码 0', icon: <CheckCircle size={18} weight="duotone" />, tone: '#22c55e' },
+            { label: '异常退出', value: (jobs.data ?? []).filter((j) => j.job.status === 'exited' && (j.job.exit_code ?? 0) !== 0).length, hint: '退出码非 0', icon: <XCircle size={18} weight="duotone" />, tone: '#f43f5e' },
+            { label: '失联', value: (jobs.data ?? []).filter((j) => j.job.status === 'lost').length, hint: '主机重启或进程被外部终止', icon: <WarningCircle size={18} weight="duotone" />, tone: '#f59e0b' },
+          ]}
+        />
+      )}
 
       {jobs.isError ? (
         // 拉取失败原本是静默的（query 没有全局 error toast），只剩一具空表头，这里给出原因和重试
